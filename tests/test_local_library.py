@@ -145,6 +145,9 @@ def _make_library(root: Path) -> Path:
     c.mkdir()
     (c / "1.txt").write_text(_prose(250, "d1"), encoding="utf-8")
     (c / "2.txt").write_text(_prose(250, "d2"), encoding="utf-8")
+    (lib / "Whole Book by Some One.txt").write_text(
+        "\n\n".join(f"Chapter {i}\n\n" + _prose(200, f"w{i}") for i in range(1, 4)), encoding="utf-8")
+    (lib / "stray_note.txt").write_text("just a short note, not a novel", encoding="utf-8")
     with (lib / "library.csv").open("w", newline="", encoding="utf-8") as f:
         wr = csv.writer(f)
         wr.writerow(["name", "followers", "rating", "stars", "genres"])
@@ -159,7 +162,8 @@ def test_library_detection_and_import(tmp_path):
     assert is_library(lib / "Completed")
     imps = import_path(lib)
     by_title = {i.novel.title: i for i in imps}
-    assert set(by_title) == {"First Serial", "Second Serial", "Third Book", "Fourth"}
+    assert set(by_title) == {"First Serial", "Second Serial", "Third Book", "Fourth", "Whole Book"}
+    assert by_title["Whole Book"].novel.author == "Some One" and len(by_title["Whole Book"].chapters) == 3
     first = by_title["First Serial"].novel
     assert first.author == "Ann Author" and first.followers == 15000 and first.rating == 4.6
     assert first.user_rating == 5 and first.genres == ["Fantasy", "Action"]
@@ -179,7 +183,7 @@ def test_incremental_rescan_and_watch(cfg, db, tmp_path):
     lib = _make_library(tmp_path)
     r = IngestRunner(cfg, db, sources=[])
     res = r.import_local(lib)
-    assert {x["title"] for x in res} == {"First Serial", "Second Serial", "Third Book", "Fourth"}
+    assert {x["title"] for x in res} == {"First Serial", "Second Serial", "Third Book", "Fourth", "Whole Book"}
     assert all(x["new"] == x["chapters"] and x["changed"] == 0 for x in res)
     assert {x["title"]: x["labelled"] for x in res}["Fourth"] is False
     # second pass: nothing changes
@@ -203,7 +207,7 @@ def test_incremental_rescan_and_watch(cfg, db, tmp_path):
     r.watch(str(lib))
     assert db.follows()[0][1] == "local"
     totals = r.run()
-    assert totals["novels"] == 4 and totals["errors"] == 0
+    assert totals["novels"] == 5 and totals["errors"] == 0
 
 
 def test_unlabelled_novels_still_feed_exemplars_and_user_rating_trains(cfg, db, tmp_path):
@@ -249,4 +253,4 @@ def test_cli_import_library_rate_novels(tmp_path):
     res = runner.invoke(main, ["--data-dir", data, "import", str(single), "--stars", "3", "--genre", "Horror"])
     assert res.exit_code == 0 and "Solo Book" in res.output
     res = runner.invoke(main, ["--data-dir", data, "ingest"])  # re-scans the watched library
-    assert res.exit_code == 0 and "'novels': 4" in res.output
+    assert res.exit_code == 0 and "'novels': 5" in res.output

@@ -501,9 +501,20 @@ def iter_library(root: Path | str) -> Iterable[tuple[Path, dict[str, Any]]]:
             elif _chapter_files(p):
                 yield p, lib_meta.get(p.name.lower(), {})
         elif p.suffix.lower() in BOOK_EXTS and p.stem.lower() not in SKIP_NAMES:
-            # Loose book files at library level: epub/docx always; text only when long enough.
-            if p.suffix.lower() in {".epub", ".docx"} or p.stat().st_size > WHOLE_BOOK_WORDS * 5:
+            # Loose book files at library level: epub/docx always; text when it is long or has
+            # at least two chapter headings (a short multi-chapter serial is still a novel).
+            if p.suffix.lower() in {".epub", ".docx"} or _looks_like_book(p):
                 yield p, lib_meta.get(p.name.lower(), lib_meta.get(p.stem.lower(), {}))
+
+
+def _looks_like_book(p: Path) -> bool:
+    if p.stat().st_size > WHOLE_BOOK_WORDS * 5:
+        return True
+    try:
+        text = read_text(p) if p.suffix.lower() in {".txt", ".md", ".markdown"} else html_to_text(read_text(p))[1]
+    except OSError:
+        return False
+    return len(_CHAPTER_HEAD.findall(text)) + len(_MD_HEAD.findall(text)) >= 2 and _words(text) >= MIN_CHAPTER_WORDS * 2
 
 
 def import_path(path: Path | str, slug: Optional[str] = None, meta_override: Optional[dict[str, Any]] = None,
