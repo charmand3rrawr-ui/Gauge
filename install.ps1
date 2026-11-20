@@ -37,7 +37,7 @@ $venvPy = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 
 Step "Installing Gauge"
 & $venvPy -m pip install --upgrade pip --quiet
-if ($WithML) { & $venvPy -m pip install -e ".[ml,epub,dev]" --quiet } else { & $venvPy -m pip install -e ".[epub,dev]" --quiet }
+if ($WithML) { & $venvPy -m pip install -e ".[ml,dev]" --quiet } else { & $venvPy -m pip install -e ".[dev]" --quiet }
 
 if (-not $SkipOllama) {
   Step "Checking Ollama"

@@ -132,14 +132,90 @@ def ingest(c: Ctx, url: Optional[str], max_novels: Optional[int], max_chapters: 
 
 @main.command(name="import")
 @click.argument("path", type=click.Path(exists=True))
+@click.option("--library/--novel", "library", default=None,
+              help="Force treating PATH as a library of novels, or as one novel. Default: auto-detect.")
+@click.option("--watch", is_flag=True, help="Also keep re-scanning this path on every `gauge ingest` / daemon cycle.")
+@click.option("--title", default=None)
+@click.option("--author", default=None)
+@click.option("--genre", "genres", multiple=True, help="Repeatable.")
+@click.option("--followers", type=int, default=None)
+@click.option("--views", type=int, default=None)
+@click.option("--rating", type=float, default=None, help="Site rating, e.g. 4.5")
+@click.option("--stars", type=float, default=None, help="YOUR 1-5 verdict (user_rating target).")
 @click.pass_obj
-def import_(c: Ctx, path: str) -> None:
-    """Import a local novel: a folder of chapter .txt/.md files, a single file, or an .epub.
-    Optional novel.json sidecar supplies metadata and engagement numbers."""
+def import_(c: Ctx, path: str, library: Optional[bool], watch: bool, title: Optional[str], author: Optional[str],
+            genres: tuple, followers: Optional[int], views: Optional[int], rating: Optional[float],
+            stars: Optional[float]) -> None:
+    """Import a novel or a whole library from disk.
+
+    PATH may be a folder of chapter files (.txt .md .html .docx), a single book (.txt .md .epub .docx),
+    or a library folder containing many of those. Metadata comes from novel.json / library.csv /
+    EPUB+DOCX metadata / file names. Re-running only touches new or edited chapters."""
     from .ingest import IngestRunner
 
-    n = IngestRunner(c.cfg, c.db).import_local(path)
-    console.print(f"[green]Imported[/] {n.title} ({c.db.chapter_count(n.key)} chapters) as {n.key}")
+    override = {k: v for k, v in {"title": title, "author": author, "genres": list(genres) or None,
+                                   "followers": followers, "views": views, "rating": rating,
+                                   "user_rating": stars}.items() if v is not None}
+    r = IngestRunner(c.cfg, c.db)
+    results = r.import_local(path, library=library, meta_override=override or None)
+    if not results:
+        console.print("[yellow]Nothing imported.[/] Is this a folder of chapter files or a book file?")
+        return
+    table = Table(title=f"Imported from {path}")
+    for col in ("key", "title", "chapters", "new", "changed", "removed", "labelled"):
+        table.add_column(col)
+    for res in results:
+        table.add_row(*[str(res[k]) for k in ("key", "title", "chapters", "new", "changed", "removed", "labelled")])
+    console.print(table)
+    for res in results:
+        for w in res["warnings"]:
+            console.print(f"  [dim]{res['title']}: {w}[/]")
+    unlabelled = sum(1 for res in results if not res["labelled"])
+    if unlabelled:
+        console.print(f"[dim]{unlabelled} novel(s) have no engagement numbers; they still feed exemplars. "
+                      f"Give them your own verdict with `gauge rate KEY --stars N` to train on your taste.[/]")
+    if watch:
+        console.print(f"[green]Watching[/] {r.watch(path)}")
+
+
+@main.command()
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_obj
+def watch(c: Ctx, path: str) -> None:
+    """Keep a local novel or library folder in sync: every ingest / daemon cycle re-scans it."""
+    from .ingest import IngestRunner
+
+    console.print(f"[green]Watching[/] {IngestRunner(c.cfg, c.db).watch(path)}  (run `gauge ingest` to scan now)")
+
+
+@main.command()
+@click.argument("key")
+@click.option("--stars", type=float, required=True, help="Your 1-5 verdict; use 0 to clear.")
+@click.pass_obj
+def rate(c: Ctx, key: str, stars: float) -> None:
+    """Give a novel your own 1-5 rating. Train on it with `gauge train --target user_rating`."""
+    if not (0 <= stars <= 5):
+        raise click.BadParameter("stars must be between 0 and 5")
+    ok = c.db.set_user_rating(key, None if stars == 0 else stars)
+    console.print(f"[green]Rated[/] {key} = {stars}" if ok else f"[red]unknown novel[/] {key}; see `gauge novels`")
+
+
+@main.command()
+@click.option("--source", default=None, help="royalroad | scribblehub | local")
+@click.pass_obj
+def novels(c: Ctx, source: Optional[str]) -> None:
+    """List ingested novels with their keys and labels."""
+    rows = c.db.novels(source)
+    if not rows:
+        console.print("(no novels yet)")
+        return
+    table = Table(title=f"{len(rows)} novels")
+    for col in ("key", "title", "author", "chapters", "followers", "rating", "stars"):
+        table.add_column(col)
+    for n in rows:
+        table.add_row(n.key, n.title[:40], n.author[:20], str(c.db.chapter_count(n.key)),
+                      str(n.followers or ""), str(n.rating or ""), str(n.user_rating or ""))
+    console.print(table)
 
 
 # ---------------------------------------------------------------------------- learn
@@ -155,7 +231,7 @@ def analyze(c: Ctx, redo: bool) -> None:
 
 
 @main.command()
-@click.option("--target", default=None, type=click.Choice(["log_followers", "log_views", "log_avg_views", "rating", "log_favorites"]))
+@click.option("--target", default=None, type=click.Choice(["log_followers", "log_views", "log_avg_views", "rating", "log_favorites", "user_rating"]))
 @click.pass_obj
 def train(c: Ctx, target: Optional[str]) -> None:
     """Full learning cycle: features -> engagement model -> exemplars -> style guide -> datasets."""

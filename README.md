@@ -30,8 +30,10 @@ No cloud. No API bills. Your drafts never leave your machine.
 ```
 
 1. **Ingest** - follows novels on Royal Road and Scribble Hub (public pages, rate-limited,
-   robots.txt honoured) and imports your own files or EPUBs. Re-running only fetches chapters
-   it has not seen, so the corpus tracks novels as they update.
+   robots.txt honoured) and imports whole libraries from your disk (`.txt` `.md` `.html`
+   `.docx` `.epub`, with metadata and labels from sidecars, EPUB/DOCX metadata or file names).
+   Re-running only touches chapters it has not seen or that changed, so the corpus tracks
+   novels, and your own drafts, as they update.
 2. **Analyze** - turns every chapter into ~60 transparent features: hook strength in the first
    200 words, cliffhanger strength in the last 200, dialogue ratio, sentence-length rhythm,
    tension curve across the chapter, reveal / progression / warmth density, chapter length,
@@ -63,7 +65,7 @@ The installer creates a venv, installs Gauge, installs [Ollama](https://ollama.c
 if missing, pulls `llama3.1:8b` and `nomic-embed-text`, and runs `gauge doctor`.
 Full details and troubleshooting: [docs/WINDOWS.md](docs/WINDOWS.md).
 
-Other platforms: `pip install -e ".[ml,epub,dev]"` then `gauge init`.
+Other platforms: `pip install -e ".[ml,dev]"` then `gauge init`.
 
 ## Quick start
 
@@ -73,8 +75,10 @@ Other platforms: `pip install -e ".[ml,epub,dev]"` then `gauge init`.
 .\gauge.bat discover royalroad rising-stars --pages 2
 .\gauge.bat ingest
 
-# 2. Add your own novel or anything you exported (folder of .txt/.md, one file, or .epub)
+# 2. Learn from your own disk too: a novel folder, a book file, or a whole library of them
 .\gauge.bat import "C:\Writing\MySerial"
+.\gauge.bat import "D:\Books" --watch          # library of folders/epubs/docx, kept in sync
+.\gauge.bat rate local:my-serial --stars 5     # label novels with your own taste
 
 # 3. Learn
 .\gauge.bat train
@@ -101,7 +105,9 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge discover SOURCE LISTING` | follow novels from a site listing (`best-rated`, `trending`, `rising-stars`, ...) |
 | `gauge follow URL` | follow one novel |
 | `gauge ingest [--url U]` | fetch followed novels; only new chapters |
-| `gauge import PATH` | import local folder / file / epub (+ optional `novel.json` metrics) |
+| `gauge import PATH [--watch] [--stars N]` | import a novel folder, a book (`.txt .md .html .docx .epub`), or a whole library; see [docs/LOCAL_LIBRARY.md](docs/LOCAL_LIBRARY.md) |
+| `gauge watch PATH` | re-scan a local folder every cycle (new / edited / removed chapters) |
+| `gauge novels [--source S]` / `gauge rate KEY --stars N` | list novels; give one your own 1-5 label (`--target user_rating`) |
 | `gauge analyze [--all]` | compute features |
 | `gauge train [--target T]` | full learning cycle |
 | `gauge report [--novel KEY]` | what was learned; explain one novel |
@@ -132,12 +138,12 @@ For real fine-tuning on the exported datasets, see [docs/LEARNING.md](docs/LEARN
 gauge/
   features.py      feature extraction (hook, momentum, payoff, cliffhanger, voice, packaging)
   lexicon.py       the small transparent word lists the features count
-  ingest/          royalroad.py, scribblehub.py, local.py, polite http.py, incremental runner.py
+  ingest/          royalroad.py, scribblehub.py, local.py (folders, libraries, epub, docx), http.py, runner.py
   learn/           engagement.py (model), exemplars.py, style.py, dataset.py, trainer.py
   write/           project.py, planner.py, drafter.py, critic.py, pipeline.py, prompts.py
   llm/             ollama / openai-compatible / fake clients, embeddings
   daemon.py  report.py  cli.py  db.py (sqlite)  config.py
-docs/              ARCHITECTURE, LEARNING, WINDOWS, ETHICS, ROADMAP
+docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, WINDOWS, ETHICS, ROADMAP
 tests/             pytest suite, runs offline with a fake LLM
 ```
 

@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS novels (
     status TEXT,
     followers INTEGER, favorites INTEGER, views INTEGER, average_views INTEGER,
     rating REAL, rating_count INTEGER, comments INTEGER, chapter_count INTEGER, pages INTEGER,
-    first_published TEXT, last_updated TEXT, fetched_at TEXT
+    first_published TEXT, last_updated TEXT, fetched_at TEXT,
+    user_rating REAL
 );
 CREATE TABLE IF NOT EXISTS chapters (
     novel_key TEXT NOT NULL,
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS chapters (
     views INTEGER,
     comments INTEGER,
     fetched_at TEXT,
+    content_hash TEXT,
     PRIMARY KEY (novel_key, idx)
 );
 CREATE TABLE IF NOT EXISTS features (
@@ -98,6 +100,17 @@ class Database:
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after the first release to existing databases."""
+        wanted = {"novels": {"user_rating": "REAL"}, "chapters": {"content_hash": "TEXT"}}
+        for table, cols in wanted.items():
+            have = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+            for col, typ in cols.items():
+                if col not in have:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+        self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -115,7 +128,7 @@ class Database:
     def upsert_novel(self, n: NovelRecord) -> None:
         with self.tx() as c:
             c.execute(
-                """INSERT INTO novels VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """INSERT INTO novels VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(key) DO UPDATE SET
                   url=excluded.url, title=excluded.title, author=excluded.author,
                   blurb=excluded.blurb, genres=excluded.genres, tags=excluded.tags,
@@ -125,13 +138,14 @@ class Database:
                   rating_count=excluded.rating_count, comments=excluded.comments,
                   chapter_count=excluded.chapter_count, pages=excluded.pages,
                   first_published=COALESCE(excluded.first_published, novels.first_published),
-                  last_updated=excluded.last_updated, fetched_at=excluded.fetched_at""",
+                  last_updated=excluded.last_updated, fetched_at=excluded.fetched_at,
+                  user_rating=COALESCE(excluded.user_rating, novels.user_rating)""",
                 (
                     n.key, n.source, n.source_id, n.url, n.title, n.author, n.blurb,
                     json.dumps(n.genres), json.dumps(n.tags), n.status, n.followers, n.favorites,
                     n.views, n.average_views, n.rating, n.rating_count, n.comments,
                     n.chapter_count, n.pages, _dt(n.first_published), _dt(n.last_updated),
-                    _dt(n.fetched_at),
+                    _dt(n.fetched_at), n.user_rating,
                 ),
             )
             c.execute(
@@ -152,6 +166,7 @@ class Database:
             first_published=_parse_dt(r["first_published"]),
             last_updated=_parse_dt(r["last_updated"]),
             fetched_at=_parse_dt(r["fetched_at"]) or utcnow(),
+            user_rating=r["user_rating"],
         )
 
     def get_novel(self, key: str) -> Optional[NovelRecord]:
@@ -173,15 +188,15 @@ class Database:
     def upsert_chapter(self, ch: ChapterRecord) -> None:
         with self.tx() as c:
             c.execute(
-                """INSERT INTO chapters VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """INSERT INTO chapters VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(novel_key, idx) DO UPDATE SET
                   source_chapter_id=excluded.source_chapter_id, url=excluded.url,
                   title=excluded.title, text=excluded.text, published_at=excluded.published_at,
                   words=excluded.words, views=COALESCE(excluded.views, chapters.views),
                   comments=COALESCE(excluded.comments, chapters.comments),
-                  fetched_at=excluded.fetched_at""",
+                  fetched_at=excluded.fetched_at, content_hash=excluded.content_hash""",
                 (ch.novel_key, ch.index, ch.source_chapter_id, ch.url, ch.title, ch.text,
-                 _dt(ch.published_at), ch.words, ch.views, ch.comments, _dt(ch.fetched_at)),
+                 _dt(ch.published_at), ch.words, ch.views, ch.comments, _dt(ch.fetched_at), ch.content_hash),
             )
 
     def chapters(self, novel_key: str) -> list[ChapterRecord]:
@@ -192,7 +207,7 @@ class Database:
                 novel_key=r["novel_key"], index=r["idx"], source_chapter_id=r["source_chapter_id"] or "",
                 url=r["url"] or "", title=r["title"] or "", text=r["text"],
                 published_at=_parse_dt(r["published_at"]), words=r["words"] or 0,
-                views=r["views"], comments=r["comments"],
+                views=r["views"], comments=r["comments"], content_hash=r["content_hash"] or "",
                 fetched_at=_parse_dt(r["fetched_at"]) or utcnow(),
             )
             for r in rows
@@ -206,6 +221,24 @@ class Database:
         rows = self._conn.execute(
             "SELECT source_chapter_id FROM chapters WHERE novel_key=?", (novel_key,))
         return {r[0] for r in rows if r[0]}
+
+    def chapter_hashes(self, novel_key: str) -> dict[int, str]:
+        rows = self._conn.execute("SELECT idx, content_hash FROM chapters WHERE novel_key=?", (novel_key,))
+        return {int(r[0]): (r[1] or "") for r in rows}
+
+    def delete_chapters_from(self, novel_key: str, first_idx: int) -> int:
+        """Remove chapters with idx >= first_idx (a local novel shrank). Also drops their features."""
+        with self.tx() as c:
+            cur = c.execute("DELETE FROM chapters WHERE novel_key=? AND idx>=?", (novel_key, first_idx))
+            c.execute("DELETE FROM features WHERE level='chapter' AND owner_key LIKE ? AND "
+                      "CAST(substr(owner_key, length(?) + 2) AS INTEGER) >= ?",
+                      (f"{novel_key}#%", novel_key, first_idx))
+        return cur.rowcount
+
+    def set_user_rating(self, novel_key: str, stars: Optional[float]) -> bool:
+        with self.tx() as c:
+            cur = c.execute("UPDATE novels SET user_rating=? WHERE key=?", (stars, novel_key))
+        return cur.rowcount > 0
 
     def total_chapters(self) -> int:
         return int(self._conn.execute("SELECT COUNT(*) FROM chapters").fetchone()[0])
@@ -221,6 +254,10 @@ class Database:
     def features(self, level: str) -> dict[str, dict[str, float]]:
         rows = self._conn.execute("SELECT owner_key, values_json FROM features WHERE level=?", (level,))
         return {r[0]: json.loads(r[1]) for r in rows}
+
+    def delete_feature(self, owner_key: str, level: str) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM features WHERE owner_key=? AND level=?", (owner_key, level))
 
     def feature_for(self, owner_key: str, level: str) -> Optional[dict[str, float]]:
         r = self._conn.execute(

@@ -77,10 +77,19 @@ class Trainer:
         fn = TARGETS[self.cfg.learn.target]
         cands = []
         chapter_feats = self.db.features("chapter")
-        for novel in self.db.novels():
+        novels = self.db.novels()
+        # Unlabelled novels (most local imports) still teach *shape*. They enter the ranking at
+        # the 25th percentile of labelled engagement, or as a neutral 1.0 if nothing is labelled,
+        # so labelled hits are preferred but your own library is never ignored.
+        labelled = sorted(v for v in (fn(n) for n in novels) if v is not None)
+        fallback = labelled[len(labelled) // 4] if labelled else 1.0
+        for novel in novels:
             eng = fn(novel)
             if eng is None:
-                continue
+                if novel.user_rating is not None and labelled:
+                    eng = labelled[0] + (labelled[-1] - labelled[0]) * (novel.user_rating - 1) / 4
+                else:
+                    eng = fallback
             chapters = self.db.chapters(novel.key)
             feats = [chapter_feats.get(f"{novel.key}#{c.index}", {}) for c in chapters]
             cands.extend(make_candidates(novel.key, novel.title, novel.genres + novel.tags, eng, chapters, feats))

@@ -3,7 +3,7 @@
 Thanks for helping. The bar is simple: tests pass, lint passes, the ethics doc still holds.
 
 ```powershell
-pip install -e ".[ml,epub,dev]"
+pip install -e ".[ml,dev]"
 pytest -q
 ruff check gauge tests
 ```

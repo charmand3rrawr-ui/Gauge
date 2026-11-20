@@ -25,6 +25,7 @@ TARGETS = {
     "log_avg_views": lambda n: math.log1p(n.average_views) if n.average_views is not None else None,
     "rating": lambda n: n.rating,
     "log_favorites": lambda n: math.log1p(n.favorites) if n.favorites is not None else None,
+    "user_rating": lambda n: n.user_rating,
 }
 
 

@@ -38,7 +38,8 @@ def test_import_folder_with_sidecar(tmp_path):
         (d / f"ch{i}.txt").write_text(f"Chapter body {i}. " * 50, encoding="utf-8")
     (d / "novel.json").write_text(json.dumps({"title": "My Novel", "followers": 500, "rating": 4.2,
                                               "genres": ["Fantasy"], "chapters": {"1": {"views": 99}}}))
-    novel, chapters = import_path(d)
+    (imp,) = import_path(d)
+    novel, chapters = imp.novel, imp.chapters
     assert novel.title == "My Novel" and novel.followers == 500 and novel.source == "local"
     assert [c.title for c in chapters] == ["ch1", "ch2", "ch10"]  # natural sort
     assert chapters[0].views == 99 and chapters[1].views is None

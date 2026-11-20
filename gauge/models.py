@@ -1,6 +1,7 @@
 """Core data records shared across ingestion, analysis and writing."""
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Optional
 
@@ -29,6 +30,8 @@ class NovelRecord(BaseModel):
     comments: Optional[int] = None
     chapter_count: Optional[int] = None
     pages: Optional[int] = None
+    # Your own 1-5 verdict for local novels; lets Gauge learn *your* taste (target 'user_rating').
+    user_rating: Optional[float] = None
     first_published: Optional[datetime] = None
     last_updated: Optional[datetime] = None
     fetched_at: datetime = Field(default_factory=utcnow)
@@ -51,11 +54,14 @@ class ChapterRecord(BaseModel):
     # imports and some sources do). Kept optional so the schema is uniform.
     views: Optional[int] = None
     comments: Optional[int] = None
+    content_hash: str = ""
     fetched_at: datetime = Field(default_factory=utcnow)
 
     def model_post_init(self, __context) -> None:  # type: ignore[override]
         if not self.words:
             self.words = len(self.text.split())
+        if not self.content_hash:
+            self.content_hash = hashlib.sha1(self.text.encode("utf-8")).hexdigest()[:16]
 
 
 class FeatureVector(BaseModel):

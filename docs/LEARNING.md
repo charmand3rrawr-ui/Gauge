@@ -30,7 +30,9 @@ be edited. If your genre has its own tension vocabulary, add it.
 
 ## Targets (what "addictive" means numerically)
 
-`log_followers` (default), `log_views`, `log_avg_views`, `rating`, `log_favorites`.
+`log_followers` (default), `log_views`, `log_avg_views`, `rating`, `log_favorites`, and
+`user_rating`: your own 1-5 verdict on local novels (`gauge rate`), so the model can learn your
+taste instead of the crowd's. See [LOCAL_LIBRARY.md](LOCAL_LIBRARY.md).
 Log scales because engagement is heavy-tailed. Switch with `gauge train --target log_avg_views`.
 Average views per chapter is the closest public proxy to retention; followers to intent to
 return; rating to satisfaction. They disagree in interesting ways, so train on more than one.

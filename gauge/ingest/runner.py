@@ -81,8 +81,14 @@ class IngestRunner:
         totals = {"novels": 0, "chapters": 0, "errors": 0}
         follows = self.db.follows()
         limit = max_novels if max_novels is not None else self.cfg.ingest.max_novels_per_run
-        for url, _src in follows[:limit]:
+        for url, src in follows[:limit]:
             try:
+                if src == "local":
+                    for r in self.import_local(url):
+                        totals["novels"] += 1
+                        totals["chapters"] += int(r["new"]) + int(r["changed"])
+                    self.db.touch_follow(url)
+                    continue
                 r = self.ingest_url(url)
                 totals["novels"] += r["novels"]
                 totals["chapters"] += r["chapters"]
@@ -92,11 +98,52 @@ class IngestRunner:
         self.db.log_run("ingest", started, totals)
         return totals
 
-    def import_local(self, path: str) -> NovelRecord:
+    # ---- local folders -----------------------------------------------------
+    def watch(self, path: str) -> str:
+        """Register a local novel or library folder; every run re-scans it for new/edited chapters."""
+        from pathlib import Path
+
+        p = Path(path).expanduser().resolve()
+        if not p.exists():
+            raise FileNotFoundError(p)
+        self.db.follow(str(p), "local")
+        return str(p)
+
+    def import_local(self, path: str, library: Optional[bool] = None,
+                     meta_override: Optional[dict[str, object]] = None) -> list[dict[str, object]]:
+        """Import a novel or library from disk. Incremental: chapters whose text is unchanged are
+        skipped, edited chapters are replaced, chapters removed on disk are removed here."""
         from .local import import_path
 
-        novel, chapters = import_path(path)
-        self.db.upsert_novel(novel)
-        for ch in chapters:
-            self.db.upsert_chapter(ch)
-        return novel
+        results: list[dict[str, object]] = []
+        for imp in import_path(path, meta_override=meta_override, library=library):
+            n = imp.novel
+            self.db.upsert_novel(n)
+            have = self.db.chapter_hashes(n.key)
+            new = changed = 0
+            for ch in imp.chapters:
+                prev = have.get(ch.index)
+                if prev == ch.content_hash:
+                    continue
+                self.db.upsert_chapter(ch)
+                if prev is None:
+                    new += 1
+                else:
+                    changed += 1
+            removed = 0
+            if have and max(have) > len(imp.chapters):
+                removed = self.db.delete_chapters_from(n.key, len(imp.chapters) + 1)
+            if changed:
+                # Edited chapters need fresh features; drop their cached rows so analyze() recomputes.
+                for ch in imp.chapters:
+                    if have.get(ch.index) not in (None, ch.content_hash):
+                        self.db.delete_feature(f"{n.key}#{ch.index}", "chapter")
+            results.append({"key": n.key, "title": n.title, "chapters": len(imp.chapters), "new": new,
+                            "changed": changed, "removed": removed, "labelled": _is_labelled(n),
+                            "warnings": imp.warnings})
+            log.info("%s: %d chapters (%d new, %d changed, %d removed)", n.title, len(imp.chapters), new, changed, removed)
+        return results
+
+
+def _is_labelled(n: NovelRecord) -> bool:
+    return any(v is not None for v in (n.followers, n.views, n.average_views, n.rating, n.favorites, n.user_rating))
