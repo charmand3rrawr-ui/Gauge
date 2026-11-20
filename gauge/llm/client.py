@@ -129,8 +129,42 @@ class FakeLLM:
         self.calls.append({"prompt": prompt, "system": system, "json_mode": json_mode})
         if self.canned:
             return self.canned.pop(0)
+        if "stay in character as" in prompt.lower():
+            return "Okay. Okay. You want the truth? I ran because the footsteps knew my name. One more time."
         if json_mode:
             low = prompt.lower()
+            if "create a character sheet" in low:
+                m = re.search(r"(?im)^name: (.+)$", prompt)
+                name = m.group(1).strip() if m else "Someone"
+                return json.dumps({
+                    "name": name, "aliases": [name.split()[0]] if " " in name else [], "concept": "a courier who owes the wrong people",
+                    "appearance": "Rain-soaked jacket. Scar across the left palm.",
+                    "backstory": "Grew up running packages; owes the Broker a debt she cannot name.",
+                    "matrix": {"openness": 0.6, "conscientiousness": 0.3, "extraversion": 0.4, "agreeableness": 0.35,
+                               "neuroticism": 0.7, "dominance": 0.3, "warmth": 0.8, "impulsivity": 0.85, "honesty": 0.8,
+                               "courage": 0.75, "humor": 0.75, "ambition": 0.4, "loyalty": 0.9, "curiosity": 0.8, "cynicism": 0.3,
+                               "values": ["family", "paying debts", "not being owned"], "fears": ["losing her sister", "forgetting"],
+                               "wants": "clear the debt", "needs": "to let someone help", "wound": "her mother left without a word",
+                               "flaw": "runs before she thinks", "lines_wont_cross": ["abandon Jun", "work for the Broker willingly"]},
+                    "voice": {"register": "clipped", "sentence_length": "short", "vocabulary": "courier slang, no abstractions",
+                              "tics": ["says 'okay' twice when scared"], "catchphrases": ["One more time."], "swears": True,
+                              "humor_style": "deflecting", "avoids_talking_about": ["her mother"]},
+                    "state": {"mood": "wired", "goal": "deliver the bag", "knows": ["the seal was broken"], "secrets": ["she can rewind"]},
+                    "relationships": {"Jun": {"trust": 0.9, "affection": 0.95, "respect": 0.6, "fear": 0.0, "stance": "little sister, her whole reason"}},
+                })
+            if "produce your scene brief" in low:
+                return json.dumps({"goal": "get out with the bag", "mood": "wired", "actions": ["checks exits first", "runs"],
+                                   "dialogue": ["Okay. Okay. One more time."], "notices": ["the footsteps are patient"],
+                                   "hides": ["that she already rewound once"], "refuses": ["hand the bag over"],
+                                   "conflict_with_plan": "she would not stop to talk; she would run"})
+            if "in-character review" in low:
+                return json.dumps({"consistency": 8, "issues": [{"quote": "Okay", "problem": "too calm for me here",
+                                                                  "fix": "I would swear first"}]})
+            if "memory update for" in low:
+                return json.dumps({"events": ["ran from the footsteps", "saw my name on the wall"], "feelings": "shaken",
+                                   "mood": "shaken", "goal": "find who wrote it", "location": "the alley", "learned": ["someone knows my name"],
+                                   "new_secrets": [], "condition": ["bruised shoulder"], "arc_progress": "starting to doubt the rewind",
+                                   "relationships": {"Jun": {"trust": 0.0, "affection": 0.05, "note": "thought of her when running"}}})
             if "running story summary" in low:
                 return json.dumps({"summary": "Rin rewound time and saw her own name on a wall.",
                                    "open_threads": ["Who wrote her name?", "Why tomorrow's date?"]})

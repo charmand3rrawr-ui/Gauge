@@ -39,7 +39,8 @@ class Drafter:
         found = self.exemplars.search(q, kind=kind, k=self.k, genres=project.state.genres)
         return "\n\n".join(f"[{e.novel_title}]\n{e.text}" for e in found) or "(none)"
 
-    def draft(self, project: Project, plan: ChapterPlan, prev_text: Optional[str], words: int) -> str:
+    def draft(self, project: Project, plan: ChapterPlan, prev_text: Optional[str], words: int,
+              cast: str = "") -> str:
         prompt = prompts.DRAFT_PROMPT.format(
             number=plan.number, title_novel=project.state.name, words=words, bible=project.bible_markdown(),
             summary=project.state.running_summary or "(this is the first chapter)",
@@ -48,6 +49,7 @@ class Drafter:
             cliffhanger=plan.cliffhanger, beats="; ".join(plan.beats),
             opening_exemplars=self._exemplars(project, plan, "opening"),
             ending_exemplars=self._exemplars(project, plan, "ending"),
+            cast=cast or "(no profiled characters in this scene)",
         )
         max_tokens = int(words * 1.8) + 400
         raw = self.llm.generate(prompt, system=self.system, max_tokens=max_tokens)

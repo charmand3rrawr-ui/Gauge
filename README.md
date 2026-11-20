@@ -44,9 +44,13 @@ No cloud. No API bills. Your drafts never leave your machine.
    endings from the most engaging chapters. Distils everything into a plain-English
    **style guide** and an Ollama **Modelfile**. Exports preference pairs and SFT rows for
    optional LoRA fine-tuning.
-4. **Write** - a project has a series bible, a rolling outline, and a running memory. Each
-   chapter is planned, drafted with retrieved exemplars in context, scored by the engagement
-   model *and* an LLM editor rubric, revised until it clears the bar, then saved as Markdown.
+4. **Write** - a project has a series bible, a rolling outline, a running memory, and a cast of
+   **characters with independent personality matrices**. When a character is in a scene their
+   agent is activated: they brief the drafter on what they want, would do, would say and would
+   refuse, review the draft for out-of-character moments, and remember the chapter afterwards.
+   Each chapter is planned, drafted with retrieved exemplars and the cast's briefs in context,
+   scored by the engagement model, an LLM editor rubric and in-character consistency, revised
+   until it clears the bar, then saved as Markdown. See [docs/CHARACTERS.md](docs/CHARACTERS.md).
 5. **Repeat** - `gauge daemon` runs the whole cycle on a schedule, or Windows Task Scheduler
    runs `gauge daemon --once` for you.
 
@@ -90,6 +94,11 @@ type data\models\style_guide.md         # what the data says works, in English
 .\gauge.bat write "Ten Seconds" --chapters 3
 type data\projects\ten-seconds\chapters\chapter_001.md
 
+# 4b. Meet the cast; add your own; interview them
+.\gauge.bat character list "Ten Seconds"
+.\gauge.bat character new "Ten Seconds" "Marina Vale" --concept "a fence who sells rewound goods" --role antagonist
+.\gauge.bat character chat "Ten Seconds" Rin --ask "What are you not telling your sister?"
+
 # 5. Score any chapter you wrote by hand against the corpus
 .\gauge.bat score "C:\Writing\draft.txt"
 
@@ -115,6 +124,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge new NAME --idea ... --genre ...` | create a project: bible + outline |
 | `gauge write NAME [--chapters N]` | draft, score, revise, save |
 | `gauge projects [NAME]` | list projects / status |
+| `gauge character new/roll/sync/list/show/set/brief/chat/remove` | characters as independent agents with personality matrices; see [docs/CHARACTERS.md](docs/CHARACTERS.md) |
 | `gauge daemon [--once] [--write] [--project P] [--every MIN]` | continuous loop |
 
 ## Using a different local model
@@ -140,10 +150,10 @@ gauge/
   lexicon.py       the small transparent word lists the features count
   ingest/          royalroad.py, scribblehub.py, local.py (folders, libraries, epub, docx), http.py, runner.py
   learn/           engagement.py (model), exemplars.py, style.py, dataset.py, trainer.py
-  write/           project.py, planner.py, drafter.py, critic.py, pipeline.py, prompts.py
+  write/           project.py, characters.py (matrix, agents), planner.py, drafter.py, critic.py, pipeline.py, prompts.py
   llm/             ollama / openai-compatible / fake clients, embeddings
   daemon.py  report.py  cli.py  db.py (sqlite)  config.py
-docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, WINDOWS, ETHICS, ROADMAP
+docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WINDOWS, ETHICS, ROADMAP
 tests/             pytest suite, runs offline with a fake LLM
 ```
 

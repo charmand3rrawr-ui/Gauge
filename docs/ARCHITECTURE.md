@@ -22,7 +22,11 @@ llm/             LLM protocol: OllamaLLM, OpenAICompatLLM, FakeLLM
                  Embedder: OllamaEmbedder, HashingEmbedder (offline fallback)
 
 write/           Project (bible, outline, memory on disk) -> Planner -> Drafter -> Critic
-                 WritePipeline.write_next(): plan, draft, critique, revise, save, update memory
+                 characters.py: PersonalityMatrix, Voice, Relationship, CharacterState, Character,
+                 Roster (who is in the scene), CharacterAgent (brief / review / remember / chat),
+                 CharacterCreator
+                 WritePipeline.write_next(): plan, activate cast, draft, critique + in-character
+                 review, revise, save, update story memory and each character's memory
 
 daemon.py        once(): ingest.run -> trainer.cycle -> (write_next)   run_forever(): loop
 report.py        summaries, leaderboard, explain_novel, compare_to_corpus
@@ -49,13 +53,21 @@ cli.py           click commands
 6. `WritePipeline.write_next()`:
    - `Planner.ensure_plan(n)` extends the outline (5 chapters at a time) when needed, using
      retrieved *ending* exemplars as shape references.
+   - `Roster.present_in()` finds the characters named in the plan and the previous chapter's
+     tail; each `CharacterAgent.brief()` answers as that person (goal, mood, actions, lines,
+     refusals, friction with the plan). The briefs become the CAST section of the draft prompt.
    - `Drafter.draft()` writes the chapter with the bible, running summary, previous chapter
      tail, the plan, and retrieved opening/ending exemplars.
    - `Critic.critique()` computes chapter features, projects them into novel-feature space and
      scores with the engagement model (or heuristic targets if no model), and asks the LLM for a
      1-10 rubric (hook, momentum, payoff, cliffhanger, clarity). Blended 50/50.
-   - If below `min_acceptable_score`, `Drafter.revise()` is called with the editor's notes and
-     the measured issues, up to `max_revisions` times. The best version is kept.
+   - Each present character's `CharacterAgent.review()` scores their own portrayal; the chapter
+     score is blended with that consistency (`write.character_weight`).
+   - If below `min_acceptable_score`, `Drafter.revise()` is called with the editor's notes, the
+     measured issues and the characters' own corrections, up to `max_revisions` times. The best
+     version is kept.
+   - Every character on the page runs `remember()`: memories, mood, knowledge and relationship
+     deltas are written back to `characters/<name>.json`.
    - The chapter is saved as Markdown with front matter; the running summary and open threads
      are updated by the LLM; the score is logged in `generated`.
 

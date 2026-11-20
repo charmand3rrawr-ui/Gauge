@@ -353,6 +353,13 @@ def write(c: Ctx, name: str, chapters: int) -> None:
         console.print(f"[green]Chapter {res.number}[/] {res.title}  score={res.score:.2f} "
                       f"(measured {res.critique.measured:.2f} / judged {res.critique.judged:.2f}) "
                       f"revisions={res.revisions}\n  -> {res.path}")
+        if res.cast:
+            console.print(f"  cast: {', '.join(res.cast)}  in-character consistency="
+                          f"{sum(r.consistency for r in res.character_reviews) / len(res.character_reviews):.2f}"
+                          if res.character_reviews else f"  cast: {', '.join(res.cast)}")
+        for r in res.character_reviews:
+            for i in r.issues[:1]:
+                console.print(f"  {r.name}: \"{i.quote}\" - {i.problem}")
         if res.critique.notes:
             console.print(f"  editor: {res.critique.notes}")
 
@@ -372,6 +379,213 @@ def projects(c: Ctx, name: Optional[str]) -> None:
 
     pipe = WritePipeline(c.cfg, c.db)
     console.print_json(json.dumps(pipe.status(pipe.open_project(name)), default=str))
+
+
+# ---------------------------------------------------------------------------- characters
+@main.group()
+def character() -> None:
+    """Characters as independent agents: personality matrix, voice, memory, relationships."""
+
+
+def _roster(c: Ctx, project: str):
+    from .write.characters import Roster
+    from .write.project import Project
+
+    if not Project.exists(c.cfg.projects_dir, project):
+        console.print(f"[red]no project named {project!r}[/]")
+        sys.exit(1)
+    p = Project(c.cfg.projects_dir, project)
+    return p, Roster.load(p.dir)
+
+
+def _pipeline_or_exit(c: Ctx):
+    from .write import WritePipeline
+
+    pipe = WritePipeline(c.cfg, c.db)
+    if not pipe.llm.available():
+        console.print(f"[red]LLM not reachable[/] ({pipe.llm.describe()}). Run `gauge doctor`.")
+        sys.exit(1)
+    return pipe
+
+
+@character.command("new")
+@click.argument("project")
+@click.argument("name")
+@click.option("--concept", required=True, help="Who they are, in a line or a paragraph.")
+@click.option("--role", type=click.Choice(["protagonist", "antagonist", "supporting", "minor"]), default="supporting")
+@click.option("--seed", type=int, default=None, help="Roll the trait matrix from this seed, then let the LLM flesh it out.")
+@click.pass_obj
+def character_new(c: Ctx, project: str, name: str, concept: str, role: str, seed: Optional[int]) -> None:
+    """Create a character with a full personality matrix, voice and relationships."""
+    pipe = _pipeline_or_exit(c)
+    p = pipe.open_project(project)
+    ch = pipe.create_character(p, name, concept, role, seed)
+    console.print(ch.sheet_markdown())
+    console.print(f"[green]Saved[/] {p.dir / 'characters' / (ch.name.lower().replace(' ', '-') + '.json')}")
+
+
+@character.command("roll")
+@click.argument("project")
+@click.argument("name")
+@click.option("--role", default="supporting")
+@click.option("--seed", type=int, default=None)
+@click.option("--concept", default="")
+@click.pass_obj
+def character_roll(c: Ctx, project: str, name: str, role: str, seed: Optional[int], concept: str) -> None:
+    """Create a character from a random trait matrix, no LLM needed. Edit the JSON or `set` traits later."""
+    from .write.characters import CharacterCreator
+
+    p, roster = _roster(c, project)
+    ch = CharacterCreator(None).roll(name, role, seed, concept)  # type: ignore[arg-type]
+    roster.add(ch)
+    roster.save()
+    console.print(ch.sheet_markdown())
+
+
+@character.command("sync")
+@click.argument("project")
+@click.pass_obj
+def character_sync(c: Ctx, project: str) -> None:
+    """Create sheets for every character named in the bible that does not have one yet."""
+    pipe = _pipeline_or_exit(c)
+    created = pipe.sync_characters(pipe.open_project(project))
+    console.print(f"[green]Created[/] {', '.join(created)}" if created else "Everyone in the bible already has a sheet.")
+
+
+@character.command("list")
+@click.argument("project")
+@click.pass_obj
+def character_list(c: Ctx, project: str) -> None:
+    """List a project's characters with role, mood and last appearance."""
+    _, roster = _roster(c, project)
+    if not roster.characters:
+        console.print("(no characters yet; `gauge character new PROJECT NAME --concept ...` or `gauge character sync PROJECT`)")
+        return
+    table = Table(title=f"{project}: {len(roster.characters)} characters")
+    for col in ("name", "role", "mood", "goal", "last seen", "wants"):
+        table.add_column(col)
+    for ch in roster.ordered():
+        table.add_row(ch.name, ch.role, ch.state.mood, ch.state.goal[:40], str(ch.state.last_seen_chapter or "-"), ch.matrix.wants[:40])
+    console.print(table)
+
+
+@character.command("show")
+@click.argument("project")
+@click.argument("name")
+@click.pass_obj
+def character_show(c: Ctx, project: str, name: str) -> None:
+    """Print one character's full sheet: matrix, tendencies, voice, state, relationships, memories."""
+    _, roster = _roster(c, project)
+    ch = roster.get(name)
+    if ch is None:
+        console.print(f"[red]no character {name!r}[/]; have: {', '.join(roster.names())}")
+        sys.exit(1)
+    console.print(ch.sheet_markdown())
+
+
+@character.command("set")
+@click.argument("project")
+@click.argument("name")
+@click.option("--trait", "traits", multiple=True, help="axis=value, e.g. --trait courage=0.9 (repeatable)")
+@click.option("--alias", "aliases", multiple=True)
+@click.option("--mood", default=None)
+@click.option("--goal", default=None)
+@click.option("--role", default=None)
+@click.pass_obj
+def character_set(c: Ctx, project: str, name: str, traits: tuple, aliases: tuple, mood: Optional[str],
+                  goal: Optional[str], role: Optional[str]) -> None:
+    """Adjust a character by hand: trait axes, aliases, mood, goal, role."""
+    from .write.characters import TRAIT_AXES
+
+    _, roster = _roster(c, project)
+    ch = roster.get(name)
+    if ch is None:
+        console.print(f"[red]no character {name!r}[/]")
+        sys.exit(1)
+    for t in traits:
+        axis, _, val = t.partition("=")
+        if axis not in TRAIT_AXES:
+            raise click.BadParameter(f"unknown axis {axis!r}; axes: {', '.join(TRAIT_AXES)}")
+        setattr(ch.matrix, axis, max(0.0, min(1.0, float(val))))
+    if aliases:
+        ch.aliases = sorted(set(ch.aliases) | set(aliases))
+    if mood:
+        ch.state.mood = mood
+    if goal:
+        ch.state.goal = goal
+    if role:
+        ch.role = role
+    roster.save()
+    console.print(ch.sheet_markdown())
+
+
+@character.command("remove")
+@click.argument("project")
+@click.argument("name")
+@click.pass_obj
+def character_remove(c: Ctx, project: str, name: str) -> None:
+    """Delete a character sheet."""
+    _, roster = _roster(c, project)
+    ok = roster.remove(name)
+    if ok:
+        roster.save()
+    console.print(f"[green]Removed[/] {name}" if ok else f"[red]no character {name!r}[/]")
+
+
+@character.command("chat")
+@click.argument("project")
+@click.argument("name")
+@click.option("--ask", default=None, help="One question; omit for an interactive session.")
+@click.pass_obj
+def character_chat(c: Ctx, project: str, name: str, ask: Optional[str]) -> None:
+    """Talk to a character directly. They answer as themselves, with everything they remember."""
+    from .write.characters import CharacterAgent
+
+    pipe = _pipeline_or_exit(c)
+    p = pipe.open_project(project)
+    roster = pipe.roster(p)
+    ch = roster.get(name)
+    if ch is None:
+        console.print(f"[red]no character {name!r}[/]; have: {', '.join(roster.names())}")
+        sys.exit(1)
+    agent = CharacterAgent(pipe.llm, ch)
+    history: list = []
+    if ask:
+        console.print(f"[bold]{ch.name}:[/] {agent.chat(ask)}")
+        return
+    console.print(f"Talking to [bold]{ch.name}[/]. Empty line to stop.")
+    while True:
+        q = click.prompt("You", default="", show_default=False)
+        if not q.strip():
+            break
+        a = agent.chat(q, history)
+        history.append((q, a))
+        console.print(f"[bold]{ch.name}:[/] {a}")
+
+
+@character.command("brief")
+@click.argument("project")
+@click.argument("name")
+@click.option("--chapter", type=int, default=None, help="Chapter number from the outline (default: next).")
+@click.pass_obj
+def character_brief(c: Ctx, project: str, name: str, chapter: Optional[int]) -> None:
+    """Preview how a character would approach a planned chapter (what the drafter will be told)."""
+    from .write.characters import CharacterAgent
+
+    pipe = _pipeline_or_exit(c)
+    p = pipe.open_project(project)
+    roster = pipe.roster(p)
+    ch = roster.get(name)
+    if ch is None:
+        console.print(f"[red]no character {name!r}[/]")
+        sys.exit(1)
+    n = chapter or p.next_chapter_number()
+    plan = pipe.planner.ensure_plan(p, n)
+    prev = p.read_chapter(n - 1) if n > 1 else None
+    scene = {"number": n, "title": plan.title, "goal": plan.goal, "hook": plan.hook, "turn": plan.turn,
+             "cliffhanger": plan.cliffhanger, "beats": plan.beats, "summary": p.state.running_summary,
+             "prev_tail": " ".join(prev.split()[-250:]) if prev else "", "others": [o for o in roster.names() if o != ch.name]}
+    console.print(CharacterAgent(pipe.llm, ch).brief(scene).render())
 
 
 # ---------------------------------------------------------------------------- daemon

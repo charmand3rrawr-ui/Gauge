@@ -48,6 +48,11 @@ class WriteConfig(BaseModel):
     max_revisions: int = 2
     min_acceptable_score: float = 0.62
     exemplars_in_prompt: int = 4
+    # Characters as independent agents: scene briefs before drafting, in-character review after.
+    characters_enabled: bool = True
+    max_active_characters: int = 5
+    character_review: bool = True
+    character_weight: float = 0.2  # share of the chapter score that comes from in-character consistency
 
 
 class DaemonConfig(BaseModel):
