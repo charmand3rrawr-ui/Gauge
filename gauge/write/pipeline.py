@@ -9,9 +9,11 @@ from typing import Optional
 
 from ..config import GaugeConfig
 from ..db import Database
+from ..learn.techniques import TechniqueLibrary
 from ..learn.trainer import Trainer
 from ..llm.client import LLM, CallLog, generate_json, make_llm
 from ..llm.parallel import run_parallel
+from ..llm.tokens import truncate_to_tokens
 from ..util import utcnow
 from . import prompts
 from .characters import (
@@ -26,9 +28,11 @@ from .characters import (
 )
 from .critic import Critic, Critique
 from .drafter import Drafter
+from .muse import Muse, NoveltyReport, NoveltyTracker, direction_record
 from .planner import Planner
 from .project import Project
-from .schemas import SummaryOut, schema_of
+from .schemas import ContinueSummaryOut, SummaryOut, schema_of
+from .world import WorldAgent, WorldBrief, WorldReview, WorldState, load_world, save_world
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +47,8 @@ class ChapterResult:
     critique: Critique
     cast: list[str] = field(default_factory=list)
     character_reviews: list[CharacterReview] = field(default_factory=list)
+    world_review: Optional[WorldReview] = None
+    novelty: Optional[NoveltyReport] = None
     timings: dict[str, float] = field(default_factory=dict)  # seconds per step
     llm_calls: int = 0
     llm_seconds: float = 0.0
@@ -76,19 +82,116 @@ class WritePipeline:
         self.planner = Planner(self.llm, self.exemplars, compact)
         self.drafter = Drafter(self.llm, self.exemplars, compact, cfg.write.exemplars_in_prompt)
         self.critic = Critic(self.fast_llm, self.model)
+        self.techniques = TechniqueLibrary(self.trainer.embedder)
+        self.techniques.load(cfg.models_dir)
+        self.novelty = NoveltyTracker()
+        hint = "\n".join(t.card() for t in self.techniques.items[:12]) if self.techniques.items else ""
+        self.muse = Muse(self.fast_llm, hint)
+        if cfg.write.muse_enabled:
+            self.planner.direction_for = self._pick_direction
 
     def _log_call(self, rec) -> None:
         self.db.log_call(rec.purpose, rec.model, rec.prompt_tokens, rec.output_tokens, rec.duration_ms, rec.ok, rec.retries,
                          str(self._ctx.get("project") or ""), self._ctx.get("chapter"))  # type: ignore[arg-type]
 
     # ---- project setup -----------------------------------------------------
-    def new_project(self, name: str, idea: str, genres: list[str], words: Optional[int] = None) -> Project:
-        p = Project.create(self.cfg.projects_dir, name, idea, genres, words or self.cfg.write.target_chapter_words)
+    def new_project(self, name: str, idea: str, genres: list[str], words: Optional[int] = None,
+                    premise_doc: str = "", continue_from: Optional[str] = None) -> Project:
+        """Create a project from a one-line idea, a full premise document, and/or an existing manuscript."""
+        p = Project.create(self.cfg.projects_dir, name, idea or premise_doc[:200], genres,
+                           words or self.cfg.write.target_chapter_words, premise_doc=premise_doc)
+        if continue_from:
+            self.continue_from(p, continue_from)
         self.planner.build_bible(p)
         if self.cfg.write.characters_enabled:
             self.sync_characters(p)
+        if self.cfg.write.world_enabled:
+            self.build_world(p)
         self.planner.extend_outline(p, count=5)
         return p
+
+    def continue_from(self, project: Project, path: str) -> int:
+        """Import an existing manuscript as the chapters already written, then summarise it so the
+        story continues from there instead of starting over."""
+        from ..ingest.local import import_path
+
+        imported = import_path(path, library=False)
+        if not imported:
+            raise ValueError(f"no chapters found in {path}")
+        chapters = imported[0].chapters
+        for ch in chapters:
+            project.write_chapter(ch.index, ch.title or f"Chapter {ch.index}", ch.text, {"title": ch.title, "imported": True,
+                                                                                            "words": ch.words})
+        project.state.continued_from = str(path)
+        # Summarise with as much of the manuscript as fits: the last chapters matter most.
+        room = self.fast_llm.context_window() - 1200
+        text = "\n\n".join(f"## {c.title or 'Chapter ' + str(c.index)}\n{c.text}" for c in chapters)
+        text = truncate_to_tokens(text, room, from_end=True)
+        prompt = prompts.CONTINUE_SUMMARY_PROMPT.format(count=len(chapters), text=text)
+        try:
+            d = generate_json(self.fast_llm, prompt, schema=schema_of(ContinueSummaryOut), temperature=0.2, max_tokens=900,
+                              purpose="continue:summary")
+        except Exception as e:
+            log.warning("manuscript summary failed: %s", e)
+            d = {}
+        project.state.running_summary = str(d.get("summary") or " ".join(chapters[-1].text.split()[-200:]))
+        project.state.open_threads = [str(t) for t in d.get("open_threads", [])][:8] if isinstance(d.get("open_threads"), list) else []
+        if not project.state.premise_doc:
+            cast = "\n".join(f"- {k}: {v}" for k, v in (d.get("characters") or {}).items()) if isinstance(d.get("characters"), dict) else ""
+            notes = "\n".join(f"- {w}" for w in d.get("world_notes", [])) if isinstance(d.get("world_notes"), list) else ""
+            project.state.premise_doc = (f"{d.get('premise', '')}\n\nCHARACTERS SO FAR:\n{cast}\n\nWORLD RULES SEEN:\n{notes}\n\n"
+                                         f"STORY SO FAR:\n{project.state.running_summary}").strip()
+        project.save()
+        return len(chapters)
+
+    # ---- world -------------------------------------------------------------
+    def world(self, project: Project) -> Optional[WorldState]:
+        return load_world(project.dir) if self.cfg.write.world_enabled else None
+
+    def build_world(self, project: Project) -> WorldState:
+        w = load_world(project.dir) or WorldState()
+        agent = WorldAgent(self.fast_llm, w, self.cfg.write.world_agency)
+        agent.build(project.bible_markdown(), project.state.premise_doc)
+        save_world(project.dir, w)
+        return w
+
+    def _world_brief(self, project: Project, plan, w: WorldState, briefs: list[SceneBrief]) -> WorldBrief:
+        cast_summary = "\n".join(f"- {b.name}: wants {b.goal}; mood {b.mood}" + (f"; friction: {b.conflict_with_plan}" if b.conflict_with_plan else "")
+                                 for b in briefs) or ""
+        conflicts = sum(1 for b in briefs if b.conflict_with_plan)
+        scene = {"number": plan.number, "title": plan.title, "goal": plan.goal, "hook": plan.hook, "turn": plan.turn,
+                 "cliffhanger": plan.cliffhanger, "beats": plan.beats}
+        return WorldAgent(self.fast_llm, w, self.cfg.write.world_agency).brief(scene, cast_summary, conflicts)
+
+    # ---- creativity --------------------------------------------------------
+    def _pick_direction(self, project: Project) -> str:
+        d = self.muse.choose(project.bible_markdown(), project.state.running_summary, project.state.open_threads,
+                             project.state.past_directions, self.cfg.write.muse_directions)
+        if d is None:
+            return ""
+        project.state.past_directions.append(d.pitch)
+        project.state.past_directions = project.state.past_directions[-20:]
+        log.info("muse chose: %s (%s)", d.title, direction_record(d))
+        return f"{d.title}: {d.pitch}" + (f" Fresh because {d.fresh_because}" if d.fresh_because else "")
+
+    def _technique_cards(self, plan) -> str:
+        if not self.techniques.items or self.cfg.write.techniques_in_prompt <= 0:
+            return ""
+        found = self.techniques.search(f"{plan.goal} {plan.hook} {plan.turn} {plan.cliffhanger}", k=self.cfg.write.techniques_in_prompt)
+        return "\n".join(f"- {t.card()}" for t in found)
+
+    def _avoid_list(self, project: Project, n: int) -> tuple[str, list[str]]:
+        previous = project.previous_texts(n)
+        if not previous:
+            return "", previous
+        phrases = self.novelty.overused_phrases(previous)
+        openings = [" ".join(p.split()[:7]) for p in previous[-3:]]
+        parts = []
+        if phrases:
+            parts.append("phrases already worn out: " + ", ".join(f'"{p}"' for p in phrases[:10]))
+        if openings:
+            parts.append("recent chapter openings (open differently): " + " | ".join(f'"{o}..."' for o in openings))
+        return "\n".join(f"- {x}" for x in parts), previous
 
     # ---- characters --------------------------------------------------------
     def roster(self, project: Project) -> Roster:
@@ -187,6 +290,8 @@ class WritePipeline:
         prev = project.read_chapter(n - 1) if n > 1 else None
         words = project.state.target_chapter_words
         roster = self.roster(project) if self.cfg.write.characters_enabled else Roster(project.dir)
+        world_state = self.world(project)
+        previous_texts = project.previous_texts(n)
 
         # Resume from a checkpointed draft if the last run died after generating it.
         ckpt = None if fresh else project.load_checkpoint(n)
@@ -204,22 +309,29 @@ class WritePipeline:
             timings["briefs"] = time.monotonic() - t0
             cast_names = [b.name for b in briefs]
             cast_text = render_cast(briefs, roster) if briefs else ""
+            world_text = ""
+            if world_state is not None:
+                t0 = time.monotonic()
+                world_text = self._world_brief(project, plan, world_state, briefs).render()
+                timings["world"] = time.monotonic() - t0
+            avoid_text, _prev_texts = self._avoid_list(project, n)
             t0 = time.monotonic()
-            text = self.drafter.draft(project, plan, prev, words, cast=cast_text)
+            text = self.drafter.draft(project, plan, prev, words, cast=cast_text, world=world_text,
+                                      techniques=self._technique_cards(plan), avoid=avoid_text)
             timings["draft"] = time.monotonic() - t0
             revisions = 0
             if self.cfg.write.checkpoint_drafts:
                 project.save_checkpoint(n, "draft", text, {"plan_title": plan.title, "cast": cast_names, "revisions": 0})
 
         t0 = time.monotonic()
-        crit, reviews = self._critique(text, plan, n, roster, cast_names)
+        crit, reviews, wrev, nov = self._critique(text, plan, n, roster, cast_names, world_state, previous_texts)
         timings["critique"] = time.monotonic() - t0
-        best_text, best, best_reviews = text, crit, reviews
+        best_text, best, best_reviews, best_wrev, best_nov = text, crit, reviews, wrev, nov
         t_rev = 0.0
         while crit.score < self.cfg.write.min_acceptable_score and revisions < self.cfg.write.max_revisions:
             revisions += 1
             log.info("ch %d score %.2f < %.2f; revising (%d)", n, crit.score, self.cfg.write.min_acceptable_score, revisions)
-            problems = self.critic.problems(crit) + self._character_problems(reviews)
+            problems = self.critic.problems(crit) + self._character_problems(reviews) + self._world_problems(wrev) + (nov.notes if nov else [])
             t1 = time.monotonic()
             text = self.drafter.revise(text, problems, crit.measured_issues, words)
             if self.cfg.write.checkpoint_drafts:
@@ -227,11 +339,12 @@ class WritePipeline:
                                                                              "revisions": revisions})
             # Only characters who had complaints are asked again; the others' verdicts stand.
             flagged = {r.name for r in reviews if r.issues}
-            crit, new_reviews = self._critique(text, plan, n, roster, cast_names, only=flagged or None, previous=reviews)
+            crit, new_reviews, wrev, nov = self._critique(text, plan, n, roster, cast_names, world_state, previous_texts,
+                                                          only=flagged or None, previous=reviews)
             reviews = new_reviews
             t_rev += time.monotonic() - t1
             if crit.score > best.score:
-                best_text, best, best_reviews = text, crit, reviews
+                best_text, best, best_reviews, best_wrev, best_nov = text, crit, reviews, wrev, nov
         if t_rev:
             timings["revise"] = t_rev
 
@@ -242,6 +355,12 @@ class WritePipeline:
                      self.cfg.llm.parallel, "character memory")
         if roster.characters:
             roster.save()
+        if world_state is not None:
+            WorldAgent(self.fast_llm, world_state, self.cfg.write.world_agency).remember(best_text, n)
+            save_world(project.dir, world_state)
+            promotable = [f.tag for f in world_state.promotable()]
+            if promotable:
+                log.info("recurring extras worth promoting to characters: %s (gauge world promote)", ", ".join(promotable))
         self._update_memory(project, n, plan.title, best_text)
         timings["memory"] = time.monotonic() - t0
 
@@ -250,6 +369,9 @@ class WritePipeline:
             "judged": round(best.judged, 3), "rubric": best.rubric, "revisions": revisions,
             "words": len(best_text.split()), "written_at": utcnow().isoformat(),
             "cast": cast_names, "character_consistency": round(self._consistency(best_reviews), 3),
+            "world_consistency": round(best_wrev.consistency, 3) if best_wrev else None,
+            "novelty": round(best_nov.score, 3) if best_nov else None,
+            "direction": project.state.current_direction[:120],
             "resumed": resumed, "seconds": round(time.monotonic() - t_all, 1),
         }
         path = project.write_chapter(n, plan.title, best_text, meta)
@@ -259,11 +381,13 @@ class WritePipeline:
         timings["total"] = time.monotonic() - t_all
         self._ctx = {"project": project.name, "chapter": None}
         return ChapterResult(number=n, title=plan.title, path=path, score=best.score, revisions=revisions, critique=best,
-                             cast=cast_names, character_reviews=best_reviews, timings=timings,
+                             cast=cast_names, character_reviews=best_reviews, world_review=best_wrev, novelty=best_nov,
+                             timings=timings,
                              llm_calls=len(self.calls.records) - calls_before,
                              llm_seconds=round(self.calls.total_seconds() - secs_before, 1), resumed=resumed)
 
     def _critique(self, text: str, plan, n: int, roster: Roster, cast_names: list[str],
+                  world_state: Optional[WorldState] = None, previous_texts: Optional[list[str]] = None,
                   only: Optional[set[str]] = None, previous: Optional[list[CharacterReview]] = None):
         crit = self.critic.critique(text, plan)
         reviews = self._character_reviews(text, n, roster, cast_names, only=only) if cast_names else []
@@ -273,7 +397,23 @@ class WritePipeline:
         if reviews:
             w = self.cfg.write.character_weight
             crit.score = (1 - w) * crit.score + w * self._consistency(reviews)
-        return crit, reviews
+        wrev = None
+        if world_state is not None and self.cfg.write.world_weight > 0:
+            wrev = WorldAgent(self.fast_llm, world_state, self.cfg.write.world_agency).review(text, n)
+            w = self.cfg.write.world_weight
+            crit.score = (1 - w) * crit.score + w * wrev.consistency
+        nov = None
+        if previous_texts and self.cfg.write.novelty_weight > 0:
+            nov = self.novelty.report(text, previous_texts)
+            w = self.cfg.write.novelty_weight
+            crit.score = (1 - w) * crit.score + w * nov.score
+        return crit, reviews, wrev, nov
+
+    @staticmethod
+    def _world_problems(wrev: Optional[WorldReview]) -> list[str]:
+        if not wrev:
+            return []
+        return [f"world rule broken at \"{v['quote']}\": {v['rule']}. Fix: {v['fix']}" for v in wrev.violations[:3]]
 
     def _update_memory(self, project: Project, n: int, title: str, text: str) -> None:
         prompt = prompts.SUMMARY_PROMPT.format(summary=project.state.running_summary or "(none)", number=n,

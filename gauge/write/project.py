@@ -47,6 +47,10 @@ class ProjectState(BaseModel):
     written: int = 0
     running_summary: str = ""  # what has happened so far, kept short for the prompt
     open_threads: list[str] = Field(default_factory=list)
+    premise_doc: str = ""  # the author's own premise document, canon for the bible
+    past_directions: list[str] = Field(default_factory=list)  # pitches the muse already took
+    current_direction: str = ""
+    continued_from: str = ""  # path of an imported manuscript this project continues
 
 
 class Project:
@@ -60,15 +64,28 @@ class Project:
             self.state = ProjectState(**json.loads(self.state_path.read_text(encoding="utf-8")))
 
     @classmethod
-    def create(cls, root: Path, name: str, idea: str, genres: builtins.list[str], words: int) -> Project:
+    def create(cls, root: Path, name: str, idea: str, genres: builtins.list[str], words: int,
+               premise_doc: str = "") -> Project:
         p = cls(root, name)
         if p.state_path.exists():
             raise FileExistsError(f"project already exists: {p.dir}")
         p.state.seed_idea = idea
         p.state.genres = genres
         p.state.target_chapter_words = words
+        p.state.premise_doc = premise_doc
         p.save()
+        if premise_doc:
+            (p.dir / "premise.md").write_text(premise_doc, encoding="utf-8")
         return p
+
+    def previous_texts(self, upto: int, limit: int = 12) -> builtins.list[str]:
+        """Prose of the most recent written chapters before ``upto`` (for novelty checks)."""
+        out = []
+        for n in range(max(1, upto - limit), upto):
+            t = self.read_chapter(n)
+            if t:
+                out.append(re.sub(r"^#[^\n]*\n+", "", t))  # drop the "# Chapter N" heading
+        return out
 
     @classmethod
     def exists(cls, root: Path, name: str) -> bool:
@@ -184,3 +201,14 @@ class Project:
 
 def _slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "project"
+
+
+def title_from_text(text: str, n: int = 4) -> str:
+    """First few words of an idea as a project name, without a dangling article or preposition."""
+    import re as _re
+
+    words = [w for w in _re.findall(r"[A-Za-z0-9'\-]+", text)][:n]
+    tail = {"a", "an", "the", "of", "in", "on", "at", "to", "and", "or", "who", "that", "with", "for", "by", "from"}
+    while words and words[-1].lower() in tail:
+        words.pop()
+    return " ".join(words).strip() or "My Story"

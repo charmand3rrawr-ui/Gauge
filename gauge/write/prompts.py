@@ -38,6 +38,9 @@ STORY SO FAR:
 OPEN THREADS (must be advanced or deliberately parked):
 {threads}
 
+DIRECTION FOR THIS STRETCH (chosen for freshness; build the chapters so they deliver it):
+{direction}
+
 Serial rules: every chapter needs a hook in the first paragraph, one real turn in the middle,
 one payoff, and an unresolved last line. Escalate across chapters. Vary chapter shapes (action,
 quiet-but-tense, reveal, humiliation-of-antagonist, training/progression, relationship).
@@ -78,6 +81,17 @@ threat, no resolution):
 CAST IN THIS SCENE (each character has thought about the scene for themselves; honour their
 wants, voices and refusals, and let the friction between them and the plan create the drama):
 {cast}
+
+THE WORLD IN THIS SCENE (the setting is an actor too: its rules hold, its weather and crowds and
+institutions act, and nameless people may step in; never contradict the continuity facts):
+{world}
+
+CRAFT MOVES TO TRY (learned from chapters readers could not put down; use a move LIKE these, in
+your own way, never the same words or situation):
+{techniques}
+
+PHRASES AND SHAPES TO AVOID (this story has already used them; find fresh ones):
+{avoid}
 
 Write the chapter now. Prose only. No title, no notes, no headings. Pick up exactly where the
 previous chapter ended if there was one. Make the first sentence impossible to skim past and the
@@ -228,3 +242,158 @@ third person. Do not break character.
 
 Author: {question}
 {name}:"""
+
+
+# ------------------------------------------------------------------------------ premise / continue
+PREMISE_BIBLE_PROMPT = """Build the series bible for a serial web novel from the author's premise document below.
+
+RULES: Every fact in the document is canon. Keep names, places, rules and events exactly as given.
+Invent only what the document leaves open, and keep inventions consistent with its tone.
+Where the document already answers a field, copy it; do not "improve" it.
+
+Genres: {genres}
+
+PREMISE DOCUMENT:
+{premise}
+
+Respond with ONLY a JSON object with these keys:
+- "premise": one paragraph, high-concept, faithful to the document
+- "protagonist": name + one paragraph: want, wound, skill, flaw
+- "world": one paragraph of concrete texture
+- "stakes": what is lost if the protagonist fails
+- "promise": the repeatable pleasure a reader gets EVERY chapter
+- "tone": 3-6 adjectives
+- "pov": narration choice
+- "characters": object of name -> one-line description (everyone the document names, plus 2-4 more)
+- "rules": list of 3-6 hard rules of the world/power system
+- "arc": list of 6-8 sentences describing the first 50 chapters' arc, each a major turn"""
+
+CONTINUE_SUMMARY_PROMPT = """Summarize the existing manuscript so a co-author can continue it seamlessly.
+
+The chapters below are the story so far ({count} chapters). Respond with ONLY JSON:
+{{"summary": "<= 300 words, present tense, facts only, ending with where the last chapter stopped",
+ "open_threads": ["up to 8 unresolved questions or promises"],
+ "characters": {{"<name>": "one line: who they are and where they stand now"}},
+ "premise": "one paragraph: the story's premise as revealed so far",
+ "world_notes": ["rules of the world evident in the text"]}}
+
+MANUSCRIPT:
+{text}"""
+
+# ------------------------------------------------------------------------------ muse
+MUSE_PROMPT = """Propose alternative directions for the next stretch of this serial.
+
+BIBLE:
+{bible}
+
+STORY SO FAR:
+{summary}
+
+OPEN THREADS:
+{threads}
+
+DIRECTIONS ALREADY TAKEN (do not repeat their shape):
+{past}
+
+CRAFT MOVES AVAILABLE (you may build a direction around one):
+{techniques}
+
+Give {k} directions that are genuinely different from each other and from what came before:
+different kind of pressure, different scale, different emotional register. At least one should be
+something a reader would not predict but would, afterwards, feel was inevitable.
+
+Respond with ONLY JSON: {{"directions": [{{"title": "3-6 words", "pitch": "3-5 sentences of what happens
+and what it costs", "fresh_because": "one sentence", "risk": "what could make it fall flat"}}]}}"""
+
+MUSE_PICK_PROMPT = """Rate these directions for the next stretch of a serial. 1-10 each for surprise (would a
+binge-reader not see it coming), fit (does it pay off what the story has set up), payoff (does it
+deliver the reader's promised pleasure).
+
+BIBLE:
+{bible}
+
+STORY SO FAR:
+{summary}
+
+DIRECTIONS:
+{directions}
+
+Respond with ONLY JSON: {{"scores": [{{"index": 1, "surprise": int, "fit": int, "payoff": int}}, ...]}}"""
+
+# ------------------------------------------------------------------------------ world
+WORLD_SYSTEM = """You are the World of a serial story: its physics, its weather and clocks, its streets and
+institutions, its crowds and its nameless people, and the consequences that follow actions whether
+or not anyone is watching. You are not a character and you take no one's side. You never bend a
+rule for the plot; if the plot needs a rule bent, the price must be visible on the page. You speak
+through the setting and through background people who have no names: a vendor, a guard, a child,
+a drunk, a clerk, a crowd. You remember everything that has happened in you.
+
+STATE OF THE WORLD
+{world}"""
+
+WORLD_BUILD_PROMPT = """Build the world state for this serial from its bible and premise.
+
+BIBLE:
+{bible}
+
+PREMISE NOTES:
+{premise}
+
+Respond with ONLY JSON:
+{{"name": "the world's name or the city/region where the story lives",
+ "physics_rules": ["3-5 things that cannot happen or always cost something in this world"],
+ "power_rules": ["3-5 hard rules of the magic / tech / system, with their costs"],
+ "social_rules": ["3-5 rules of law, money, class, institutions, taboos"],
+ "time": "when the story opens", "weather": "weather at the opening", "season": "season",
+ "current_location": "where chapter 1 happens",
+ "locations": {{"<place>": "one line of concrete texture"}} (4-8 places),
+ "active_events": ["2-4 things happening in the world that the cast does not control"]}}"""
+
+WORLD_BRIEF_PROMPT = """The author is about to write chapter {number} ("{title}").
+
+Scene: {goal}
+Opens: {hook}
+Turns: {turn}
+Ends: {cliffhanger}
+Beats: {beats}
+
+The cast's intentions this scene:
+{cast}
+
+Your presence level for this scene is {level:.1f} out of 1: {mode}.
+
+Produce the world's scene brief. Respond with ONLY JSON:
+{{"setting": "2-3 sentences of concrete sensory setting consistent with time, weather and place",
+ "constraints": ["rules of yours that are in play in this scene and must not be broken"],
+ "interventions": ["0-3 things the world itself does: weather turns, a crowd reacts, an institution notices, a mechanism fails"],
+ "background_figures": [{{"tag": "a nameless person, e.g. 'the one-armed noodle vendor'", "trait": "one detail",
+   "action": "what they do that touches the scene", "line": "optional single line they say"}}],
+ "consequences_surfacing": ["earlier actions whose bill arrives now"],
+ "continuity": ["facts that must stay true: who is where, what time it is, what is broken"]}}"""
+
+WORLD_REVIEW_PROMPT = """World-consistency review of chapter {number}. You are the World. Check only your domain:
+physics and power rules obeyed, time and weather continuous, places as established, crowds and
+institutions behaving as they would, consequences not forgotten. Ignore prose quality.
+
+Respond with ONLY JSON: {{"consistency": 0-10, "violations": [{{"quote": "exact words",
+"rule": "which rule or fact it breaks", "fix": "the smallest change that repairs it"}}]}}
+
+CHAPTER:
+{text}"""
+
+WORLD_MEMORY_PROMPT = """World update after chapter {number}. Record what changed in the world itself.
+Respond with ONLY JSON:
+{{"events": ["2-5 events in the world's terms"], "time": "time now", "weather": "weather now", "season": "",
+ "current_location": "where the chapter ended",
+ "new_locations": {{"<place>": "texture"}}, "new_events": ["world events that began"], "ended_events": ["that ended"],
+ "new_consequences": ["actions this chapter that will have a cost later"], "paid_consequences": ["debts settled"],
+ "background_figures": [{{"tag": "nameless person who appeared", "trait": "detail", "action": "what they did"}}]}}
+
+CHAPTER:
+{text}"""
+
+WORLD_CHAT_PROMPT = """Answer as the world. The author asks you a question about the state of things, off the page.
+Be concrete and consistent with everything you know. Do not invent names for background people.
+
+Author: {question}
+World:"""

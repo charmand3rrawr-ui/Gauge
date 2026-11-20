@@ -50,6 +50,7 @@ class LearnConfig(BaseModel):
     ridge_alpha: float = 1.0
     exemplar_count: int = 200
     min_chapters_for_training: int = 30
+    absorb_per_cycle: int = 8  # chapters turned into technique cards per daemon cycle (needs the LLM)
 
 
 class WriteConfig(BaseModel):
@@ -64,6 +65,15 @@ class WriteConfig(BaseModel):
     character_weight: float = 0.2  # share of the chapter score that comes from in-character consistency
     min_mentions_for_review: int = 2  # characters named fewer times than this skip review/memory (protagonist never skips)
     checkpoint_drafts: bool = True  # save raw drafts so a crash never loses a generation
+    # The World agent: physics, weather, crowds and consequences, present in every scene.
+    world_enabled: bool = True
+    world_agency: float = 0.6  # 0 = pure backdrop, 1 = the world constantly intervenes
+    world_weight: float = 0.1  # share of the chapter score from world-consistency review
+    # Creativity.
+    muse_enabled: bool = True
+    muse_directions: int = 3  # alternative directions proposed before each outline extension
+    techniques_in_prompt: int = 3  # technique cards shown to the drafter
+    novelty_weight: float = 0.15  # share of the chapter score from novelty against earlier chapters
 
 
 class DaemonConfig(BaseModel):

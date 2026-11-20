@@ -166,3 +166,89 @@ def schema_of(model: type[BaseModel]) -> dict[str, Any]:
     """JSON schema in the shape Ollama / OpenAI-compatible servers accept (no $defs indirection
     issues for simple models; nested models are inlined by pydantic when possible)."""
     return model.model_json_schema()
+
+
+# ------------------------------------------------------------------------------ world
+class WorldBuildOut(BaseModel):
+    name: str = ""
+    physics_rules: list[str] = Field(default_factory=list)
+    power_rules: list[str] = Field(default_factory=list)
+    social_rules: list[str] = Field(default_factory=list)
+    time: str = ""
+    weather: str = ""
+    season: str = ""
+    current_location: str = ""
+    locations: dict[str, str] = Field(default_factory=dict)
+    active_events: list[str] = Field(default_factory=list)
+
+
+class FigureOut(BaseModel):
+    tag: str = ""
+    trait: str = ""
+    action: str = ""
+    line: str = ""
+
+
+class WorldBriefOut(BaseModel):
+    setting: str = ""
+    constraints: list[str] = Field(default_factory=list)
+    interventions: list[str] = Field(default_factory=list)
+    background_figures: list[FigureOut] = Field(default_factory=list)
+    consequences_surfacing: list[str] = Field(default_factory=list)
+    continuity: list[str] = Field(default_factory=list)
+
+
+class ViolationOut(BaseModel):
+    quote: str = ""
+    rule: str = ""
+    fix: str = ""
+
+
+class WorldReviewOut(BaseModel):
+    consistency: float = 10
+    violations: list[ViolationOut] = Field(default_factory=list)
+
+
+class WorldMemoryOut(BaseModel):
+    events: list[str] = Field(default_factory=list)
+    time: str = ""
+    weather: str = ""
+    season: str = ""
+    current_location: str = ""
+    new_locations: dict[str, str] = Field(default_factory=dict)
+    new_events: list[str] = Field(default_factory=list)
+    ended_events: list[str] = Field(default_factory=list)
+    new_consequences: list[str] = Field(default_factory=list)
+    paid_consequences: list[str] = Field(default_factory=list)
+    background_figures: list[FigureOut] = Field(default_factory=list)
+
+
+# ------------------------------------------------------------------------------ muse / premise
+class DirectionOut(BaseModel):
+    title: str = ""
+    pitch: str = ""
+    fresh_because: str = ""
+    risk: str = ""
+
+
+class MuseDirectionsOut(BaseModel):
+    directions: list[DirectionOut] = Field(default_factory=list)
+
+
+class ScoreOut(BaseModel):
+    index: int = 1
+    surprise: float = 5
+    fit: float = 5
+    payoff: float = 5
+
+
+class MuseRatingsOut(BaseModel):
+    scores: list[ScoreOut] = Field(default_factory=list)
+
+
+class ContinueSummaryOut(BaseModel):
+    summary: str = ""
+    open_threads: list[str] = Field(default_factory=list)
+    characters: dict[str, str] = Field(default_factory=dict)
+    premise: str = ""
+    world_notes: list[str] = Field(default_factory=list)

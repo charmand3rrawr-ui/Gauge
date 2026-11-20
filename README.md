@@ -44,8 +44,12 @@ No cloud. No API bills. Your drafts never leave your machine.
    endings from the most engaging chapters. Distils everything into a plain-English
    **style guide** and an Ollama **Modelfile**. Exports preference pairs and SFT rows for
    optional LoRA fine-tuning.
-4. **Write** - a project has a series bible, a rolling outline, a running memory, and a cast of
-   **characters with independent personality matrices**. When a character is in a scene their
+4. **Write** - a project has a series bible, a rolling outline, a running memory, a cast of
+   **characters with independent personality matrices**, and a **World agent** that owns the
+   physics, weather, crowds and consequences and acts in every scene through nameless passerby
+   ([docs/WORLD.md](docs/WORLD.md)). A **muse** proposes divergent directions before each outline,
+   **technique cards** absorbed from the corpus feed the drafter, and a **novelty tracker** punishes
+   repetition ([docs/CREATIVITY.md](docs/CREATIVITY.md)). When a character is in a scene their
    agent is activated: they brief the drafter on what they want, would do, would say and would
    refuse, review the draft for out-of-character moments, and remember the chapter afterwards.
    Each chapter is planned, drafted with retrieved exemplars and the cast's briefs in context,
@@ -54,7 +58,15 @@ No cloud. No API bills. Your drafts never leave your machine.
 5. **Repeat** - `gauge daemon` runs the whole cycle on a schedule, or Windows Task Scheduler
    runs `gauge daemon --once` for you.
 
-## Install on Windows (5 minutes)
+## Install for everyone (double-click)
+
+Download the ZIP, unzip it, double-click **Install Gauge.bat**, wait. It installs Python and
+Ollama if needed, downloads the models, puts a **Gauge Studio** shortcut on the Desktop and opens
+it: one big box for your idea, **START MY STORY**, **WRITE THE NEXT CHAPTER**, click a chapter to
+read, **Talk to a character**. No accounts, no keys, nothing leaves the computer.
+Details and troubleshooting: [installer/README.md](installer/README.md).
+
+## Install on Windows (command line, 5 minutes)
 
 Requirements: Windows 10/11, Python 3.10+, ~8 GB free disk for models. A GPU with 8 GB VRAM
 makes writing fast; CPU-only works for everything, just slower.
@@ -89,8 +101,12 @@ Other platforms: `pip install -e ".[ml,dev]"` then `gauge init`.
 .\gauge.bat report                      # feature importances, leaderboard, recent runs
 type data\models\style_guide.md         # what the data says works, in English
 
-# 4. Write
+# 4. Write: from an idea, a premise document, or an existing manuscript
 .\gauge.bat new "Ten Seconds" --idea "a broke courier can rewind ten seconds, at the cost of a memory each time" --genre Sci-fi --genre Thriller
+.\gauge.bat new "Ash" --premise-file "D:\Writing\ash-premise.md"       # your premise is canon
+.\gauge.bat new "Book 2" --continue-from "D:\Writing\Book1"             # continue a manuscript
+.\gauge.bat start "a courier who can rewind ten seconds" --chapters 3    # one command, premise to chapters
+.\gauge.bat absorb                                                       # learn craft moves from the corpus
 .\gauge.bat write "Ten Seconds" --chapters 3
 type data\projects\ten-seconds\chapters\chapter_001.md
 
@@ -121,7 +137,11 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge train [--target T]` | full learning cycle |
 | `gauge report [--novel KEY]` | what was learned; explain one novel |
 | `gauge score FILE` | score a chapter file; percentiles vs corpus |
-| `gauge new NAME --idea ... --genre ...` | create a project: bible + outline |
+| `gauge new NAME [--idea] [--premise-file F] [--continue-from PATH]` | create a project from an idea, a canon premise document, and/or an existing manuscript |
+| `gauge start PREMISE [--chapters N]` | premise (text or file) straight to written chapters |
+| `gauge absorb [--chapters N]` | extract craft technique cards from the strongest unread chapters |
+| `gauge world show/build/set/chat/extras/promote` | the World agent; see [docs/WORLD.md](docs/WORLD.md) |
+| `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
 | `gauge projects [NAME]` | list projects / status |
@@ -170,11 +190,13 @@ gauge/
   features.py      feature extraction (hook, momentum, payoff, cliffhanger, voice, packaging)
   lexicon.py       the small transparent word lists the features count
   ingest/          royalroad.py, scribblehub.py, local.py (folders, libraries, epub, docx), http.py, runner.py
-  learn/           engagement.py (model), exemplars.py, style.py, dataset.py, trainer.py
-  write/           project.py, characters.py (matrix, agents), planner.py, drafter.py, critic.py, pipeline.py, prompts.py
+  learn/           engagement.py (model), exemplars.py, techniques.py (absorber), style.py, dataset.py, trainer.py
+  write/           project, characters (matrix, agents), world (physics, crowds), muse (directions, novelty),
+                   planner, drafter, critic, pipeline, prompts, schemas
   llm/             ollama / openai-compatible / fake clients, embeddings
   daemon.py  report.py  cli.py  db.py (sqlite)  config.py
-docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WINDOWS, ETHICS, ROADMAP
+docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, WINDOWS, ETHICS, ROADMAP
+installer/         double-click installer (bootstrap.ps1) and Gauge Studio GUI launcher
 tests/             pytest suite, runs offline with a fake LLM
 ```
 

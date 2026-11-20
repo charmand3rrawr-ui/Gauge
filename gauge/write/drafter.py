@@ -52,7 +52,7 @@ class Drafter:
         return [f"[{e.novel_title}]\n{e.text}" for e in found]
 
     def build_draft_prompt(self, project: Project, plan: ChapterPlan, prev_text: Optional[str], words: int,
-                           cast: str = "") -> tuple[str, int]:
+                           cast: str = "", world: str = "", techniques: str = "", avoid: str = "") -> tuple[str, int]:
         """Return (prompt, max_output_tokens), fitted to the model's context window."""
         max_out = output_tokens_for(words)
         budget = PromptBudget(self.llm.context_window(), max_out)
@@ -61,13 +61,16 @@ class Drafter:
         skeleton = prompts.DRAFT_PROMPT.format(
             number=plan.number, title_novel=project.state.name, words=words, bible="", summary="", prev_tail="",
             ch_title=plan.title, goal=plan.goal, hook=plan.hook, turn=plan.turn, cliffhanger=plan.cliffhanger,
-            beats="; ".join(plan.beats), opening_exemplars="", ending_exemplars="", cast="")
+            beats="; ".join(plan.beats), opening_exemplars="", ending_exemplars="", cast="", world="", techniques="", avoid="")
         budget.take(skeleton)
         # Priority order: previous tail (continuity) > bible > summary > cast > exemplars.
         prev_tail = budget.fit("prev_tail", tail(prev_text, 250) if prev_text else "(there is no previous chapter)")
         bible = budget.fit("bible", project.bible_markdown(), min_tokens=200)
         summary = budget.fit("summary", project.state.running_summary or "(this is the first chapter)")
         cast_text = budget.fit("cast", cast or "(no profiled characters in this scene)", min_tokens=150)
+        world_text = budget.fit("world", world or "(no world state yet)", min_tokens=120)
+        avoid_text = budget.fit("avoid", avoid or "(nothing yet)", min_tokens=60)
+        tech_text = budget.fit("techniques", techniques or "(no technique library yet; run `gauge absorb`)", min_tokens=100)
         openings = budget.fit_list("opening_exemplars", self._exemplar_items(project, plan, "opening"))
         endings = budget.fit_list("ending_exemplars", self._exemplar_items(project, plan, "ending"))
         if budget.dropped:
@@ -78,12 +81,14 @@ class Drafter:
             summary=summary or "(summary omitted)", prev_tail=prev_tail or "(previous chapter omitted)",
             ch_title=plan.title, goal=plan.goal, hook=plan.hook, turn=plan.turn, cliffhanger=plan.cliffhanger,
             beats="; ".join(plan.beats), opening_exemplars=openings or "(none)", ending_exemplars=endings or "(none)",
-            cast=cast_text or "(no profiled characters in this scene)",
+            cast=cast_text or "(no profiled characters in this scene)", world=world_text or "(omitted)",
+            techniques=tech_text or "(omitted)", avoid=avoid_text or "(nothing)",
         )
         return prompt, max_out
 
-    def draft(self, project: Project, plan: ChapterPlan, prev_text: Optional[str], words: int, cast: str = "") -> str:
-        prompt, max_out = self.build_draft_prompt(project, plan, prev_text, words, cast)
+    def draft(self, project: Project, plan: ChapterPlan, prev_text: Optional[str], words: int, cast: str = "",
+              world: str = "", techniques: str = "", avoid: str = "") -> str:
+        prompt, max_out = self.build_draft_prompt(project, plan, prev_text, words, cast, world, techniques, avoid)
         raw = self.llm.generate(prompt, system=self.system, max_tokens=max_out, purpose="draft")
         return clean_prose(raw)
 

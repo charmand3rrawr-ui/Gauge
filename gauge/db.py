@@ -74,6 +74,11 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     ts TEXT, project TEXT, chapter INTEGER, purpose TEXT, model TEXT,
     prompt_tokens INTEGER, output_tokens INTEGER, duration_ms INTEGER, ok INTEGER, retries INTEGER
 );
+CREATE TABLE IF NOT EXISTS absorbed (
+    owner_key TEXT PRIMARY KEY,
+    techniques INTEGER,
+    at TEXT
+);
 CREATE TABLE IF NOT EXISTS generated (
     project TEXT NOT NULL,
     chapter INTEGER NOT NULL,
@@ -300,6 +305,14 @@ class Database:
             d["summary"] = json.loads(d["summary"] or "{}")
             out.append(d)
         return out
+
+    # ---- technique absorption ------------------------------------------------
+    def absorbed_keys(self) -> set:
+        return {r[0] for r in self._conn.execute("SELECT owner_key FROM absorbed")}
+
+    def mark_absorbed(self, owner_key: str, techniques: int) -> None:
+        with self.tx() as c:
+            c.execute("INSERT OR REPLACE INTO absorbed VALUES (?,?,?)", (owner_key, techniques, utcnow().isoformat()))
 
     # ---- llm telemetry -----------------------------------------------------
     def log_call(self, purpose: str, model: str, prompt_tokens: int, output_tokens: int, duration_ms: int, ok: bool,

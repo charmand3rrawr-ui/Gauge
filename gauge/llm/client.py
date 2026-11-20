@@ -349,7 +349,47 @@ class FakeLLM:
         low = prompt.lower()
         if "stay in character as" in low:
             return "Okay. Okay. You want the truth? I ran because the footsteps knew my name. One more time."
+        if "answer as the world" in low:
+            return "Rain since dusk. The market is closing; the vendor with one arm is still counting coins."
         if json_mode:
+            if "build the world state" in low:
+                return json.dumps({"name": "Lowmarket", "physics_rules": ["a rewind lasts ten seconds, no more", "rain never stops in the lower city"],
+                                   "power_rules": ["each rewind erases one memory"], "social_rules": ["couriers are untouchable while carrying a sealed bag"],
+                                   "time": "night of day 1", "weather": "steady rain", "season": "late autumn", "current_location": "Noodle Alley",
+                                   "locations": {"Noodle Alley": "steam, neon, puddles", "The Broker's Office": "dry, quiet, too warm"},
+                                   "active_events": ["the dock strike enters its third week"]})
+            if "produce the world's scene brief" in low:
+                return json.dumps({"setting": "Noodle Alley at closing time, rain hammering the awnings.",
+                                   "constraints": ["a rewind lasts ten seconds", "couriers with sealed bags are untouchable"],
+                                   "interventions": ["the alley's power cuts out", "a crowd spills from the noodle shop"],
+                                   "background_figures": [{"tag": "the one-armed noodle vendor", "trait": "counts coins twice",
+                                                           "action": "pulls his shutter down early", "line": "Not tonight."}],
+                                   "consequences_surfacing": ["the broken seal has been noticed"], "continuity": ["it is night", "it is raining"]})
+            if "world-consistency review" in low:
+                return json.dumps({"consistency": 9, "violations": [{"quote": "the sun", "rule": "it is night and raining", "fix": "replace with neon"}]})
+            if "world update after chapter" in low:
+                return json.dumps({"events": ["the alley lost power", "the seal's breaking was noticed"], "time": "late night of day 1",
+                                   "weather": "heavier rain", "current_location": "Noodle Alley", "new_locations": {},
+                                   "new_events": ["the Broker's people are asking about a courier"], "ended_events": [],
+                                   "new_consequences": ["the vendor saw Rin's face"], "paid_consequences": [],
+                                   "background_figures": [{"tag": "the one-armed noodle vendor", "trait": "counts coins twice", "action": "closed early"}]})
+            if "extract the craft techniques" in low:
+                return json.dumps({"techniques": [
+                    {"kind": "hook", "name": "Dialogue before setting", "description": "Open on a spoken line that implies danger before any description.", "example": "\"Don't open it,\" Rin said."},
+                    {"kind": "ending", "name": "Sound cut", "description": "End on a sound stopping; the silence is the cliffhanger.", "example": "The footsteps behind her stopped."},
+                    {"kind": "reversal", "name": "Own voice", "description": "The pursuer is revealed to be the protagonist herself.", "example": "it was her own voice"}]})
+            if "propose alternative directions" in low:
+                return json.dumps({"directions": [
+                    {"title": "The Debt Comes Due", "pitch": "The Broker calls the debt early and Rin must rewind through a negotiation she keeps losing.", "fresh_because": "a fight with no violence", "risk": "talky"},
+                    {"title": "Jun Vanishes", "pitch": "Jun disappears and every rewind costs a memory of her.", "fresh_because": "the power turns on the thing she protects", "risk": "too dark too soon"},
+                    {"title": "The Strike Breaks", "pitch": "The dock strike turns violent and Rin's route becomes a battlefield.", "fresh_because": "the world moves without her", "risk": "loses focus"}]})
+            if "rate these directions" in low:
+                return json.dumps({"scores": [{"index": 1, "surprise": 6, "fit": 8, "payoff": 7}, {"index": 2, "surprise": 9, "fit": 8, "payoff": 9},
+                                              {"index": 3, "surprise": 7, "fit": 5, "payoff": 6}]})
+            if "summarize the existing manuscript" in low:
+                return json.dumps({"summary": "Rin, a courier, discovered she can rewind ten seconds. The last chapter ended with her name on a wall.",
+                                   "open_threads": ["Who wrote her name?"], "characters": {"Rin": "the courier", "Jun": "her sister"},
+                                   "premise": "A courier who can rewind ten seconds at the cost of a memory.", "world_notes": ["rewinds cost memories"]})
             if "create a character sheet" in low:
                 m = re.search(r"(?im)^name: (.+)$", prompt)
                 name = m.group(1).strip() if m else "Someone"

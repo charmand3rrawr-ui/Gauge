@@ -36,6 +36,21 @@ class Daemon:
         out["ingest"] = ingest.run()
         trainer = Trainer(self.cfg, self.db)
         out["train"] = trainer.cycle()
+        # Absorb craft techniques from the strongest unread chapters (needs the LLM; skipped when offline).
+        if self.cfg.learn.absorb_per_cycle > 0:
+            from .learn.techniques import Absorber
+            from .llm import make_llm
+
+            fast = make_llm(self.cfg.llm, "fast")
+            if fast.available():
+                try:
+                    out["absorb"] = Absorber(self.db, fast, trainer.embedder, self.cfg.models_dir,
+                                             self.cfg.learn.target).run(self.cfg.learn.absorb_per_cycle)
+                except Exception as e:
+                    log.exception("absorb failed: %s", e)
+                    out["absorb"] = f"failed: {e}"
+            else:
+                out["absorb"] = "skipped: LLM not reachable"
         do_write = self.cfg.daemon.write_after_learning if write is None else write
         if do_write and self.cfg.daemon.active_project:
             from .write.pipeline import WritePipeline

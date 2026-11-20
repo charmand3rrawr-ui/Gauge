@@ -71,6 +71,22 @@ cli.py           click commands
    - The chapter is saved as Markdown with front matter; the running summary and open threads
      are updated by the LLM; the score is logged in `generated`.
 
+## World, muse, techniques
+
+- `write/world.py`: `WorldState` (rules, clock, weather, places, events, consequences, nameless
+  figures, history) and `WorldAgent` (build / brief / review / remember / chat).
+  `intervention_level()` decides how hard the world pushes a scene. Persisted as `world.json`.
+- `write/muse.py`: `Muse` proposes and rates alternative directions (surprise, fit, payoff, plus a
+  deterministic novelty penalty against past directions); `Planner.direction_for` hooks it into
+  outline extension. `NoveltyTracker` scores drafts against the project's own earlier chapters.
+- `learn/techniques.py`: `Absorber` turns the strongest unread chapters into `Technique` cards
+  (LLM extraction, embedded); `TechniqueLibrary.search` diversifies by kind. The `absorbed` table
+  makes it incremental; the daemon runs it each cycle.
+- `WritePipeline.write_next` order: plan (muse direction if the outline needs extending) ->
+  character briefs -> world brief -> technique cards + avoid list -> draft -> critic + character
+  reviews + world review + novelty -> revise -> character memory + world memory + story summary.
+- `gui.py`: `StudioController` (all logic, tested) and `run_studio` (tkinter window).
+
 ## Execution model
 
 - `llm/tokens.py`: token estimation and `PromptBudget`; `Drafter.build_draft_prompt` fits every

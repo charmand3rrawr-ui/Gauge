@@ -331,22 +331,84 @@ def score(c: Ctx, path: str) -> None:
 # ---------------------------------------------------------------------------- write
 @main.command()
 @click.argument("name")
-@click.option("--idea", required=True, help="Your seed idea in a sentence or a paragraph.")
+@click.option("--idea", default=None, help="Your seed idea in a sentence or a paragraph.")
+@click.option("--premise-file", type=click.Path(exists=True), default=None,
+              help="A premise document (.md/.txt): names, rules, arc. Everything in it is canon.")
+@click.option("--continue-from", "continue_from", type=click.Path(exists=True), default=None,
+              help="An existing manuscript (folder, .txt/.md/.docx/.epub). Gauge continues it from the next chapter.")
 @click.option("--genre", "genres", multiple=True, help="Repeatable, e.g. --genre LitRPG --genre Progression")
 @click.option("--words", default=None, type=int, help="Target words per chapter.")
 @click.pass_obj
-def new(c: Ctx, name: str, idea: str, genres: tuple, words: Optional[int]) -> None:
-    """Create a writing project: bible + first outline."""
+def new(c: Ctx, name: str, idea: Optional[str], premise_file: Optional[str], continue_from: Optional[str], genres: tuple,
+        words: Optional[int]) -> None:
+    """Create a writing project from an idea, a premise document and/or an existing manuscript."""
+    from .write import WritePipeline
+
+    if not (idea or premise_file or continue_from):
+        raise click.UsageError("give --idea, --premise-file or --continue-from (any combination)")
+    pipe = WritePipeline(c.cfg, c.db)
+    if not pipe.llm.available():
+        console.print(f"[red]LLM not reachable[/] ({pipe.llm.describe()}). Run `gauge doctor`.")
+        sys.exit(1)
+    premise = Path(premise_file).read_text(encoding="utf-8", errors="replace") if premise_file else ""
+    p = pipe.new_project(name, idea or "", list(genres) or ["Fantasy"], words, premise_doc=premise, continue_from=continue_from)
+    console.print(f"[green]Created[/] {p.dir}" + (f"  (continuing from chapter {p.state.written + 1})" if continue_from else "") + "\n")
+    console.print(p.bible_markdown())
+    console.print(p.outline_markdown())
+    w = pipe.world(p)
+    if w is not None:
+        console.print(f"World: {w.name}  rules={len(w.physics_rules) + len(w.power_rules) + len(w.social_rules)}  places={len(w.locations)}")
+
+
+@main.command()
+@click.argument("premise")
+@click.option("--name", default=None, help="Project name (default: first words of the premise).")
+@click.option("--chapters", default=3, show_default=True)
+@click.option("--genre", "genres", multiple=True)
+@click.option("--words", default=None, type=int)
+@click.pass_obj
+def start(c: Ctx, premise: str, name: Optional[str], chapters: int, genres: tuple, words: Optional[int]) -> None:
+    """One command from premise to chapters: PREMISE may be text or a path to a premise file."""
     from .write import WritePipeline
 
     pipe = WritePipeline(c.cfg, c.db)
     if not pipe.llm.available():
         console.print(f"[red]LLM not reachable[/] ({pipe.llm.describe()}). Run `gauge doctor`.")
         sys.exit(1)
-    p = pipe.new_project(name, idea, list(genres) or ["Fantasy"], words)
-    console.print(f"[green]Created[/] {p.dir}\n")
-    console.print(p.bible_markdown())
-    console.print(p.outline_markdown())
+    text = Path(premise).read_text(encoding="utf-8", errors="replace") if Path(premise).exists() else premise
+    from .write.project import title_from_text
+
+    title = name or title_from_text(text)
+    p = pipe.new_project(title, text if len(text) < 300 else "", list(genres) or ["Fantasy"], words,
+                         premise_doc=text if len(text) >= 300 else "")
+    console.print(f"[green]Created[/] {p.state.name}: {p.state.bible.premise}\n")
+    for res in pipe.write_many(p, chapters):
+        console.print(f"[green]Chapter {res.number}[/] {res.title}  score={res.score:.2f}  -> {res.path}")
+    console.print(f"\nContinue with: gauge write \"{p.state.name}\" --chapters 5")
+
+
+@main.command()
+@click.option("--chapters", "n", default=None, type=int, help="How many chapters to absorb this run.")
+@click.pass_obj
+def absorb(c: Ctx, n: Optional[int]) -> None:
+    """Read the strongest unread chapters and extract reusable craft techniques (needs the LLM)."""
+    from .learn import Trainer
+    from .learn.techniques import Absorber
+    from .llm import make_llm
+
+    fast = make_llm(c.cfg.llm, "fast")
+    if not fast.available():
+        console.print(f"[red]LLM not reachable[/] ({fast.describe()}).")
+        sys.exit(1)
+    t = Trainer(c.cfg, c.db)
+    a = Absorber(c.db, fast, t.embedder, c.cfg.models_dir, c.cfg.learn.target)
+    res = a.run(n or c.cfg.learn.absorb_per_cycle)
+    console.print(f"[green]Absorbed[/] {res}")
+    kinds = a.library.kinds_count()
+    if kinds:
+        console.print("library by kind: " + ", ".join(f"{k} {v}" for k, v in sorted(kinds.items())))
+        for t_ in a.library.items[-3:]:
+            console.print(f"  - {t_.card()}")
 
 
 @main.command()
@@ -377,6 +439,15 @@ def write(c: Ctx, name: str, chapters: int, fresh: bool) -> None:
         for r in res.character_reviews:
             for i in r.issues[:1]:
                 console.print(f"  {r.name}: \"{i.quote}\" - {i.problem}")
+        extras = []
+        if res.world_review is not None:
+            extras.append(f"world {res.world_review.consistency:.2f}")
+        if res.novelty is not None:
+            extras.append(f"novelty {res.novelty.score:.2f}")
+        if extras:
+            console.print("  " + "  ".join(extras))
+        if res.novelty and res.novelty.overused:
+            console.print("  worn phrases: " + ", ".join(f'"{p}"' for p in res.novelty.overused[:4]))
         if res.critique.notes:
             console.print(f"  editor: {res.critique.notes}")
 
@@ -658,6 +729,140 @@ def bench(c: Ctx, tokens: int, n_chars: int) -> None:
         console.print("  tip: set llm.fast_model to a 3B model (e.g. llama3.2:3b) to cut the JSON work by 2-3x.")
     if c.cfg.llm.num_ctx < 8192:
         console.print(f"  [yellow]num_ctx={c.cfg.llm.num_ctx} is small; prompts will be trimmed. 8192 is recommended.[/]")
+
+
+# ---------------------------------------------------------------------------- world
+@main.group()
+def world() -> None:
+    """The World agent: physics, weather, crowds, consequences, present in every scene."""
+
+
+def _world_or_exit(c: Ctx, project: str):
+    from .write.project import Project
+    from .write.world import load_world
+
+    if not Project.exists(c.cfg.projects_dir, project):
+        console.print(f"[red]no project named {project!r}[/]")
+        sys.exit(1)
+    p = Project(c.cfg.projects_dir, project)
+    w = load_world(p.dir)
+    if w is None:
+        console.print("[yellow]no world yet[/]; run `gauge world build PROJECT`")
+        sys.exit(1)
+    return p, w
+
+
+@world.command("show")
+@click.argument("project")
+@click.pass_obj
+def world_show(c: Ctx, project: str) -> None:
+    """Print the world: rules, clock and weather, places, events, consequences, recurring extras."""
+    _, w = _world_or_exit(c, project)
+    console.print(w.markdown())
+
+
+@world.command("build")
+@click.argument("project")
+@click.pass_obj
+def world_build(c: Ctx, project: str) -> None:
+    """(Re)build the world state from the bible and premise."""
+    pipe = _pipeline_or_exit(c)
+    w = pipe.build_world(pipe.open_project(project))
+    console.print(w.markdown())
+
+
+@world.command("set")
+@click.argument("project")
+@click.option("--rule", "rules", multiple=True, help="Add a physics/power/social rule (repeatable).")
+@click.option("--time", "time_", default=None)
+@click.option("--weather", default=None)
+@click.option("--location", default=None)
+@click.option("--event", "events", multiple=True, help="Add an active world event.")
+@click.option("--agency", type=float, default=None, help="0-1: how much the world intervenes (saved to config).")
+@click.pass_obj
+def world_set(c: Ctx, project: str, rules: tuple, time_: Optional[str], weather: Optional[str], location: Optional[str],
+              events: tuple, agency: Optional[float]) -> None:
+    """Edit the world by hand."""
+    from .write.world import save_world
+
+    p, w = _world_or_exit(c, project)
+    w.physics_rules.extend(rules)
+    if time_:
+        w.time = time_
+    if weather:
+        w.weather = weather
+    if location:
+        w.current_location = location
+    w.active_events.extend(events)
+    save_world(p.dir, w)
+    if agency is not None:
+        c.cfg.write.world_agency = max(0.0, min(1.0, agency))
+        c.cfg.save()
+    console.print(w.describe())
+
+
+@world.command("chat")
+@click.argument("project")
+@click.option("--ask", required=True)
+@click.pass_obj
+def world_chat(c: Ctx, project: str, ask: str) -> None:
+    """Ask the world a question: weather, who is in the market, what the law would do."""
+    from .write.world import WorldAgent
+
+    pipe = _pipeline_or_exit(c)
+    p, w = _world_or_exit(c, project)
+    console.print(f"[bold]World:[/] {WorldAgent(pipe.fast_llm, w, c.cfg.write.world_agency).chat(ask)}")
+
+
+@world.command("extras")
+@click.argument("project")
+@click.pass_obj
+def world_extras(c: Ctx, project: str) -> None:
+    """List nameless background figures and which ones recur enough to deserve a name."""
+    _, w = _world_or_exit(c, project)
+    if not w.background_figures:
+        console.print("(no background figures yet)")
+        return
+    table = Table(title="Background figures")
+    for col in ("tag", "trait", "seen", "last ch", "promote?"):
+        table.add_column(col)
+    for f in sorted(w.background_figures, key=lambda x: -x.appearances):
+        table.add_row(f.tag, f.trait, str(f.appearances), str(f.last_seen), "yes" if f.appearances >= 3 else "")
+    console.print(table)
+
+
+@world.command("promote")
+@click.argument("project")
+@click.argument("tag")
+@click.option("--name", required=True, help="The name this extra gets as a full character.")
+@click.option("--role", default="minor")
+@click.pass_obj
+def world_promote(c: Ctx, project: str, tag: str, name: str, role: str) -> None:
+    """Turn a recurring nameless extra into a full character with a personality matrix."""
+    pipe = _pipeline_or_exit(c)
+    p, w = _world_or_exit(c, project)
+    f = w.figure(tag)
+    if f is None:
+        console.print(f"[red]no background figure {tag!r}[/]; see `gauge world extras`")
+        sys.exit(1)
+    concept = f"Formerly '{f.tag}' ({f.trait}). Seen {f.appearances} times. " + " ".join(f.actions[-3:])
+    ch = pipe.create_character(p, name, concept, role)
+    ch.aliases = sorted(set(ch.aliases) | {f.tag})
+    roster = pipe.roster(p)
+    roster.add(ch)
+    roster.save()
+    console.print(f"[green]Promoted[/] {f.tag} -> {ch.name} ({ch.role})")
+    console.print(ch.sheet_markdown())
+
+
+# ---------------------------------------------------------------------------- gui
+@main.command()
+@click.pass_obj
+def gui(c: Ctx) -> None:
+    """Open Gauge Studio: a big-button window for starting a story and reading chapters."""
+    from .gui import run_studio
+
+    run_studio(c.cfg, c.db)
 
 
 # ---------------------------------------------------------------------------- daemon

@@ -20,7 +20,11 @@ class Planner:
         self.system = prompts.SYSTEM_AUTHOR.format(style_guide=style_guide or "(no data yet)")
 
     def build_bible(self, project: Project) -> Bible:
-        prompt = prompts.BIBLE_PROMPT.format(idea=project.state.seed_idea, genres=", ".join(project.state.genres))
+        if project.state.premise_doc.strip():
+            # The author's premise is canon: the model fills gaps, it does not reinvent.
+            prompt = prompts.PREMISE_BIBLE_PROMPT.format(genres=", ".join(project.state.genres), premise=project.state.premise_doc)
+        else:
+            prompt = prompts.BIBLE_PROMPT.format(idea=project.state.seed_idea, genres=", ".join(project.state.genres))
         data = generate_json(self.llm, prompt, system=self.system, schema=schema_of(BibleOut), temperature=0.9,
                              max_tokens=1600, purpose="bible")
         bible = Bible(
@@ -43,11 +47,22 @@ class Planner:
         found = self.exemplars.search(q, kind="ending", k=k, genres=project.state.genres)
         return "\n\n".join(f"[{e.novel_title}, ch {e.chapter_index}]\n...{e.text}" for e in found) or "(none)"
 
-    def extend_outline(self, project: Project, count: int = 5, exemplar_k: int = 3) -> list[ChapterPlan]:
+    # Set by the pipeline: a callable(project) -> direction text chosen by the muse, or None.
+    direction_for = None
+
+    def extend_outline(self, project: Project, count: int = 5, exemplar_k: int = 3, direction: str = "") -> list[ChapterPlan]:
         start = (project.state.outline[-1].number + 1) if project.state.outline else 1
         end = start + count - 1
+        if not direction and self.direction_for is not None:
+            try:
+                direction = self.direction_for(project) or ""
+            except Exception as e:  # the muse is optional; outlining must not depend on it
+                log.warning("direction provider failed: %s", e)
+                direction = ""
+        if direction:
+            project.state.current_direction = direction
         prompt = prompts.OUTLINE_PROMPT.format(
-            start=start, end=end, bible=project.bible_markdown(),
+            start=start, end=end, bible=project.bible_markdown(), direction=direction or "(author's choice: keep escalating)",
             summary=project.state.running_summary or "(nothing yet - this is the beginning)",
             threads="\n".join(f"- {t}" for t in project.state.open_threads) or "(none)",
             ending_exemplars=self._ending_exemplars(project, exemplar_k),
