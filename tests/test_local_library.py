@@ -170,9 +170,9 @@ def test_library_detection_and_import(tmp_path):
     assert by_title["Second Serial"].novel.followers == 3000 and len(by_title["Second Serial"].chapters) == 2
     assert by_title["Third Book"].novel.user_rating == 2 and by_title["Third Book"].novel.author == "E. Pub"
     assert len(by_title["Fourth"].chapters) == 2
-    # forcing single-novel mode on a library folder fails loudly instead of silently mixing books
+    # forcing single-novel mode on a folder with no chapter files fails loudly
     try:
-        import_path(lib, library=False)
+        import_path(lib / "Completed", library=False)
     except ValueError:
         pass
     else:
