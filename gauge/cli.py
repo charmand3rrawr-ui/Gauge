@@ -78,6 +78,10 @@ def doctor(c: Ctx) -> None:
         have = llm.models()  # type: ignore[attr-defined]
         if have and c.cfg.llm.model not in have and not any(m.startswith(c.cfg.llm.model) for m in have):
             console.print(f"             [yellow]model {c.cfg.llm.model} not pulled[/]; run: ollama pull {c.cfg.llm.model}")
+    fast = make_llm(c.cfg.llm, "fast")
+    console.print(f"Fast model : {fast.model if c.cfg.llm.fast_model else '(same as main; set llm.fast_model to a 3B model for speed)'}")
+    console.print(f"Execution  : num_ctx={c.cfg.llm.num_ctx} parallel={c.cfg.llm.parallel} retries={c.cfg.llm.retries} "
+                  f"keep_alive={c.cfg.llm.keep_alive} structured_output={c.cfg.llm.structured_output}")
     emb = make_embedder(c.cfg.llm)
     console.print(f"Embeddings : {emb.describe()}")
     console.print(f"Data dir   : {c.cfg.root.resolve()}")
@@ -277,6 +281,15 @@ def report(c: Ctx, top: int, novel: Optional[str]) -> None:
         for r in rows:
             table.add_row(*[str(v) for v in r.values()])
         console.print(table)
+    calls = c.db.call_summary(limit_days=30)
+    if calls:
+        table = Table(title="LLM time by purpose (last 30 days)")
+        for col in ("purpose", "model", "calls", "seconds", "avg_seconds", "prompt_tokens", "output_tokens", "failed", "retries"):
+            table.add_column(col)
+        for r in calls:
+            table.add_row(*[str(r[k]) for k in ("purpose", "model", "calls", "seconds", "avg_seconds", "prompt_tokens",
+                                                 "output_tokens", "failed", "retries")])
+        console.print(table)
     runs = c.db.recent_runs(5)
     if runs:
         console.print("\n[bold]Recent runs[/]")
@@ -339,8 +352,9 @@ def new(c: Ctx, name: str, idea: str, genres: tuple, words: Optional[int]) -> No
 @main.command()
 @click.argument("name")
 @click.option("--chapters", default=1, show_default=True)
+@click.option("--fresh", is_flag=True, help="Ignore a checkpointed draft and generate from scratch.")
 @click.pass_obj
-def write(c: Ctx, name: str, chapters: int) -> None:
+def write(c: Ctx, name: str, chapters: int, fresh: bool) -> None:
     """Write the next chapter(s) of a project: draft -> score -> revise -> save."""
     from .write import WritePipeline
 
@@ -349,10 +363,13 @@ def write(c: Ctx, name: str, chapters: int) -> None:
         console.print(f"[red]LLM not reachable[/] ({pipe.llm.describe()}). Run `gauge doctor`.")
         sys.exit(1)
     p = pipe.open_project(name)
-    for res in pipe.write_many(p, chapters):
+    for res in pipe.write_many(p, chapters, fresh=fresh):
         console.print(f"[green]Chapter {res.number}[/] {res.title}  score={res.score:.2f} "
                       f"(measured {res.critique.measured:.2f} / judged {res.critique.judged:.2f}) "
-                      f"revisions={res.revisions}\n  -> {res.path}")
+                      f"revisions={res.revisions}{'  [resumed from checkpoint]' if res.resumed else ''}\n  -> {res.path}")
+        steps = "  ".join(f"{k} {v:.0f}s" for k, v in res.timings.items() if k != "total")
+        console.print(f"  timing: {steps}  | total {res.timings.get('total', 0):.0f}s, "
+                      f"{res.llm_calls} LLM calls ({res.llm_seconds:.0f}s in model)")
         if res.cast:
             console.print(f"  cast: {', '.join(res.cast)}  in-character consistency="
                           f"{sum(r.consistency for r in res.character_reviews) / len(res.character_reviews):.2f}"
@@ -586,6 +603,61 @@ def character_brief(c: Ctx, project: str, name: str, chapter: Optional[int]) -> 
              "cliffhanger": plan.cliffhanger, "beats": plan.beats, "summary": p.state.running_summary,
              "prev_tail": " ".join(prev.split()[-250:]) if prev else "", "others": [o for o in roster.names() if o != ch.name]}
     console.print(CharacterAgent(pipe.llm, ch).brief(scene).render())
+
+
+# ---------------------------------------------------------------------------- bench
+@main.command()
+@click.option("--tokens", default=200, show_default=True, help="Tokens to generate per measurement.")
+@click.option("--characters", "n_chars", default=4, show_default=True, help="Cast size to assume for the estimate.")
+@click.pass_obj
+def bench(c: Ctx, tokens: int, n_chars: int) -> None:
+    """Measure your models' speed and estimate minutes per chapter before you commit to a model."""
+    from .llm import make_llm
+    from .write.drafter import output_tokens_for
+
+    main_llm = make_llm(c.cfg.llm, "main")
+    if not main_llm.available():
+        console.print(f"[red]LLM not reachable[/] ({main_llm.describe()}).")
+        sys.exit(1)
+    fast_llm = make_llm(c.cfg.llm, "fast")
+    console.print(f"Measuring [bold]{main_llm.model}[/] (prose) ...")
+    m = main_llm.throughput(tokens)  # type: ignore[attr-defined]
+    if fast_llm.model != main_llm.model:
+        console.print(f"Measuring [bold]{fast_llm.model}[/] (JSON work) ...")
+        f = fast_llm.throughput(tokens)  # type: ignore[attr-defined]
+    else:
+        f = m
+    table = Table(title="Throughput")
+    for col in ("model", "generation tok/s", "prompt tok/s", "load s"):
+        table.add_column(col)
+    table.add_row(main_llm.model, str(m["generation_tps"]), str(m["prompt_tps"]), str(m["load_seconds"]))
+    if f is not m:
+        table.add_row(fast_llm.model, str(f["generation_tps"]), str(f["prompt_tps"]), str(f["load_seconds"]))
+    console.print(table)
+
+    # Estimate one chapter: draft + revisions on the main model, JSON work on the fast model.
+    w = c.cfg.write
+    gen = max(0.1, m["generation_tps"])
+    fgen = max(0.1, f["generation_tps"])
+    prompt_tps = max(50.0, m["prompt_tps"] or 500.0)
+    fprompt_tps = max(50.0, f["prompt_tps"] or 500.0)
+    out_tokens = w.target_chapter_words * 1.35
+    prompt_tokens = min(c.cfg.llm.num_ctx - output_tokens_for(w.target_chapter_words), 4500)
+    draft_s = out_tokens / gen + prompt_tokens / prompt_tps
+    revise_s = (out_tokens / gen + (prompt_tokens + out_tokens) / prompt_tps) * w.max_revisions
+    json_calls = 1 + w.max_revisions  # critic
+    json_calls += n_chars * (1 + 1 + 1) if w.characters_enabled else 0  # brief, review, memory
+    json_calls += 1  # summary
+    per_json = 250 / fgen + (1500 + out_tokens) / fprompt_tps
+    json_s = json_calls * per_json / max(1, min(c.cfg.llm.parallel, max(1, n_chars)))
+    total = draft_s + revise_s + json_s
+    console.print(f"\nEstimated per chapter ({w.target_chapter_words} words, {w.max_revisions} revisions, {n_chars} characters):")
+    console.print(f"  draft {draft_s / 60:.1f} min  revisions {revise_s / 60:.1f} min  JSON work {json_s / 60:.1f} min  "
+                  f"-> [bold]about {total / 60:.0f} min[/] (worst case; good drafts skip revisions)")
+    if f is m and c.cfg.llm.provider == "ollama":
+        console.print("  tip: set llm.fast_model to a 3B model (e.g. llama3.2:3b) to cut the JSON work by 2-3x.")
+    if c.cfg.llm.num_ctx < 8192:
+        console.print(f"  [yellow]num_ctx={c.cfg.llm.num_ctx} is small; prompts will be trimmed. 8192 is recommended.[/]")
 
 
 # ---------------------------------------------------------------------------- daemon

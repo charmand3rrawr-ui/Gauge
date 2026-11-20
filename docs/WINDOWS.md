@@ -33,6 +33,22 @@ do not need to change the system policy.
 
 Change at any time: `.\gauge.bat init --model qwen2.5:14b` then `ollama pull qwen2.5:14b`.
 
+## Making it fast
+
+1. `.\gauge.bat bench` measures your models and estimates minutes per chapter.
+2. Add a small model for JSON work: `ollama pull llama3.2:3b`, then set `"fast_model": "llama3.2:3b"`
+   under `llm` in `data\config.json`. Briefs, reviews, memory, critic and summaries move there;
+   the big model only writes prose. Typically 2-3x less time per chapter.
+3. Concurrency: the installer sets `OLLAMA_NUM_PARALLEL=4` for your user (restart the Ollama app
+   once). `llm.parallel` in the config should match it.
+4. Context: `llm.num_ctx` defaults to 8192. On an 8 GB card with a 8B model, set the user
+   environment variables `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0` so the KV
+   cache fits; otherwise Ollama will offload layers to CPU and slow down sharply.
+5. `llm.keep_alive` is `30m` so the daemon does not reload weights every cycle; `-1` keeps them
+   loaded forever.
+6. If a chapter dies halfway, just run `gauge write` again: the draft was checkpointed and is
+   resumed instead of regenerated.
+
 ## LM Studio instead of Ollama
 
 Start LM Studio's local server (default `http://localhost:1234`), load a model, then:

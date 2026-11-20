@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -9,7 +10,8 @@ from typing import Optional
 from ..config import GaugeConfig
 from ..db import Database
 from ..learn.trainer import Trainer
-from ..llm.client import LLM, extract_json, make_llm
+from ..llm.client import LLM, CallLog, generate_json, make_llm
+from ..llm.parallel import run_parallel
 from ..util import utcnow
 from . import prompts
 from .characters import (
@@ -26,6 +28,7 @@ from .critic import Critic, Critique
 from .drafter import Drafter
 from .planner import Planner
 from .project import Project
+from .schemas import SummaryOut, schema_of
 
 log = logging.getLogger(__name__)
 
@@ -40,13 +43,27 @@ class ChapterResult:
     critique: Critique
     cast: list[str] = field(default_factory=list)
     character_reviews: list[CharacterReview] = field(default_factory=list)
+    timings: dict[str, float] = field(default_factory=dict)  # seconds per step
+    llm_calls: int = 0
+    llm_seconds: float = 0.0
+    resumed: bool = False
 
 
 class WritePipeline:
-    def __init__(self, cfg: GaugeConfig, db: Database, llm: Optional[LLM] = None, trainer: Optional[Trainer] = None):
+    def __init__(self, cfg: GaugeConfig, db: Database, llm: Optional[LLM] = None, trainer: Optional[Trainer] = None,
+                 fast_llm: Optional[LLM] = None):
         self.cfg = cfg
         self.db = db
-        self.llm = llm or make_llm(cfg.llm)
+        self.calls = CallLog()
+        self.llm = llm or make_llm(cfg.llm, "main", self.calls)
+        if llm is not None:
+            llm.calls = self.calls  # share one log so timings cover everything
+        # Small model for JSON work (briefs, reviews, memory, critic, summaries); main model for prose.
+        self.fast_llm = fast_llm or (self.llm if llm is not None and cfg.llm.provider == "fake" else make_llm(cfg.llm, "fast", self.calls))
+        if fast_llm is not None:
+            fast_llm.calls = self.calls
+        self._ctx: dict[str, object] = {"project": "", "chapter": None}
+        self.calls.sink = self._log_call
         self.trainer = trainer or Trainer(cfg, db)
         self.model = self.trainer.load_model()
         self.exemplars = self.trainer.load_exemplars()
@@ -58,7 +75,11 @@ class WritePipeline:
         compact = compact_guide_for_prompt(self.guide) if self.guide else ""
         self.planner = Planner(self.llm, self.exemplars, compact)
         self.drafter = Drafter(self.llm, self.exemplars, compact, cfg.write.exemplars_in_prompt)
-        self.critic = Critic(self.llm, self.model)
+        self.critic = Critic(self.fast_llm, self.model)
+
+    def _log_call(self, rec) -> None:
+        self.db.log_call(rec.purpose, rec.model, rec.prompt_tokens, rec.output_tokens, rec.duration_ms, rec.ok, rec.retries,
+                         str(self._ctx.get("project") or ""), self._ctx.get("chapter"))  # type: ignore[arg-type]
 
     # ---- project setup -----------------------------------------------------
     def new_project(self, name: str, idea: str, genres: list[str], words: Optional[int] = None) -> Project:
@@ -113,24 +134,28 @@ class WritePipeline:
         if prev:
             texts.append(" ".join(prev.split()[-400:]))
         cast = roster.present_in(texts, limit=self.cfg.write.max_active_characters)
-        briefs: list[SceneBrief] = []
-        for c in cast:
+        def one(c: Character) -> SceneBrief:
             scene = {"number": plan.number, "title": plan.title, "goal": plan.goal, "hook": plan.hook, "turn": plan.turn,
                      "cliffhanger": plan.cliffhanger, "beats": plan.beats, "summary": project.state.running_summary,
                      "prev_tail": " ".join(prev.split()[-250:]) if prev else "",
                      "others": [o.name for o in cast if o is not c]}
-            briefs.append(CharacterAgent(self.llm, c).brief(scene))
-        return briefs
+            return CharacterAgent(self.fast_llm, c).brief(scene)
 
-    def _character_reviews(self, text: str, number: int, roster: Roster, cast_names: list[str]) -> list[CharacterReview]:
+        return [b for b in run_parallel(one, cast, self.cfg.llm.parallel, "scene brief") if b is not None]
+
+    def _worth_attention(self, c: Character, text: str) -> bool:
+        """Protagonist always; others only when they are really in the chapter, not name-dropped."""
+        return c.role == "protagonist" and c.mentioned_in(text) or c.mentions(text) >= self.cfg.write.min_mentions_for_review
+
+    def _character_reviews(self, text: str, number: int, roster: Roster, cast_names: list[str],
+                           only: Optional[set[str]] = None) -> list[CharacterReview]:
         if not self.cfg.write.character_review:
             return []
-        out = []
-        for name in cast_names:
-            c = roster.get(name)
-            if c is not None and c.mentioned_in(text):
-                out.append(CharacterAgent(self.llm, c).review(text, number))
-        return out
+        chars = [c for c in (roster.get(n) for n in cast_names) if c is not None and self._worth_attention(c, text)
+                 and (only is None or c.name in only)]
+        reviews = run_parallel(lambda c: CharacterAgent(self.fast_llm, c).review(text, number), chars,
+                               self.cfg.llm.parallel, "character review")
+        return [r for r in reviews if r is not None]
 
     @staticmethod
     def _consistency(reviews: list[CharacterReview]) -> float:
@@ -150,54 +175,101 @@ class WritePipeline:
         return Project(self.cfg.projects_dir, name)
 
     # ---- one chapter -------------------------------------------------------
-    def write_next(self, project: Project) -> ChapterResult:
+    def write_next(self, project: Project, fresh: bool = False) -> ChapterResult:
         n = project.next_chapter_number()
+        self._ctx = {"project": project.name, "chapter": n}
+        timings: dict[str, float] = {}
+        calls_before = len(self.calls.records)
+        secs_before = self.calls.total_seconds()
+        t_all = time.monotonic()
+
         plan = self.planner.ensure_plan(project, n)
         prev = project.read_chapter(n - 1) if n > 1 else None
         words = project.state.target_chapter_words
-
-        # Activate the characters who are in this scene: each thinks about it as themselves.
         roster = self.roster(project) if self.cfg.write.characters_enabled else Roster(project.dir)
-        briefs = self._activate_cast(project, plan, prev, roster) if roster.characters else []
-        cast_names = [b.name for b in briefs]
-        cast_text = render_cast(briefs, roster) if briefs else ""
 
-        text = self.drafter.draft(project, plan, prev, words, cast=cast_text)
+        # Resume from a checkpointed draft if the last run died after generating it.
+        ckpt = None if fresh else project.load_checkpoint(n)
+        resumed = False
+        if ckpt and ckpt.get("plan_title") == plan.title:
+            text = ckpt["text"]
+            cast_names = list(ckpt.get("cast", []))
+            revisions = int(ckpt.get("revisions", 0))
+            resumed = True
+            log.info("ch %d: resuming from checkpoint (%s, %d words)", n, ckpt.get("stage"), len(text.split()))
+        else:
+            # Activate the characters who are in this scene: each thinks about it as themselves.
+            t0 = time.monotonic()
+            briefs = self._activate_cast(project, plan, prev, roster) if roster.characters else []
+            timings["briefs"] = time.monotonic() - t0
+            cast_names = [b.name for b in briefs]
+            cast_text = render_cast(briefs, roster) if briefs else ""
+            t0 = time.monotonic()
+            text = self.drafter.draft(project, plan, prev, words, cast=cast_text)
+            timings["draft"] = time.monotonic() - t0
+            revisions = 0
+            if self.cfg.write.checkpoint_drafts:
+                project.save_checkpoint(n, "draft", text, {"plan_title": plan.title, "cast": cast_names, "revisions": 0})
+
+        t0 = time.monotonic()
         crit, reviews = self._critique(text, plan, n, roster, cast_names)
-        revisions = 0
+        timings["critique"] = time.monotonic() - t0
         best_text, best, best_reviews = text, crit, reviews
+        t_rev = 0.0
         while crit.score < self.cfg.write.min_acceptable_score and revisions < self.cfg.write.max_revisions:
             revisions += 1
             log.info("ch %d score %.2f < %.2f; revising (%d)", n, crit.score, self.cfg.write.min_acceptable_score, revisions)
             problems = self.critic.problems(crit) + self._character_problems(reviews)
+            t1 = time.monotonic()
             text = self.drafter.revise(text, problems, crit.measured_issues, words)
-            crit, reviews = self._critique(text, plan, n, roster, cast_names)
+            if self.cfg.write.checkpoint_drafts:
+                project.save_checkpoint(n, f"revision-{revisions}", text, {"plan_title": plan.title, "cast": cast_names,
+                                                                             "revisions": revisions})
+            # Only characters who had complaints are asked again; the others' verdicts stand.
+            flagged = {r.name for r in reviews if r.issues}
+            crit, new_reviews = self._critique(text, plan, n, roster, cast_names, only=flagged or None, previous=reviews)
+            reviews = new_reviews
+            t_rev += time.monotonic() - t1
             if crit.score > best.score:
                 best_text, best, best_reviews = text, crit, reviews
+        if t_rev:
+            timings["revise"] = t_rev
 
-        # Everyone who was on the page remembers it, in their own terms.
-        present = [c for c in roster.characters.values() if c.mentioned_in(best_text)]
-        for c in present:
-            CharacterAgent(self.llm, c).remember(best_text, n, roster)
+        # Everyone who was really on the page remembers it, in their own terms (in parallel).
+        t0 = time.monotonic()
+        present = [c for c in roster.characters.values() if self._worth_attention(c, best_text)]
+        run_parallel(lambda c: CharacterAgent(self.fast_llm, c).remember(best_text, n, roster), present,
+                     self.cfg.llm.parallel, "character memory")
         if roster.characters:
             roster.save()
+        self._update_memory(project, n, plan.title, best_text)
+        timings["memory"] = time.monotonic() - t0
 
         meta = {
             "title": plan.title, "score": round(best.score, 3), "measured": round(best.measured, 3),
             "judged": round(best.judged, 3), "rubric": best.rubric, "revisions": revisions,
             "words": len(best_text.split()), "written_at": utcnow().isoformat(),
             "cast": cast_names, "character_consistency": round(self._consistency(best_reviews), 3),
+            "resumed": resumed, "seconds": round(time.monotonic() - t_all, 1),
         }
         path = project.write_chapter(n, plan.title, best_text, meta)
-        self._update_memory(project, n, plan.title, best_text)
+        project.clear_checkpoint(n)
         project.save()
         self.db.record_generated(project.name, n, best.score, best.features)
+        timings["total"] = time.monotonic() - t_all
+        self._ctx = {"project": project.name, "chapter": None}
         return ChapterResult(number=n, title=plan.title, path=path, score=best.score, revisions=revisions, critique=best,
-                             cast=cast_names, character_reviews=best_reviews)
+                             cast=cast_names, character_reviews=best_reviews, timings=timings,
+                             llm_calls=len(self.calls.records) - calls_before,
+                             llm_seconds=round(self.calls.total_seconds() - secs_before, 1), resumed=resumed)
 
-    def _critique(self, text: str, plan, n: int, roster: Roster, cast_names: list[str]):
+    def _critique(self, text: str, plan, n: int, roster: Roster, cast_names: list[str],
+                  only: Optional[set[str]] = None, previous: Optional[list[CharacterReview]] = None):
         crit = self.critic.critique(text, plan)
-        reviews = self._character_reviews(text, n, roster, cast_names) if cast_names else []
+        reviews = self._character_reviews(text, n, roster, cast_names, only=only) if cast_names else []
+        if only is not None and previous:
+            redone = {r.name for r in reviews}
+            reviews = reviews + [r for r in previous if r.name not in redone]
         if reviews:
             w = self.cfg.write.character_weight
             crit.score = (1 - w) * crit.score + w * self._consistency(reviews)
@@ -207,7 +279,8 @@ class WritePipeline:
         prompt = prompts.SUMMARY_PROMPT.format(summary=project.state.running_summary or "(none)", number=n,
                                                title=title, text=text)
         try:
-            data = extract_json(self.llm.generate(prompt, json_mode=True, temperature=0.2, max_tokens=600))
+            data = generate_json(self.fast_llm, prompt, schema=schema_of(SummaryOut), temperature=0.2, max_tokens=600,
+                                 purpose="summary")
             if data.get("summary"):
                 project.state.running_summary = str(data["summary"])
             threads = data.get("open_threads")
@@ -217,8 +290,8 @@ class WritePipeline:
             log.warning("summary update failed: %s; appending raw tail", e)
             project.state.running_summary = (project.state.running_summary + f"\nCh {n}: " + " ".join(text.split()[:60]))[-2000:]
 
-    def write_many(self, project: Project, count: int) -> list[ChapterResult]:
-        return [self.write_next(project) for _ in range(count)]
+    def write_many(self, project: Project, count: int, fresh: bool = False) -> list[ChapterResult]:
+        return [self.write_next(project, fresh=fresh and i == 0) for i in range(count)]
 
     def status(self, project: Project) -> dict[str, object]:
         gens = self.db.generated(project.name)

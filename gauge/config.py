@@ -26,6 +26,15 @@ class LLMConfig(BaseModel):
     temperature: float = 0.9
     max_tokens: int = 3000
     timeout_seconds: int = 600
+    # Execution. num_ctx is sent on every call: Ollama's default (2-4k) silently truncates long
+    # prompts. 8192 fits a full draft prompt; raise it if you have the VRAM.
+    num_ctx: int = 8192
+    keep_alive: str = "30m"  # keep weights loaded between calls / daemon cycles ("-1" = forever)
+    fast_model: str = ""  # small model for JSON work (briefs, reviews, memory, critic); "" = main model
+    parallel: int = 4  # concurrent character calls; match OLLAMA_NUM_PARALLEL
+    retries: int = 3
+    retry_backoff_seconds: float = 2.0
+    structured_output: bool = True  # JSON-schema constrained output when the server supports it
 
 
 class IngestConfig(BaseModel):
@@ -53,6 +62,8 @@ class WriteConfig(BaseModel):
     max_active_characters: int = 5
     character_review: bool = True
     character_weight: float = 0.2  # share of the chapter score that comes from in-character consistency
+    min_mentions_for_review: int = 2  # characters named fewer times than this skip review/memory (protagonist never skips)
+    checkpoint_drafts: bool = True  # save raw drafts so a crash never loses a generation
 
 
 class DaemonConfig(BaseModel):

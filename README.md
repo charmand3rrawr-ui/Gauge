@@ -122,10 +122,31 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge report [--novel KEY]` | what was learned; explain one novel |
 | `gauge score FILE` | score a chapter file; percentiles vs corpus |
 | `gauge new NAME --idea ... --genre ...` | create a project: bible + outline |
-| `gauge write NAME [--chapters N]` | draft, score, revise, save |
+| `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
+| `gauge bench` | measure model speed; estimate minutes per chapter |
 | `gauge projects [NAME]` | list projects / status |
 | `gauge character new/roll/sync/list/show/set/brief/chat/remove` | characters as independent agents with personality matrices; see [docs/CHARACTERS.md](docs/CHARACTERS.md) |
 | `gauge daemon [--once] [--write] [--project P] [--every MIN]` | continuous loop |
+
+## Execution: speed and reliability
+
+- **Context window is explicit.** Every call sends `llm.num_ctx` (default 8192) and every draft
+  prompt is assembled against it: plan and previous ending first, then bible, summary, cast
+  briefs and exemplars while they fit. Nothing is left for the server to truncate.
+- **Two models.** Set `llm.fast_model` to a small model (e.g. `llama3.2:3b`) and all JSON work
+  (scene briefs, in-character reviews, memory, critic, summaries) runs there, while the main
+  model only writes and revises prose.
+- **Parallel characters.** Briefs, reviews and memory updates run `llm.parallel` at a time; the
+  installer sets `OLLAMA_NUM_PARALLEL=4`. Characters who are only name-dropped skip review, and
+  revisions re-review only the characters who had complaints.
+- **Retries and schema output.** Transient failures retry with backoff; JSON answers are
+  schema-constrained when the server supports it, fall back automatically when it does not, and
+  get one repair retry when they still fail to parse.
+- **Checkpoints.** Raw drafts are saved to `projects/<slug>/drafts/` before they are judged, so a
+  crash never loses a generation; the next `gauge write` resumes from them (`--fresh` to ignore).
+- **Telemetry.** Every call is logged with purpose, tokens and duration. `gauge write` prints
+  per-step timings, `gauge report` shows LLM time by purpose, and `gauge bench` measures your
+  models and estimates minutes per chapter before you commit to a model size.
 
 ## Using a different local model
 

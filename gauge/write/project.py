@@ -112,6 +112,44 @@ class Project:
             text = parts[2] if len(parts) == 3 else text
         return text.strip()
 
+    # ---- draft checkpoints -------------------------------------------------
+    @property
+    def drafts_dir(self) -> Path:
+        return self.dir / "drafts"
+
+    def checkpoint_path(self, n: int) -> Path:
+        return self.drafts_dir / f"chapter_{n:03d}.json"
+
+    def save_checkpoint(self, n: int, stage: str, text: str, extra: Optional[dict[str, Any]] = None) -> Path:
+        """Persist a raw draft before it is judged, so a crash costs nothing but the critique."""
+        self.drafts_dir.mkdir(parents=True, exist_ok=True)
+        p = self.checkpoint_path(n)
+        data: dict[str, Any] = {}
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                data = {}
+        data.update({"chapter": n, "stage": stage, "text": text, **(extra or {})})
+        data.setdefault("history", []).append(stage)
+        p.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        return p
+
+    def load_checkpoint(self, n: int) -> Optional[dict[str, Any]]:
+        p = self.checkpoint_path(n)
+        if not p.exists():
+            return None
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        return data if data.get("text") else None
+
+    def clear_checkpoint(self, n: int) -> None:
+        p = self.checkpoint_path(n)
+        if p.exists():
+            p.unlink()
+
     def next_chapter_number(self) -> int:
         return self.state.written + 1
 

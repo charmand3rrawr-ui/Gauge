@@ -71,6 +71,25 @@ cli.py           click commands
    - The chapter is saved as Markdown with front matter; the running summary and open threads
      are updated by the LLM; the score is logged in `generated`.
 
+## Execution model
+
+- `llm/tokens.py`: token estimation and `PromptBudget`; `Drafter.build_draft_prompt` fits every
+  section into `num_ctx - output - margin` in priority order (plan, previous tail, bible, summary,
+  cast, exemplars) and logs what it trimmed.
+- `llm/client.py`: `num_ctx` and `keep_alive` on every call, retries with backoff on 429/5xx and
+  connection errors, JSON-schema `format` with automatic fallback to plain JSON mode on a 400, and
+  a `CallRecord` per call into a thread-safe `CallLog` whose sink writes `llm_calls` rows.
+  `generate_json()` adds one low-temperature repair retry. `make_llm(cfg, "fast")` returns a
+  client on `fast_model` sharing the same log.
+- `llm/parallel.py`: `run_parallel` for briefs, reviews and memory updates, order-preserving,
+  one failure never cancels the rest.
+- `write/schemas.py`: pydantic models for every structured answer; prompts and contracts live
+  side by side.
+- Checkpoints: `Project.save_checkpoint` after the draft and after each revision; `write_next`
+  resumes when the checkpoint's plan title matches, clears it on acceptance.
+- Timings: `ChapterResult.timings` (briefs, draft, critique, revise, memory, total), plus call and
+  model-second counts; `gauge bench` uses measured tokens/s to estimate a chapter.
+
 ## Why these choices
 
 - **SQLite + JSON + Markdown**: zero services to run, trivially backed up, hand-editable.

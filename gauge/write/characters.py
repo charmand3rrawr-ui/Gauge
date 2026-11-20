@@ -24,9 +24,10 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from ..llm.client import LLM, extract_json
+from ..llm.client import LLM, generate_json
 from ..text import tail
 from . import prompts
+from .schemas import BriefOut, MemoryOut, ReviewOut, SheetOut, schema_of
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,10 @@ TRAIT_AXES = (
     "dominance", "warmth", "impulsivity", "honesty", "courage", "humor", "ambition", "loyalty",
     "curiosity", "cynicism",
 )
+
+
+_NOT_NAMES = {"the", "mr", "mrs", "ms", "miss", "dr", "doctor", "sir", "lady", "lord", "master", "mister",
+              "captain", "professor", "old", "young", "big", "little", "saint", "st", "king", "queen", "prince", "princess"}
 
 
 def _clamp(v: Any, lo: float = 0.0, hi: float = 1.0, default: float = 0.5) -> float:
@@ -245,8 +250,10 @@ class Character(BaseModel):
     # ---- detection ---------------------------------------------------------
     def _pattern(self) -> re.Pattern:
         names = [self.name] + [a for a in self.aliases if a]
-        first = self.name.split()[0] if self.name.split() else self.name
-        if len(first) >= 3 and first not in names:
+        parts = self.name.split()
+        first = parts[0] if parts else self.name
+        if (len(parts) > 1 and len(first) >= 3 and first not in names and first[0].isupper()
+                and first.lower().strip(".") not in _NOT_NAMES):
             names.append(first)
         alts = "|".join(re.escape(n) for n in sorted(set(names), key=len, reverse=True))
         return re.compile(rf"(?<![A-Za-z])(?:{alts})(?![A-Za-z])")
@@ -353,7 +360,8 @@ class Roster:
             return self.characters[s]
         low = name.lower()
         for c in self.characters.values():
-            if low == c.name.lower() or low in (a.lower() for a in c.aliases) or low == c.name.split()[0].lower():
+            first = c.name.split()[0].lower() if c.name.split() else ""
+            if low == c.name.lower() or low in (a.lower() for a in c.aliases) or (low == first and first not in _NOT_NAMES):
                 return c
         return None
 
@@ -441,8 +449,8 @@ class CharacterAgent:
             others=", ".join(scene.get("others", [])) or "(no one else named)",
         )
         try:
-            d = extract_json(self.llm.generate(prompt, system=self.c.system_prompt(), json_mode=True,
-                                               temperature=0.7, max_tokens=600))
+            d = generate_json(self.llm, prompt, system=self.c.system_prompt(), schema=schema_of(BriefOut),
+                              temperature=0.7, max_tokens=600, purpose="character:brief")
         except Exception as e:
             log.warning("scene brief failed for %s: %s", self.c.name, e)
             d = {}
@@ -462,8 +470,8 @@ class CharacterAgent:
     def review(self, chapter_text: str, number: int) -> CharacterReview:
         prompt = prompts.CHARACTER_REVIEW_PROMPT.format(number=number, name=self.c.name, text=chapter_text)
         try:
-            d = extract_json(self.llm.generate(prompt, system=self.c.system_prompt(), json_mode=True,
-                                               temperature=0.2, max_tokens=700))
+            d = generate_json(self.llm, prompt, system=self.c.system_prompt(), schema=schema_of(ReviewOut),
+                              temperature=0.2, max_tokens=700, purpose="character:review")
         except Exception as e:
             log.warning("character review failed for %s: %s", self.c.name, e)
             return CharacterReview(name=self.c.name)
@@ -479,8 +487,8 @@ class CharacterAgent:
         prompt = prompts.CHARACTER_MEMORY_PROMPT.format(number=number, name=self.c.name, text=chapter_text,
                                                         others=", ".join(roster.names()) if roster else "")
         try:
-            d = extract_json(self.llm.generate(prompt, system=self.c.system_prompt(), json_mode=True,
-                                               temperature=0.2, max_tokens=700))
+            d = generate_json(self.llm, prompt, system=self.c.system_prompt(), schema=schema_of(MemoryOut),
+                              temperature=0.2, max_tokens=700, purpose="character:memory")
         except Exception as e:
             log.warning("memory update failed for %s: %s; recording raw tail", self.c.name, e)
             d = {"events": [" ".join(tail(chapter_text, 40).split())]}
@@ -531,7 +539,8 @@ class CharacterAgent:
     def chat(self, question: str, history: Optional[list[tuple[str, str]]] = None) -> str:
         convo = "\n".join(f"Author: {q}\n{self.c.name}: {a}" for q, a in (history or []))
         prompt = prompts.CHARACTER_CHAT_PROMPT.format(name=self.c.name, history=convo or "(start of conversation)", question=question)
-        return self.llm.generate(prompt, system=self.c.system_prompt(), temperature=0.8, max_tokens=500).strip()
+        return self.llm.generate(prompt, system=self.c.system_prompt(), temperature=0.8, max_tokens=500,
+                                 purpose="character:chat").strip()
 
 
 def render_cast(briefs: list[SceneBrief], roster: Roster) -> str:
@@ -562,8 +571,11 @@ def character_from_sheet(name: str, d: dict[str, Any], role: str = "supporting",
         if k in d and k not in matrix_d:
             matrix_d[k] = d[k]
     state_d = d.get("state") if isinstance(d.get("state"), dict) else {}
+    full_name = str(d.get("name") or name)
+    aliases = [a for a in _as_list(d.get("aliases"), 6)
+               if len(a) >= 3 and a.lower().strip(".") not in _NOT_NAMES and a.lower() != full_name.lower()][:4]
     c = Character(
-        name=str(d.get("name") or name), aliases=_as_list(d.get("aliases"), 4),
+        name=full_name, aliases=aliases,
         role=str(d.get("role") or role), concept=str(d.get("concept") or concept),
         appearance=str(d.get("appearance", "") or ""), backstory=str(d.get("backstory", "") or ""),
         matrix=PersonalityMatrix.from_dict(matrix_d), voice=voice,
@@ -596,7 +608,8 @@ class CharacterCreator:
             if seed_matrix else "Choose trait values (0-1) that make this person specific, with at least three extremes.",
         )
         try:
-            d = extract_json(self.llm.generate(prompt, json_mode=True, temperature=0.9, max_tokens=1400))
+            d = generate_json(self.llm, prompt, schema=schema_of(SheetOut), temperature=0.9, max_tokens=1400,
+                              purpose="character:create")
         except Exception as e:
             log.warning("character sheet generation failed for %s: %s; using a rolled matrix", name, e)
             d = {}

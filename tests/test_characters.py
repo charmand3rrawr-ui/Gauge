@@ -73,7 +73,7 @@ def test_agent_brief_review_remember_chat(tmp_path):
     assert brief.goal == "get out with the bag" and "hand the bag over" in brief.refuses and "abandon Jun" in brief.refuses
     rendered = render_cast([brief], roster)
     assert "### Rin" in rendered and "will NOT:" in rendered and "friction with the plan" in rendered
-    assert llm.calls[-1]["system"].startswith("You are Rin")  # the agent speaks as the character, not the author
+    assert llm.calls_list[-1]["system"].startswith("You are Rin")  # the agent speaks as the character, not the author
     rev = agent.review("Okay, Rin said.", 1)
     assert rev.consistency == 0.8 and rev.issues[0].quote == "Okay"
     agent.remember("Rin ran. Jun waited.", 1, roster)
@@ -83,7 +83,7 @@ def test_agent_brief_review_remember_chat(tmp_path):
     assert abs(c.relationships["Jun"].affection - 0.55) < 1e-9 and c.relationships["Jun"].history[0].startswith("ch 1:")
     assert "One more time" in agent.chat("Why did you run?")
     # a failing LLM degrades gracefully
-    broken = FakeLLM(canned=["not json at all"])
+    broken = FakeLLM(canned=["not json at all", "still not json"])  # first answer and the repair retry both fail
     r2 = CharacterAgent(broken, c).review("x", 2)
     assert r2.consistency == 1.0 and r2.issues == []
 
@@ -119,7 +119,7 @@ def test_pipeline_activates_cast_and_updates_memory(cfg, db, chapter_text):
     assert roster.get("Rin").role == "protagonist" and roster.get("The Broker").role == "supporting"
     res = pipe.write_next(p)
     assert "Rin" in res.cast
-    draft_prompt = next(c["prompt"] for c in llm.calls if "CAST IN THIS SCENE" in c["prompt"])
+    draft_prompt = next(c["prompt"] for c in llm.calls_list if "CAST IN THIS SCENE" in c["prompt"])
     assert "### Rin" in draft_prompt and "will NOT:" in draft_prompt
     assert res.character_reviews and res.character_reviews[0].consistency == 0.8
     front = res.path.read_text(encoding="utf-8")
@@ -129,7 +129,7 @@ def test_pipeline_activates_cast_and_updates_memory(cfg, db, chapter_text):
     assert rin.state.last_seen_chapter == 1 and rin.state.mood == "shaken" and rin.state.memories
     assert (p.dir / "characters.md").exists()
     # character problems were fed into revision prompts
-    revise_prompts = [c["prompt"] for c in llm.calls if "Revise the chapter below" in c["prompt"]]
+    revise_prompts = [c["prompt"] for c in llm.calls_list if "Revise the chapter below" in c["prompt"]]
     assert revise_prompts and any("out of character" in rp for rp in revise_prompts)
     # a hand-made character shows up when the outline names them
     pipe.create_character(p, "Marina Vale", "a fence who sells rewound goods", "antagonist", seed=5)

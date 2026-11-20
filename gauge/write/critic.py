@@ -7,10 +7,11 @@ from typing import Optional
 
 from ..features import chapter_features
 from ..learn.engagement import EngagementModel
-from ..llm.client import LLM, extract_json
+from ..llm.client import LLM, generate_json
 from ..models import ChapterRecord
 from . import prompts
 from .project import ChapterPlan
+from .schemas import CriticOut, schema_of
 
 log = logging.getLogger(__name__)
 
@@ -70,8 +71,8 @@ class Critic:
     def _judged(self, text: str, plan: ChapterPlan) -> (float, dict[str, float], str):  # type: ignore[valid-type]
         prompt = prompts.CRITIC_PROMPT.format(hook=plan.hook, turn=plan.turn, cliffhanger=plan.cliffhanger, text=text)
         try:
-            raw = self.llm.generate(prompt, json_mode=True, temperature=0.2, max_tokens=400)
-            data = extract_json(raw)
+            data = generate_json(self.llm, prompt, schema=schema_of(CriticOut), temperature=0.2, max_tokens=400,
+                                 purpose="critic")
         except Exception as e:
             log.warning("critic LLM failed: %s", e)
             return 0.6, {}, ""

@@ -69,6 +69,11 @@ CREATE TABLE IF NOT EXISTS runs (
     finished_at TEXT,
     summary TEXT
 );
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT, project TEXT, chapter INTEGER, purpose TEXT, model TEXT,
+    prompt_tokens INTEGER, output_tokens INTEGER, duration_ms INTEGER, ok INTEGER, retries INTEGER
+);
 CREATE TABLE IF NOT EXISTS generated (
     project TEXT NOT NULL,
     chapter INTEGER NOT NULL,
@@ -293,6 +298,38 @@ class Database:
         for r in rows:
             d = dict(r)
             d["summary"] = json.loads(d["summary"] or "{}")
+            out.append(d)
+        return out
+
+    # ---- llm telemetry -----------------------------------------------------
+    def log_call(self, purpose: str, model: str, prompt_tokens: int, output_tokens: int, duration_ms: int, ok: bool,
+                 retries: int = 0, project: str = "", chapter: Optional[int] = None) -> None:
+        with self.tx() as c:
+            c.execute("INSERT INTO llm_calls (ts, project, chapter, purpose, model, prompt_tokens, output_tokens, "
+                      "duration_ms, ok, retries) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                      (utcnow().isoformat(), project, chapter, purpose, model, prompt_tokens, output_tokens, duration_ms,
+                       1 if ok else 0, retries))
+
+    def call_summary(self, project: Optional[str] = None, limit_days: Optional[int] = None) -> list[dict[str, Any]]:
+        """Totals by purpose: calls, seconds, tokens, failures, average seconds per call."""
+        q = ("SELECT purpose, model, COUNT(*) AS calls, SUM(duration_ms)/1000.0 AS seconds, SUM(prompt_tokens) AS prompt_tokens, "
+             "SUM(output_tokens) AS output_tokens, SUM(CASE WHEN ok=0 THEN 1 ELSE 0 END) AS failed, SUM(retries) AS retries "
+             "FROM llm_calls")
+        where, args = [], []
+        if project:
+            where.append("project=?")
+            args.append(project)
+        if limit_days:
+            where.append("ts >= datetime('now', ?)")
+            args.append(f"-{int(limit_days)} days")
+        if where:
+            q += " WHERE " + " AND ".join(where)
+        q += " GROUP BY purpose, model ORDER BY seconds DESC"
+        out = []
+        for r in self._conn.execute(q, args):
+            d = dict(r)
+            d["avg_seconds"] = round(d["seconds"] / max(1, d["calls"]), 1)
+            d["seconds"] = round(d["seconds"], 1)
             out.append(d)
         return out
 

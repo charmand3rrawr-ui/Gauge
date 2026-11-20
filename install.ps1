@@ -54,6 +54,12 @@ if (-not $SkipOllama) {
   }
 }
 
+Step "Tuning Ollama for concurrent character calls"
+if (-not [Environment]::GetEnvironmentVariable("OLLAMA_NUM_PARALLEL", "User")) {
+  [Environment]::SetEnvironmentVariable("OLLAMA_NUM_PARALLEL", "4", "User")
+  Write-Host "Set OLLAMA_NUM_PARALLEL=4 for your user. Restart the Ollama app once for it to take effect." -ForegroundColor Yellow
+}
+
 Step "Initialising data directory"
 & $venvPy -m gauge.cli init --provider ollama --model $Model
 & $venvPy -m gauge.cli doctor

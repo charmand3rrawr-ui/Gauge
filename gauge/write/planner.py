@@ -5,9 +5,10 @@ import logging
 from typing import Optional
 
 from ..learn.exemplars import ExemplarLibrary
-from ..llm.client import LLM, extract_json
+from ..llm.client import LLM, generate_json
 from . import prompts
 from .project import Bible, ChapterPlan, Project
+from .schemas import BibleOut, OutlineOut, schema_of
 
 log = logging.getLogger(__name__)
 
@@ -20,8 +21,8 @@ class Planner:
 
     def build_bible(self, project: Project) -> Bible:
         prompt = prompts.BIBLE_PROMPT.format(idea=project.state.seed_idea, genres=", ".join(project.state.genres))
-        raw = self.llm.generate(prompt, system=self.system, json_mode=True, temperature=0.9)
-        data = extract_json(raw)
+        data = generate_json(self.llm, prompt, system=self.system, schema=schema_of(BibleOut), temperature=0.9,
+                             max_tokens=1600, purpose="bible")
         bible = Bible(
             premise=str(data.get("premise", "")), protagonist=str(data.get("protagonist", "")),
             world=str(data.get("world", "")), stakes=str(data.get("stakes", "")),
@@ -51,8 +52,8 @@ class Planner:
             threads="\n".join(f"- {t}" for t in project.state.open_threads) or "(none)",
             ending_exemplars=self._ending_exemplars(project, exemplar_k),
         )
-        raw = self.llm.generate(prompt, system=self.system, json_mode=True, temperature=0.8)
-        data = extract_json(raw)
+        data = generate_json(self.llm, prompt, system=self.system, schema=schema_of(OutlineOut), temperature=0.8,
+                             max_tokens=1800, purpose="outline")
         plans: list[ChapterPlan] = []
         for i, c in enumerate(data.get("chapters", [])):
             try:
