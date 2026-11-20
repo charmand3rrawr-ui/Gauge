@@ -76,6 +76,27 @@ class WriteConfig(BaseModel):
     novelty_weight: float = 0.15  # share of the chapter score from novelty against earlier chapters
 
 
+class AgentsConfig(BaseModel):
+    """Independent story agents (the writing room). Each may be switched off; `profile` is a shortcut."""
+
+    profile: str = "full"  # full | lean (cheap agents only) | off
+    weight: float = 0.25  # share of the chapter score that comes from the council
+    reader_panel: bool = True
+    showrunner: bool = True
+    archivist: bool = True
+    schemer: bool = True
+    line_editor: bool = True
+    packager: bool = True
+    theme_keeper: bool = True
+    sensitivity: bool = True
+    pacing: bool = True
+    librarian: bool = True
+    comedian: bool = True  # attaches only when the genre or tone is comic
+    sensitivity_rules: str = ""  # your platform's content rules, pasted
+    sensitivity_categories: list[str] = Field(default_factory=list)
+    block_on_sensitivity: bool = False  # severe flags force a revision instead of a warning
+
+
 class DaemonConfig(BaseModel):
     cycle_minutes: int = 180
     write_after_learning: bool = False
@@ -89,6 +110,7 @@ class GaugeConfig(BaseModel):
     learn: LearnConfig = Field(default_factory=LearnConfig)
     write: WriteConfig = Field(default_factory=WriteConfig)
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
+    agents: AgentsConfig = Field(default_factory=AgentsConfig)
 
     # ---- paths -------------------------------------------------------------
     @property

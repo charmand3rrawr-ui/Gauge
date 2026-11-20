@@ -217,7 +217,7 @@ def test_studio_controller_flow(cfg, db, chapter_text):
     assert name == "A kid who finds"
     assert ctl.start_story("A kid who finds a dragon egg in the school lost-and-found") == "A kid who finds 2"  # no clobbering
     info = ctl.write_next(name)
-    assert info["number"] == 1 and ctl.chapters(name) == [(1, "Chapter 1")]
+    assert info["number"] == 1 and ctl.chapters(name) == [(1, "Ten Seconds")]  # the Packager retitled the generic "Chapter 1"
     assert ctl.read(name, 1).startswith("# Chapter 1") and "not been written" in ctl.read(name, 9)
     assert "Rin" in ctl.characters(name)
     assert "One more time" in ctl.chat(name, "Rin", "why?") and "don't know anyone" in ctl.chat(name, "Zed", "?")

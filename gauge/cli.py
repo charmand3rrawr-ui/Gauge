@@ -448,6 +448,11 @@ def write(c: Ctx, name: str, chapters: int, fresh: bool) -> None:
             console.print("  " + "  ".join(extras))
         if res.novelty and res.novelty.overused:
             console.print("  worn phrases: " + ", ".join(f'"{p}"' for p in res.novelty.overused[:4]))
+        if res.agent_reviews:
+            console.print("  room: " + "  ".join(f"{r.agent} {r.score:.2f}" for r in res.agent_reviews))
+            for r in res.agent_reviews:
+                for i in r.issues[:1]:
+                    console.print(f"    {r.agent}: {i[:140]}")
         if res.critique.notes:
             console.print(f"  editor: {res.critique.notes}")
 
@@ -853,6 +858,181 @@ def world_promote(c: Ctx, project: str, tag: str, name: str, role: str) -> None:
     roster.save()
     console.print(f"[green]Promoted[/] {f.tag} -> {ch.name} ({ch.role})")
     console.print(ch.sheet_markdown())
+
+
+# ---------------------------------------------------------------------------- agents (the writing room)
+@main.group()
+def agents() -> None:
+    """The writing room: reader panel, showrunner, archivist, schemer, line editor, packager, theme keeper,
+    sensitivity reader, pacing director, librarian, comedian."""
+
+
+def _council(c: Ctx, project: str):
+    pipe = _pipeline_or_exit(c)
+    p = pipe.open_project(project)
+    return pipe, p, pipe.council(p)
+
+
+@agents.command("list")
+@click.argument("project", required=False)
+@click.pass_obj
+def agents_list(c: Ctx, project: Optional[str]) -> None:
+    """Which agents are on, and (for a project) a one-line state each."""
+    from .write.agents import ALL_AGENTS
+
+    a = c.cfg.agents
+    table = Table(title=f"Agents (profile: {a.profile}, council weight {a.weight})")
+    for col in ("agent", "enabled", "state"):
+        table.add_column(col)
+    council = None
+    if project:
+        _, _, council = _council(c, project)
+    for name, cls in ALL_AGENTS.items():
+        on = getattr(a, name, True) and a.profile != "off"
+        state = ""
+        if council is not None:
+            ag = council.get(name)
+            state = (ag.report().splitlines() or [""])[0][:90] if ag else "(not attached)"
+        table.add_row(cls.title, "yes" if on else "no", state)
+    console.print(table)
+
+
+@agents.command("show")
+@click.argument("project")
+@click.argument("name")
+@click.pass_obj
+def agents_show(c: Ctx, project: str, name: str) -> None:
+    """Full report of one agent's state for a project."""
+    _, _, council = _council(c, project)
+    ag = council.get(name)
+    if ag is None:
+        console.print(f"[red]no agent {name!r}[/]; have: {', '.join(council.names())}")
+        sys.exit(1)
+    console.print(f"[bold]{ag.title}[/]\n{ag.report()}")
+
+
+@agents.command("enable")
+@click.argument("name")
+@click.pass_obj
+def agents_enable(c: Ctx, name: str) -> None:
+    """Turn an agent on (saved to config). NAME may also be a profile: full, lean, off."""
+    _toggle(c, name, True)
+
+
+@agents.command("disable")
+@click.argument("name")
+@click.pass_obj
+def agents_disable(c: Ctx, name: str) -> None:
+    """Turn an agent off (saved to config)."""
+    _toggle(c, name, False)
+
+
+def _toggle(c: Ctx, name: str, on: bool) -> None:
+    from .write.agents import ALL_AGENTS
+
+    if name in ("full", "lean", "off"):
+        c.cfg.agents.profile = name
+    elif name in ALL_AGENTS:
+        setattr(c.cfg.agents, name, on)
+    else:
+        raise click.BadParameter(f"unknown agent {name!r}; agents: {', '.join(ALL_AGENTS)}; profiles: full, lean, off")
+    c.cfg.save()
+    console.print(f"[green]saved[/] agents.{name if name not in ('full', 'lean', 'off') else 'profile'} = {on if name not in ('full', 'lean', 'off') else name}")
+
+
+@agents.command("setup")
+@click.argument("project")
+@click.pass_obj
+def agents_setup(c: Ctx, project: str) -> None:
+    """Attach the enabled agents to an existing project (schemer, theme keeper build their state)."""
+    pipe = _pipeline_or_exit(c)
+    names = pipe.setup_agents(pipe.open_project(project))
+    console.print(f"[green]attached[/] {', '.join(names)}")
+
+
+@main.command()
+@click.argument("project")
+@click.argument("question", required=False)
+@click.option("--subject", default=None, help="List facts about a subject instead of asking.")
+@click.pass_obj
+def canon(c: Ctx, project: str, question: Optional[str], subject: Optional[str]) -> None:
+    """Ask the Archivist what is true in the story, or list canon facts."""
+    _, _, council = _council(c, project)
+    ag = council.get("archivist")
+    if ag is None:
+        console.print("[yellow]archivist is disabled[/]")
+        sys.exit(1)
+    if subject:
+        for f in ag.lookup(subject):
+            console.print(f"ch {f.chapter}: {f.subject} / {f.attribute} = {f.value}")
+        return
+    if not question:
+        console.print(ag.report())
+        return
+    console.print(ag.ask(question))
+
+
+@main.command()
+@click.argument("project")
+@click.pass_obj
+def ledger(c: Ctx, project: str) -> None:
+    """The Showrunner's ledger of promises and payoffs."""
+    _, _, council = _council(c, project)
+    ag = council.get("showrunner")
+    console.print(ag.report() if ag else "[yellow]showrunner is disabled[/]")
+
+
+@main.command()
+@click.argument("project")
+@click.pass_obj
+def readers(c: Ctx, project: str) -> None:
+    """What the Reader Panel predicted for recent chapters, and how calibrated it is."""
+    _, _, council = _council(c, project)
+    ag = council.get("reader_panel")
+    console.print(ag.report() if ag else "[yellow]reader panel is disabled[/]")
+
+
+@main.command()
+@click.argument("project")
+@click.argument("chapter", type=int)
+@click.option("--views", type=float, default=None)
+@click.option("--comments", type=float, default=None)
+@click.pass_obj
+def feedback(c: Ctx, project: str, chapter: int, views: Optional[float], comments: Optional[float]) -> None:
+    """Record real reader numbers for a posted chapter; the Reader Panel calibrates itself against them."""
+    _, _, council = _council(c, project)
+    ag = council.get("reader_panel")
+    if ag is None:
+        console.print("[yellow]reader panel is disabled[/]")
+        sys.exit(1)
+    ag.record_actual(chapter, views, comments)
+    ag.save()
+    console.print(f"[green]recorded[/] ch {chapter}: views={views} comments={comments}  calibration={ag.calibration()}")
+
+
+@main.command()
+@click.argument("project")
+@click.pass_obj
+def package(c: Ctx, project: str) -> None:
+    """Blurb, tagline and tags for the serial, from the Packager."""
+    _, p, council = _council(c, project)
+    ag = council.get("packager")
+    if ag is None:
+        console.print("[yellow]packager is disabled[/]")
+        sys.exit(1)
+    out = ag.package(p)
+    console.print(f"[bold]{out['tagline']}[/]\n\n{out['blurb']}\n\nTags: {', '.join(out['tags'])}")
+
+
+@main.command()
+@click.argument("project")
+@click.argument("question")
+@click.pass_obj
+def research(c: Ctx, project: str, question: str) -> None:
+    """Search your project's research/ notes and premise (the Librarian)."""
+    _, _, council = _council(c, project)
+    ag = council.get("librarian")
+    console.print(ag.ask(question) if ag else "[yellow]librarian is disabled[/]")
 
 
 # ---------------------------------------------------------------------------- gui

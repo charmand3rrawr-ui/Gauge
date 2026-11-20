@@ -93,6 +93,9 @@ your own way, never the same words or situation):
 PHRASES AND SHAPES TO AVOID (this story has already used them; find fresh ones):
 {avoid}
 
+NOTES FROM THE WRITING ROOM (showrunner, archivist, opposition, readers, pacing, theme, research):
+{council}
+
 Write the chapter now. Prose only. No title, no notes, no headings. Pick up exactly where the
 previous chapter ended if there was one. Make the first sentence impossible to skim past and the
 last paragraph impossible to stop at."""

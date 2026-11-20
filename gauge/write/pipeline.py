@@ -16,6 +16,7 @@ from ..llm.parallel import run_parallel
 from ..llm.tokens import truncate_to_tokens
 from ..util import utcnow
 from . import prompts
+from .agents import AgentCouncil, AgentReview, SceneContext, build_council
 from .characters import (
     Character,
     CharacterAgent,
@@ -49,6 +50,7 @@ class ChapterResult:
     character_reviews: list[CharacterReview] = field(default_factory=list)
     world_review: Optional[WorldReview] = None
     novelty: Optional[NoveltyReport] = None
+    agent_reviews: list[AgentReview] = field(default_factory=list)
     timings: dict[str, float] = field(default_factory=dict)  # seconds per step
     llm_calls: int = 0
     llm_seconds: float = 0.0
@@ -107,6 +109,7 @@ class WritePipeline:
             self.sync_characters(p)
         if self.cfg.write.world_enabled:
             self.build_world(p)
+        self.setup_agents(p)
         self.planner.extend_outline(p, count=5)
         return p
 
@@ -144,6 +147,15 @@ class WritePipeline:
         project.save()
         return len(chapters)
 
+    # ---- the writing room --------------------------------------------------
+    def council(self, project: Project) -> AgentCouncil:
+        return build_council(self.cfg, self.fast_llm, project, embedder=self.trainer.embedder)
+
+    def setup_agents(self, project: Project) -> list[str]:
+        c = self.council(project)
+        c.setup(project)
+        return c.names()
+
     # ---- world -------------------------------------------------------------
     def world(self, project: Project) -> Optional[WorldState]:
         return load_world(project.dir) if self.cfg.write.world_enabled else None
@@ -165,14 +177,20 @@ class WritePipeline:
 
     # ---- creativity --------------------------------------------------------
     def _pick_direction(self, project: Project) -> str:
+        notes = ""
+        try:
+            notes = self.council(project).plan_notes(project)
+        except Exception as e:
+            log.warning("council plan notes failed: %s", e)
         d = self.muse.choose(project.bible_markdown(), project.state.running_summary, project.state.open_threads,
                              project.state.past_directions, self.cfg.write.muse_directions)
         if d is None:
-            return ""
+            return notes
         project.state.past_directions.append(d.pitch)
         project.state.past_directions = project.state.past_directions[-20:]
         log.info("muse chose: %s (%s)", d.title, direction_record(d))
-        return f"{d.title}: {d.pitch}" + (f" Fresh because {d.fresh_because}" if d.fresh_because else "")
+        text = f"{d.title}: {d.pitch}" + (f" Fresh because {d.fresh_because}" if d.fresh_because else "")
+        return text + (f"\nConstraints from the writing room:\n{notes}" if notes else "")
 
     def _technique_cards(self, plan) -> str:
         if not self.techniques.items or self.cfg.write.techniques_in_prompt <= 0:
@@ -292,6 +310,9 @@ class WritePipeline:
         roster = self.roster(project) if self.cfg.write.characters_enabled else Roster(project.dir)
         world_state = self.world(project)
         previous_texts = project.previous_texts(n)
+        council = self.council(project)
+        ctx = SceneContext(project=project, number=n, plan=plan, prev_tail=" ".join(prev.split()[-250:]) if prev else "",
+                           summary=project.state.running_summary, genres=project.state.genres)
 
         # Resume from a checkpointed draft if the last run died after generating it.
         ckpt = None if fresh else project.load_checkpoint(n)
@@ -315,23 +336,29 @@ class WritePipeline:
                 world_text = self._world_brief(project, plan, world_state, briefs).render()
                 timings["world"] = time.monotonic() - t0
             avoid_text, _prev_texts = self._avoid_list(project, n)
+            ctx.cast_text, ctx.world_text = cast_text, world_text
+            t0 = time.monotonic()
+            council_text = council.brief(ctx) if council.agents else ""
+            timings["council"] = time.monotonic() - t0
             t0 = time.monotonic()
             text = self.drafter.draft(project, plan, prev, words, cast=cast_text, world=world_text,
-                                      techniques=self._technique_cards(plan), avoid=avoid_text)
+                                      techniques=self._technique_cards(plan), avoid=avoid_text, council=council_text)
             timings["draft"] = time.monotonic() - t0
             revisions = 0
             if self.cfg.write.checkpoint_drafts:
                 project.save_checkpoint(n, "draft", text, {"plan_title": plan.title, "cast": cast_names, "revisions": 0})
 
         t0 = time.monotonic()
-        crit, reviews, wrev, nov = self._critique(text, plan, n, roster, cast_names, world_state, previous_texts)
+        crit, reviews, wrev, nov, agent_revs = self._critique(text, plan, n, roster, cast_names, world_state, previous_texts,
+                                                              council=council, ctx=ctx)
         timings["critique"] = time.monotonic() - t0
-        best_text, best, best_reviews, best_wrev, best_nov = text, crit, reviews, wrev, nov
+        best_text, best, best_reviews, best_wrev, best_nov, best_agents = text, crit, reviews, wrev, nov, agent_revs
         t_rev = 0.0
         while crit.score < self.cfg.write.min_acceptable_score and revisions < self.cfg.write.max_revisions:
             revisions += 1
             log.info("ch %d score %.2f < %.2f; revising (%d)", n, crit.score, self.cfg.write.min_acceptable_score, revisions)
-            problems = self.critic.problems(crit) + self._character_problems(reviews) + self._world_problems(wrev) + (nov.notes if nov else [])
+            problems = (self.critic.problems(crit) + self._character_problems(reviews) + self._world_problems(wrev)
+                        + (nov.notes if nov else []) + AgentCouncil.problems(agent_revs))
             t1 = time.monotonic()
             text = self.drafter.revise(text, problems, crit.measured_issues, words)
             if self.cfg.write.checkpoint_drafts:
@@ -339,12 +366,12 @@ class WritePipeline:
                                                                              "revisions": revisions})
             # Only characters who had complaints are asked again; the others' verdicts stand.
             flagged = {r.name for r in reviews if r.issues}
-            crit, new_reviews, wrev, nov = self._critique(text, plan, n, roster, cast_names, world_state, previous_texts,
-                                                          only=flagged or None, previous=reviews)
+            crit, new_reviews, wrev, nov, agent_revs = self._critique(text, plan, n, roster, cast_names, world_state, previous_texts,
+                                                                      only=flagged or None, previous=reviews, council=council, ctx=ctx)
             reviews = new_reviews
             t_rev += time.monotonic() - t1
             if crit.score > best.score:
-                best_text, best, best_reviews, best_wrev, best_nov = text, crit, reviews, wrev, nov
+                best_text, best, best_reviews, best_wrev, best_nov, best_agents = text, crit, reviews, wrev, nov, agent_revs
         if t_rev:
             timings["revise"] = t_rev
 
@@ -362,7 +389,14 @@ class WritePipeline:
             if promotable:
                 log.info("recurring extras worth promoting to characters: %s (gauge world promote)", ", ".join(promotable))
         self._update_memory(project, n, plan.title, best_text)
+        if council.agents:
+            # Re-run the cheap deterministic parts on the accepted text so memories match what was saved.
+            council.remember(best_text, ctx)
         timings["memory"] = time.monotonic() - t0
+        new_title = council.retitle(best_text, plan, n) if council.agents else None
+        if new_title:
+            log.info("packager retitled ch %d: %r -> %r", n, plan.title, new_title)
+            plan.title = new_title
 
         meta = {
             "title": plan.title, "score": round(best.score, 3), "measured": round(best.measured, 3),
@@ -372,6 +406,8 @@ class WritePipeline:
             "world_consistency": round(best_wrev.consistency, 3) if best_wrev else None,
             "novelty": round(best_nov.score, 3) if best_nov else None,
             "direction": project.state.current_direction[:120],
+            "agents": AgentCouncil.summary(best_agents),
+            "content_flags": next((r.data.get("flags", []) for r in best_agents if r.agent == "sensitivity"), []),
             "resumed": resumed, "seconds": round(time.monotonic() - t_all, 1),
         }
         path = project.write_chapter(n, plan.title, best_text, meta)
@@ -382,13 +418,14 @@ class WritePipeline:
         self._ctx = {"project": project.name, "chapter": None}
         return ChapterResult(number=n, title=plan.title, path=path, score=best.score, revisions=revisions, critique=best,
                              cast=cast_names, character_reviews=best_reviews, world_review=best_wrev, novelty=best_nov,
-                             timings=timings,
+                             agent_reviews=best_agents, timings=timings,
                              llm_calls=len(self.calls.records) - calls_before,
                              llm_seconds=round(self.calls.total_seconds() - secs_before, 1), resumed=resumed)
 
     def _critique(self, text: str, plan, n: int, roster: Roster, cast_names: list[str],
                   world_state: Optional[WorldState] = None, previous_texts: Optional[list[str]] = None,
-                  only: Optional[set[str]] = None, previous: Optional[list[CharacterReview]] = None):
+                  only: Optional[set[str]] = None, previous: Optional[list[CharacterReview]] = None,
+                  council: Optional[AgentCouncil] = None, ctx: Optional[SceneContext] = None):
         crit = self.critic.critique(text, plan)
         reviews = self._character_reviews(text, n, roster, cast_names, only=only) if cast_names else []
         if only is not None and previous:
@@ -407,7 +444,14 @@ class WritePipeline:
             nov = self.novelty.report(text, previous_texts)
             w = self.cfg.write.novelty_weight
             crit.score = (1 - w) * crit.score + w * nov.score
-        return crit, reviews, wrev, nov
+        agent_revs: list[AgentReview] = []
+        if council is not None and council.agents and ctx is not None:
+            agent_revs = council.review(text, ctx)
+            cs = council.score(agent_revs)
+            if cs is not None:
+                w = council.weight
+                crit.score = (1 - w) * crit.score + w * cs
+        return crit, reviews, wrev, nov, agent_revs
 
     @staticmethod
     def _world_problems(wrev: Optional[WorldReview]) -> list[str]:

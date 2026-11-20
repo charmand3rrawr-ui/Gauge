@@ -1,0 +1,40 @@
+"""Canned answers for the offline FakeLLM, keyed by (agent, op). Data only; no imports of the
+LLM layer so there is no import cycle."""
+from __future__ import annotations
+
+FAKE_AGENT_RESPONSES: dict[tuple[str, str], dict] = {
+    ("reader_panel", "brief"): {"hopes": ["the binge reader wants to know who wrote the name", "the lore-hound wants the rewind rules tested"],
+                                "fears": ["the skimmer will bail if the chapter opens on description"]},
+    ("reader_panel", "review"): {"readers": [
+        {"persona": "binge", "click_next": 0.9, "stop_at": "", "comment": "ONE MORE TIME lol, next!", "mood": "hooked"},
+        {"persona": "skimmer", "click_next": 0.7, "stop_at": "", "comment": "", "mood": "fine"},
+        {"persona": "lore", "click_next": 0.8, "stop_at": "", "comment": "wait so does the rewind reset the bag too?", "mood": "curious"},
+        {"persona": "commenter", "click_next": 0.6, "stop_at": "The courier bag was already humming", "comment": "why is she so calm", "mood": "mixed"},
+        {"persona": "hostile", "click_next": 0.4, "stop_at": "it was her own voice", "comment": "plot hole: how does she hear herself", "mood": "annoyed"}]},
+    ("showrunner", "remember"): {"planted": [{"text": "who wrote Rin's name on the wall", "kind": "question", "due_in": 4}],
+                                 "paid": [], "advanced": ["the debt"]},
+    ("showrunner", "review"): {"advanced": ["the debt"], "paid": [], "stalling": False, "notes": "the name on the wall is a strong plant"},
+    ("archivist", "remember"): {"facts": [{"subject": "Rin", "attribute": "eye colour", "value": "grey", "quote": "her grey eyes"},
+                                          {"subject": "the courier bag", "attribute": "state", "value": "humming, seal whole", "quote": "the seal was whole again"}]},
+    ("archivist", "review"): {"facts": [{"subject": "Rin", "attribute": "eye colour", "value": "brown", "quote": "her brown eyes"}]},
+    ("archivist", "ask"): {"answer": "Rin's eyes are grey (chapter 1).", "confidence": 0.9},
+    ("schemer", "setup"): {"antagonist": "The Broker", "goal": "own Rin's rewind", "resources": ["debt papers", "two enforcers", "the vendor"],
+                           "knows": ["Rin carries sealed bags", "Rin has a sister"], "scheme": ["break a seal to test her", "call the debt early", "take Jun"],
+                           "exposure": "Rin suspects nothing"},
+    ("schemer", "brief"): {"visible": "an enforcer watches the alley from the noodle shop", "hidden": "the Broker ordered the seal broken",
+                           "next_move": "call the debt early", "wants_protagonist_to": "panic and run"},
+    ("schemer", "review"): {"consistent": True, "antagonist_smart": True, "notes": "the Broker is off-page but felt", "exposure_change": "Rin now knows the seal was deliberate"},
+    ("schemer", "remember"): {"step_done": "break a seal to test her", "new_steps": ["send the vendor to report"], "exposure": "Rin suspects the seal was deliberate",
+                              "resources_gained": [], "resources_lost": []},
+    ("line_editor", "review"): {"fixes": [{"quote": "She had ten seconds", "problem": "telling the count instead of showing the panic", "fix": "show her counting on her fingers"}],
+                                "voice_ok": True, "notes": "clean; a touch of filter words"},
+    ("packager", "titles"): {"titles": ["Ten Seconds", "The Seal", "One More Time"]},
+    ("packager", "blurb"): {"blurb": "What if you could rewind ten seconds, and every rewind cost a memory?\n\nRin is a courier who owes the wrong people.",
+                            "tags": ["Time Loop", "Female Lead", "Thriller", "Urban"], "tagline": "Every rewind costs a memory."},
+    ("theme_keeper", "setup"): {"central_question": "What is a self worth if you can edit it?", "motifs": ["rain", "seals", "counting"],
+                                "images": ["wet neon", "a hand with a scar"]},
+    ("theme_keeper", "review"): {"motifs_present": ["counting"], "theme_touched": True, "notes": "counting lands; rain is wallpaper"},
+    ("sensitivity", "review"): {"flags": [{"category": "violence", "severity": "mild", "quote": "the blade", "note": "implied threat only"}], "ok_for_general": True},
+    ("comedian", "brief"): {"beats": ["Rin's 'okay, okay' tic escalates to three okays", "the vendor charges her for the rewound noodles"]},
+    ("comedian", "review"): {"laughs": 2, "flat": ["the vendor line"], "notes": "the tic works"},
+}

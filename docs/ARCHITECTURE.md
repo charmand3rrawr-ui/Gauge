@@ -87,6 +87,16 @@ cli.py           click commands
   reviews + world review + novelty -> revise -> character memory + world memory + story summary.
 - `gui.py`: `StudioController` (all logic, tested) and `run_studio` (tkinter window).
 
+## The writing room (`write/agents/`)
+
+`StoryAgent` (base.py) defines the four moments (`plan_notes`, `brief`, `review`, `remember`)
+plus `setup` and `report`, with JSON state under `projects/<slug>/agents/`. `AgentCouncil`
+(council.py) runs the enabled agents in parallel at each moment, merges weighted scores, and
+collects issues for the reviser; `build_council` reads `AgentsConfig`. Every agent prompt
+starts with `[agent:<name>:<op>]` so the offline `FakeLLM` can answer from `agents/fakes.py`.
+Agents: readers, showrunner, archivist, schemer, editor, packager, theme, sensitivity, pacing,
+librarian, comedian.
+
 ## Execution model
 
 - `llm/tokens.py`: token estimation and `PromptBudget`; `Drafter.build_draft_prompt` fits every

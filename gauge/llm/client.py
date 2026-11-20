@@ -347,6 +347,14 @@ class FakeLLM:
 
     def _answer(self, prompt: str, json_mode: bool) -> str:
         low = prompt.lower()
+        m = re.match(r"\s*\[agent:([a-z_]+):([a-z_]+)\]", prompt)
+        if m:
+            from ..write.agents.fakes import FAKE_AGENT_RESPONSES
+
+            canned = FAKE_AGENT_RESPONSES.get((m.group(1), m.group(2)))
+            if canned is not None:
+                return json.dumps(canned)
+            return json.dumps({"ok": True}) if json_mode else "A fine question. The answer is in chapter one."
         if "stay in character as" in low:
             return "Okay. Okay. You want the truth? I ran because the footsteps knew my name. One more time."
         if "answer as the world" in low:

@@ -49,7 +49,11 @@ No cloud. No API bills. Your drafts never leave your machine.
    physics, weather, crowds and consequences and acts in every scene through nameless passerby
    ([docs/WORLD.md](docs/WORLD.md)). A **muse** proposes divergent directions before each outline,
    **technique cards** absorbed from the corpus feed the drafter, and a **novelty tracker** punishes
-   repetition ([docs/CREATIVITY.md](docs/CREATIVITY.md)). When a character is in a scene their
+   repetition ([docs/CREATIVITY.md](docs/CREATIVITY.md)). A **writing room** of eleven more
+   independent agents reviews every chapter: a calibrated Reader Panel, a Showrunner with a
+   promise ledger, an Archivist with a canon ledger, a Schemer running the opposition, a Line
+   Editor, a Packager, a Theme Keeper, a Sensitivity Reader, a Pacing Director, a Research
+   Librarian and a Comedian ([docs/AGENTS.md](docs/AGENTS.md)). When a character is in a scene their
    agent is activated: they brief the drafter on what they want, would do, would say and would
    refuse, review the draft for out-of-character moments, and remember the chapter afterwards.
    Each chapter is planned, drafted with retrieved exemplars and the cast's briefs in context,
@@ -141,6 +145,8 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge start PREMISE [--chapters N]` | premise (text or file) straight to written chapters |
 | `gauge absorb [--chapters N]` | extract craft technique cards from the strongest unread chapters |
 | `gauge world show/build/set/chat/extras/promote` | the World agent; see [docs/WORLD.md](docs/WORLD.md) |
+| `gauge agents list/show/enable/disable/setup` | the writing room; see [docs/AGENTS.md](docs/AGENTS.md) |
+| `gauge canon`, `gauge ledger`, `gauge readers`, `gauge feedback`, `gauge package`, `gauge research` | ask the Archivist, read the Showrunner's ledger, see Reader Panel predictions, record real reader numbers, get blurb and tags, search your notes |
 | `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
@@ -192,10 +198,10 @@ gauge/
   ingest/          royalroad.py, scribblehub.py, local.py (folders, libraries, epub, docx), http.py, runner.py
   learn/           engagement.py (model), exemplars.py, techniques.py (absorber), style.py, dataset.py, trainer.py
   write/           project, characters (matrix, agents), world (physics, crowds), muse (directions, novelty),
-                   planner, drafter, critic, pipeline, prompts, schemas
+                   agents/ (the writing room: 11 agents + council), planner, drafter, critic, pipeline, prompts, schemas
   llm/             ollama / openai-compatible / fake clients, embeddings
   daemon.py  report.py  cli.py  db.py (sqlite)  config.py
-docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, WINDOWS, ETHICS, ROADMAP
+docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, WINDOWS, ETHICS, ROADMAP
 installer/         double-click installer (bootstrap.ps1) and Gauge Studio GUI launcher
 tests/             pytest suite, runs offline with a fake LLM
 ```
