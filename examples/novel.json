@@ -1,0 +1,17 @@
+{
+  "title": "Example Serial",
+  "author": "You",
+  "blurb": "What if every lie you told came true the next morning?",
+  "genres": ["Fantasy", "Mystery"],
+  "tags": ["Female Lead", "Progression"],
+  "status": "ongoing",
+  "followers": 1200,
+  "favorites": 240,
+  "views": 85000,
+  "rating": 4.4,
+  "rating_count": 61,
+  "chapters": {
+    "1": {"views": 9000, "comments": 40},
+    "2": {"views": 6100, "comments": 22}
+  }
+}

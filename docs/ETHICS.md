@@ -1,0 +1,39 @@
+# Ethics and good citizenship
+
+Gauge touches two sensitive things: other people's stories and other people's servers.
+
+## Servers
+
+- One clear user agent (`Gauge/0.1 (open-source web novel research tool)`), a delay between
+  requests (2.5 s default), exponential back-off on 429/5xx, robots.txt honoured by default.
+- Only public pages. No logins, no paywalls, no premium chapters, no bypassing anything.
+- Incremental by design: a chapter is fetched once, ever.
+- Keep `max_novels_per_run` and `max_chapters_per_novel` reasonable. The defaults fetch a few
+  hundred pages per cycle, spread over minutes, which is less than a human binge-reader.
+
+If a site's terms forbid automated access, do not point Gauge at it. Use `gauge import` with
+files you are allowed to have.
+
+## Stories
+
+Gauge is built to learn **patterns**, not to copy text:
+
+- The engagement model sees only numbers (ratios, densities, lengths, cadence).
+- Exemplars are 180-word openings and endings, shown to the model as *shape* references with an
+  explicit "match the energy, never the content" instruction. They are retrieval context, not
+  training data, and they are not published anywhere.
+- The SFT export uses your own local imports by default. The preference export uses short
+  excerpts. Fine-tuning on other authors' full chapters is a choice you make, with its own legal
+  and ethical weight depending on your jurisdiction; Gauge does not make it for you.
+
+## What you publish
+
+A model can produce fluent prose that is derivative, inconsistent, or quietly wrong. Read every
+chapter. Change what is not yours in spirit. Serial readers are sharp and loyal; they reward
+authors who show up, not pipelines that ship. Gauge's best use is as an editor that has read ten
+thousand chapters and can tell you, with numbers, that your ending resolves too much.
+
+## Disclosure
+
+Many platforms now ask or require that AI-assisted work be labelled. Follow the rules of the
+platform you post on.

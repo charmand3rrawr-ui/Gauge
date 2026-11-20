@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gauge-novel"
+version = "0.1.0"
+description = "Open-source, local-first engine that learns what makes web novels addictive and writes them."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Gauge contributors" }]
+keywords = ["web novel", "writing", "llm", "ollama", "serial fiction", "local-first"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: Text Processing :: Linguistic",
+]
+dependencies = [
+  "requests>=2.31",
+  "beautifulsoup4>=4.12",
+  "lxml>=4.9",
+  "numpy>=1.26",
+  "click>=8.1",
+  "pydantic>=2.5",
+  "rich>=13.0",
+]
+
+[project.optional-dependencies]
+ml = ["scikit-learn>=1.3"]
+epub = ["ebooklib>=0.18"]
+dev = ["pytest>=7.4", "ruff>=0.4"]
+
+[project.scripts]
+gauge = "gauge.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["gauge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "B008", "UP007", "UP045", "B905"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gauge"]
