@@ -167,7 +167,8 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge self propose/test/apply/rollback/list/journal/heal` | guarded self-modification; see [docs/SELF.md](docs/SELF.md) |
 | `gauge settings list/show/on/off/set/reset` | the switches; same catalog as the Studio panel; see [docs/SWITCHES.md](docs/SWITCHES.md) |
 | `gauge security seal/verify/status/log/lockdown/unlock/scan/check-text/range/drill/defense/deps` | defences, cyber-range and adversarial drill; see [docs/SECURITY.md](docs/SECURITY.md) |
-| `gauge market kit/plan/channels/policy` | marketing assets and a disclosed plan you post yourself; see [docs/MARKETING.md](docs/MARKETING.md) |
+| `gauge market kit/plan/channels/policy/social/subscribers/newsletter` | marketing assets, a disclosed plan, owned-account posting and an opt-in mailing list; see [docs/MARKETING.md](docs/MARKETING.md) |
+| `gauge site opinion/build` | publish the serial and a labelled-opinion blog as a static site; byline required, clickbait refused; see [docs/SITE.md](docs/SITE.md) |
 | `gauge code lang/binary/disasm` | read any language, read files at the binary level, disassemble Python |
 | `gauge feedback` / `gauge feedback-import` / `gauge evaluate` / `gauge profile` | record real reader numbers, bulk-import them, check score-vs-retention, see cost/latency |
 | `gauge build-sft PROJECT` | curate instruction-tuning data from accepted chapters |

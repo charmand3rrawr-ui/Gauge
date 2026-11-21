@@ -1185,6 +1185,106 @@ def evaluate(c: Ctx, project: str) -> None:
 
 
 @main.group()
+def site() -> None:
+    """Publish the author's own work to a static website: the serial and a labelled-opinion blog.
+    A byline is required and cannot impersonate an outlet; opinion is labelled; clickbait is refused."""
+
+
+def _article_dir(c: Ctx, project: str):
+    from .write.project import Project
+    if not Project.exists(c.cfg.projects_dir, project):
+        console.print(f"[red]no project named {project!r}[/]")
+        sys.exit(1)
+    p = Project(c.cfg.projects_dir, project)
+    d = p.dir / "articles"
+    d.mkdir(parents=True, exist_ok=True)
+    return p, d
+
+
+@site.command("opinion")
+@click.argument("project")
+@click.option("--thesis", required=True, help="The argument you want the column to make.")
+@click.option("--byline", required=True, help="Your name or an owned pen name (not an outlet or shared pseudonym).")
+@click.option("--angle", default="", help="Optional angle or framing.")
+@click.pass_obj
+def site_opinion(c: Ctx, project: str, thesis: str, byline: str, angle: str) -> None:
+    """Draft a labelled opinion column from your thesis. Saved for the next `site build`; claims are
+    flagged for you to verify, and the piece is marked Opinion under your byline."""
+    import json as _json
+    import re as _re
+
+    from .site.opinion import draft_opinion
+    from .util import utcnow
+
+    p, d = _article_dir(c, project)
+    pipe = _pipeline_or_exit(c)
+    try:
+        draft = draft_opinion(pipe.llm, thesis, byline, angle)
+    except PermissionError as e:
+        console.print(f"[red]refused:[/] {e}")
+        sys.exit(1)
+    slug = _re.sub(r"[^a-z0-9]+", "-", draft.title.lower()).strip("-")[:60] or "opinion"
+    (d / f"{slug}.json").write_text(_json.dumps({
+        "slug": slug, "title": draft.title, "body": draft.body, "byline": draft.byline, "kind": "opinion",
+        "summary": draft.summary, "published_at": utcnow().date().isoformat(), "thumbnail": ""}, indent=2), encoding="utf-8")
+    console.print(f"[bold]{draft.title}[/]\nby {draft.byline} (Opinion)")
+    if draft.headline_flags:
+        console.print("[yellow]headline flags:[/] " + "; ".join(draft.headline_flags))
+    if draft.claims_to_verify:
+        console.print("[yellow]verify before publishing:[/]")
+        for cl in draft.claims_to_verify[:8]:
+            console.print(f"  - {cl}")
+    console.print(f"[green]saved[/] -> {d / (slug + '.json')}; include it with `gauge site build {project} --byline ...`")
+
+
+@site.command("build")
+@click.argument("project")
+@click.option("--byline", required=True, help="The byline for the landing page and chapters.")
+@click.option("--url", default="", help="Your site's base URL (for the RSS feed links).")
+@click.option("--chapters/--no-chapters", default=True, help="Include the serial's chapters as pages.")
+@click.pass_obj
+def site_build(c: Ctx, project: str, byline: str, url: str, chapters: bool) -> None:
+    """Build the static site: a landing page, the serial's chapters, and any opinion columns you drafted.
+    Writes a folder you upload to any host. Refuses an impersonating byline or a clickbait opinion title."""
+    import json as _json
+
+    from .market.launchkit import build_launch_kit
+    from .site.publisher import Article, build_site
+    from .util import utcnow
+
+    p, d = _article_dir(c, project)
+    pipe = _pipeline_or_exit(c)
+    kit = build_launch_kit(pipe.llm, pipe.open_project(project))
+    articles: list[Article] = [Article("about", p.state.name, (kit.blurb_long or kit.blurb_short or p.state.name),
+                                        byline, kind="post", summary=kit.tagline or kit.blurb_short[:160],
+                                        published_at=utcnow().date().isoformat())]
+    if chapters:
+        for n in range(1, p.state.written + 1):
+            text = p.read_chapter(n)
+            if not text:
+                continue
+            meta = p.read_meta(n)
+            title = meta.get("title") or f"Chapter {n}"
+            articles.append(Article(f"chapter-{n:03d}", f"Chapter {n}: {title}", text, byline, kind="chapter",
+                                    summary=f"Chapter {n} of {p.state.name}", published_at=meta.get("written_at", "")[:10]))
+    for f in sorted(d.glob("*.json")):
+        try:
+            a = _json.loads(f.read_text(encoding="utf-8"))
+            articles.append(Article(**{k: a.get(k, "") for k in ("slug", "title", "body", "byline", "kind", "summary", "published_at", "thumbnail")}))
+        except Exception as e:
+            console.print(f"[yellow]skipped {f.name}: {e}[/]")
+    out = p.dir / "site"
+    try:
+        written = build_site(p.state.name, articles, out, base_url=url)
+    except PermissionError as e:
+        console.print(f"[red]refused:[/] {e}")
+        sys.exit(1)
+    console.print(f"[green]built[/] {len(written)} files -> {out}")
+    console.print(f"  landing + {sum(1 for a in articles if a.kind == 'chapter')} chapter(s) + "
+                  f"{sum(1 for a in articles if a.kind == 'opinion')} opinion column(s). Upload the folder to your host.")
+
+
+@main.group()
 def market() -> None:
     """Market a novel the legitimate way: assets and a disclosed plan you post yourself.
     Gauge never creates accounts, posts to other platforms, or messages strangers — see `market policy`."""

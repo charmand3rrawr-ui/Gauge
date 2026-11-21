@@ -470,6 +470,12 @@ class FakeLLM:
                     for i in range(start, min(end, start + 2) + 1)]})
             if "score this chapter" in low:
                 return json.dumps({"hook": 7, "momentum": 6, "payoff": 6, "cliffhanger": 8, "clarity": 7, "notes": "Tighten the middle."})
+            if "draft an opinion column" in low:
+                return json.dumps({"title": "Why serialized fiction is eating publishing",
+                                   "body": "The gatekeepers spent a decade telling us readers wanted polish. Readers, it turns out, "
+                                           "wanted momentum. Serials deliver a chapter a week and a reason to come back, and that cadence "
+                                           "is quietly rebuilding how stories find an audience. I think the trade should pay attention.",
+                                   "summary": "Serial fiction's cadence is reshaping how stories find readers."})
             if "create a marketing launch kit" in low:
                 return json.dumps({"tagline": "Ten seconds is all she has.",
                                    "logline": "A courier who can rewind ten seconds, at the cost of a memory, must clear a debt before it costs her sister.",

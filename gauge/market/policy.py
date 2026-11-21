@@ -17,6 +17,9 @@ ALLOWED = {
     "channel_guidance": "explain a community's self-promotion rules",
     "schedule_own": "schedule and publish posts to accounts the author owns, via the platform's official API, disclosed",
     "email_optin": "send to a mailing list of people who signed up, with sender identity and an unsubscribe link in every message",
+    "publish_own_site": "publish the author's own fiction and labelled opinion to a site, under a disclosed byline",
+    "opinion_labeled": "draft commentary clearly labelled as opinion, with a disclosed byline, that the author stands behind",
+    "honest_headline": "write a strong, accurate headline and flag clickbait that misrepresents the content",
 }
 
 # Things Gauge refuses, with the reason. These have no implementation here by design.
@@ -35,6 +38,9 @@ REFUSED = {
     "evade_spam_detection": "varying content to slip past a platform's abuse detection is defeating its controls",
     "email_nonconsent": "emailing people who did not sign up is spam and breaks anti-spam law (CAN-SPAM, GDPR, CASL)",
     "purchase_list": "bought, scraped or harvested email lists are never consented; sending to them is spam",
+    "fabricate_news": "generating news-shaped content with invented facts, quotes or events is misinformation",
+    "clickbait_deception": "a title or thumbnail that misrepresents the content to extract a click is deception",
+    "impersonate_outlet": "writing as a real outlet or a shared pseudonym (e.g. a ZeroHedge 'Tyler Durden' byline) hides who is speaking",
 }
 
 # Every drafted post carries this, so promotion is never passed off as something else.
