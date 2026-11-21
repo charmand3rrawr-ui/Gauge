@@ -20,6 +20,9 @@ ALLOWED = {
     "publish_own_site": "publish the author's own fiction and labelled opinion to a site, under a disclosed byline",
     "opinion_labeled": "draft commentary clearly labelled as opinion, with a disclosed byline, that the author stands behind",
     "honest_headline": "write a strong, accurate headline and flag clickbait that misrepresents the content",
+    "trend_discovery": "find trending topics from sources that permit it (Wikipedia pageviews, RSS you choose), honouring robots.txt",
+    "translate": "translate source coverage for research",
+    "original_commentary": "write original, labelled commentary on a topic that cites and links its sources",
 }
 
 # Things Gauge refuses, with the reason. These have no implementation here by design.
@@ -41,6 +44,9 @@ REFUSED = {
     "fabricate_news": "generating news-shaped content with invented facts, quotes or events is misinformation",
     "clickbait_deception": "a title or thumbnail that misrepresents the content to extract a click is deception",
     "impersonate_outlet": "writing as a real outlet or a shared pseudonym (e.g. a ZeroHedge 'Tyler Durden' byline) hides who is speaking",
+    "rewrite_republish": "paraphrase-spinning other outlets' articles to republish as your own is plagiarism and, at scale, "
+                         "copyright infringement — the content-farm mechanic",
+    "auto_publish_unreviewed_news": "publishing checkable factual claims with no human review, on a timer, is a misinformation pipeline",
 }
 
 # Every drafted post carries this, so promotion is never passed off as something else.

@@ -36,7 +36,8 @@ def assess(audit: AuditLog, integrity_status: str = "ok", since_s: float = 86400
 
 
 LOCKDOWN_SWITCHES = {"code.self_heal": False, "code.auto_apply": False, "code.bots_enabled": False, "compute.pool_generation": False,
-                     "compute.distributed_training": False, "research.enabled": False, "daemon.write_after_learning": False}
+                     "compute.distributed_training": False, "research.enabled": False, "daemon.write_after_learning": False,
+                     "newsdesk.enabled": False, "newsdesk.auto_publish": False}
 
 
 def lockdown(cfg: GaugeConfig, audit: AuditLog, reason: str) -> dict[str, Any]:
@@ -59,7 +60,7 @@ def unlock(cfg: GaugeConfig, audit: AuditLog, restore: bool = True) -> dict[str,
     restored = []
     if restore:
         for k, v in (cfg.security.locked_previous or {}).items():
-            if v and k in LOCKDOWN_SWITCHES and k not in ("code.auto_apply",):  # auto-apply never comes back automatically
+            if v and k in LOCKDOWN_SWITCHES and k not in ("code.auto_apply", "newsdesk.auto_publish"):  # unattended changes/publishing never come back automatically
                 st.set_value(cfg, k, True, save=False)
                 restored.append(k)
     cfg.security.locked = False

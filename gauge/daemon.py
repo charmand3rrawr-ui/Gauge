@@ -145,6 +145,17 @@ class Daemon:
                 out["write"] = {"chapter": res.number, "score": round(res.score, 3), "path": str(res.path)}
             else:
                 out["write"] = f"skipped: LLM not reachable ({pipe.llm.describe()})"
+        # Newsdesk: trends -> original sourced commentary into the review queue -> publish one due piece.
+        if self.cfg.newsdesk.enabled and automation_ok:
+            try:
+                from .llm import make_llm
+                from .newsdesk.desk import run_cycle
+
+                rep = run_cycle(self.cfg, make_llm(self.cfg.llm, "main"))
+                out["newsdesk"] = {"drafted": len(rep.drafted), "published": rep.published,
+                                   "waiting_review": rep.waiting_review}
+            except Exception as e:
+                self._journal("newsdesk", e)
         # Scheduled bots (plain programs; deterministic ones cannot reach the model).
         if self.cfg.code.bots_enabled and automation_ok:
             try:

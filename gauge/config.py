@@ -212,6 +212,24 @@ class AgentsConfig(BaseModel):
     suitability_block: bool = False  # a crossed content line forces a revision instead of a warning
 
 
+class NewsdeskConfig(BaseModel):
+    """Trend discovery and original commentary, published on a schedule. See docs/NEWSDESK.md."""
+
+    enabled: bool = False  # the daemon runs a newsdesk cycle each loop
+    interval_minutes: int = 30  # at most one piece published per interval
+    max_per_day: int = 24
+    languages: list[str] = Field(default_factory=lambda: ["en", "es", "fr", "de", "ja", "pt"])  # Wikipedia editions to watch
+    feeds: list[str] = Field(default_factory=list)  # RSS/Atom feeds you choose (headlines + summaries + links only)
+    target_language: str = "English"  # translate research into this
+    drafts_per_cycle: int = 2  # new trending topics drafted per cycle
+    project: str = ""  # the site project that published pieces go into
+    byline: str = ""  # your name or an owned pen name
+    voice: str = "punchy"
+    comedic: bool = True
+    auto_publish: bool = False  # publish clean pieces without review (anything with a checkable claim still waits)
+    max_source_overlap: float = 0.25  # more than this share of a source reproduced = too close; flagged
+
+
 class DaemonConfig(BaseModel):
     cycle_minutes: int = 180
     write_after_learning: bool = False
@@ -232,6 +250,7 @@ class GaugeConfig(BaseModel):
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
     code: CodeConfig = Field(default_factory=CodeConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    newsdesk: NewsdeskConfig = Field(default_factory=NewsdeskConfig)
 
     @property
     def security_dir(self) -> Path:

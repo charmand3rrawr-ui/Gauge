@@ -378,6 +378,9 @@ class FakeLLM:
             m = re.search(r"next beat as ([^:]+):", prompt)
             who = (m.group(1).strip() if m else "Someone")
             return f"\"Okay. Okay,\" {who} said, and checked the exits first." if who.startswith("Rin") else f"{who} stepped between them and said nothing."
+        if low.startswith("[translate]"):
+            body = prompt.split("TEXT:\n", 1)[1] if "TEXT:\n" in prompt else prompt
+            return "[translated] " + body.strip()
         if low.startswith("[improv:world]"):
             return "The alley's one working light cut out, and somewhere a shutter slammed down early."
         if json_mode:
@@ -470,6 +473,20 @@ class FakeLLM:
                     for i in range(start, min(end, start + 2) + 1)]})
             if "score this chapter" in low:
                 return json.dumps({"hook": 7, "momentum": 6, "payoff": 6, "cliffhanger": 8, "clarity": 7, "notes": "Tighten the middle."})
+            if "write original commentary on the trending topic" in low:
+                m = re.search(r"(?m)^TOPIC: (.+)$", prompt)
+                topic = m.group(1).strip() if m else "the story everyone is discussing"
+                return json.dumps({
+                    "title": f"{topic}: the part nobody is pricing in",
+                    "body": (f"Everyone has an opinion on {topic}, and most of them arrived before the facts did. "
+                             "Here is mine, and I will try to earn it. The loudest take is that this changes everything. "
+                             "To be fair, critics argue the opposite, that it changes very little, and that is the "
+                             "strongest case against my view, so let me answer it rather than wave it away. "
+                             "The money question is simple: who pays, and what do they get for it? The human question "
+                             "is simpler still: who gets hurt if we are wrong? A sober position holds both at once. "
+                             "Spend carefully, care loudly, and check the numbers before the outrage. That is not a "
+                             "fence to sit on; it is the only place from which you can see both sides of the field."),
+                    "summary": f"An even-handed take on {topic}."})
             if "eye-catching but accurate headlines" in low:
                 return json.dumps({"headlines": [
                     "Serial fiction is quietly reshaping publishing",

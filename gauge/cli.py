@@ -1185,6 +1185,163 @@ def evaluate(c: Ctx, project: str) -> None:
 
 
 @main.group()
+def newsdesk() -> None:
+    """Find trending topics worldwide (any language) and write ORIGINAL, sourced commentary on a schedule.
+    It never rewrites other outlets' articles; drafts wait for your approval unless they pass every check."""
+
+
+@newsdesk.command("trends")
+@click.option("--lang", "langs", multiple=True, help="Wikipedia editions to watch (repeatable), e.g. --lang en --lang ja.")
+@click.option("--feed", "feeds", multiple=True, help="RSS/Atom feeds you choose (repeatable).")
+@click.option("--top", type=int, default=15, show_default=True)
+@click.pass_obj
+def newsdesk_trends(c: Ctx, langs: tuple, feeds: tuple, top: int) -> None:
+    """What the world is reading: Wikipedia's most-viewed pages per language, plus your feeds."""
+    from .newsdesk.desk import make_fetcher
+    from .newsdesk.trends import discover
+
+    nd = c.cfg.newsdesk
+    topics = discover(make_fetcher(c.cfg), list(langs) or nd.languages, list(feeds) or nd.feeds)
+    if not topics:
+        console.print("no trends found (offline, robots.txt refused, or no feeds configured)")
+        return
+    for t in topics[:top]:
+        console.print(f"  {t.score:5.2f}  {t.title}  [{', '.join(t.langs) or t.source}]")
+
+
+@newsdesk.command("draft")
+@click.argument("topic")
+@click.option("--byline", default=None, help="Defaults to newsdesk.byline.")
+@click.pass_obj
+def newsdesk_draft(c: Ctx, topic: str, byline: Optional[str]) -> None:
+    """Draft original commentary on TOPIC (sourced from your feeds) and add it to the review queue."""
+    from .newsdesk.commentary import write_commentary
+    from .newsdesk.desk import gather_sources, make_fetcher, queue_for
+    from .site.stance import load_stance
+
+    nd = c.cfg.newsdesk
+    by = byline or nd.byline
+    if not by:
+        console.print("[red]set a byline[/] (--byline or newsdesk.byline): your name or an owned pen name")
+        sys.exit(1)
+    pipe = _pipeline_or_exit(c)
+    sources = gather_sources(make_fetcher(c.cfg), pipe.llm, topic, nd.feeds, nd.target_language) if nd.feeds else []
+    try:
+        com = write_commentary(pipe.llm, topic, sources, by, stance=load_stance(c.cfg.root / "stance.json"),
+                               voice=nd.voice, comedic=nd.comedic, max_overlap=nd.max_source_overlap)
+    except PermissionError as e:
+        console.print(f"[red]refused:[/] {e}")
+        sys.exit(1)
+    item = queue_for(c.cfg).add(com)
+    console.print(f"[bold]{com.title}[/]  (queued as {item.id}, {'clean' if com.clean else 'needs review'})")
+    console.print(f"  originality {com.originality:.0%}; {len(com.sources)} source(s) linked")
+    for f in com.originality_flags + com.balance_flags + com.headline_flags + com.claims_to_verify[:6]:
+        console.print(f"  [yellow]- {f}[/]")
+
+
+@newsdesk.command("queue")
+@click.option("--status", type=click.Choice(["pending_review", "approved", "published", "rejected"]), default=None)
+@click.pass_obj
+def newsdesk_queue(c: Ctx, status: Optional[str]) -> None:
+    """List drafts and their status."""
+    from .newsdesk.desk import queue_for
+
+    items = queue_for(c.cfg).items(status)
+    if not items:
+        console.print("(queue is empty)")
+        return
+    for i in items:
+        mark = "clean" if i.clean else f"{len(i.flags)} flag(s)"
+        console.print(f"  {i.id}  {i.status:<15} {mark:<10} {i.title[:70]}")
+
+
+@newsdesk.command("show")
+@click.argument("item_id")
+@click.pass_obj
+def newsdesk_show(c: Ctx, item_id: str) -> None:
+    """Read a queued draft in full, with its flags, before approving it."""
+    from .newsdesk.desk import queue_for
+
+    it = queue_for(c.cfg).get(item_id)
+    if it is None:
+        console.print(f"[red]no queued item {item_id}[/]")
+        sys.exit(1)
+    console.print(f"[bold]{it.title}[/]  ({it.status}, originality {it.originality:.0%})\n")
+    console.print(it.body)
+    for f in it.flags:
+        console.print(f"[yellow]- {f}[/]")
+
+
+@newsdesk.command("approve")
+@click.argument("item_id")
+@click.pass_obj
+def newsdesk_approve(c: Ctx, item_id: str) -> None:
+    """Approve a draft for publication on the next due slot."""
+    from .newsdesk.desk import queue_for
+
+    ok = queue_for(c.cfg).approve(item_id)
+    console.print(f"[green]approved[/] {item_id}" if ok else f"[red]cannot approve {item_id}[/]")
+
+
+@newsdesk.command("reject")
+@click.argument("item_id")
+@click.pass_obj
+def newsdesk_reject(c: Ctx, item_id: str) -> None:
+    """Reject a draft; it will never be published."""
+    from .newsdesk.desk import queue_for
+
+    ok = queue_for(c.cfg).reject(item_id)
+    console.print(f"[yellow]rejected[/] {item_id}" if ok else f"[red]cannot reject {item_id}[/]")
+
+
+@newsdesk.command("run")
+@click.option("--no-draft", is_flag=True, help="Only publish what is due; do not discover or draft.")
+@click.pass_obj
+def newsdesk_run(c: Ctx, no_draft: bool) -> None:
+    """One cycle: discover trends, draft new commentary into the queue, publish one due piece."""
+    from .newsdesk.desk import run_cycle
+
+    pipe = _pipeline_or_exit(c)
+    rep = run_cycle(c.cfg, pipe.llm, draft=not no_draft)
+    console.print(f"trends {rep.topics_found}; drafted {len(rep.drafted)}; skipped {len(rep.skipped)} already-queued; "
+                  f"waiting review {rep.waiting_review}; published: {rep.published or 'nothing due'}")
+    for d in rep.drafted:
+        console.print(f"  + {d}")
+    for n in rep.notes:
+        console.print(f"  [yellow]- {n}[/]")
+
+
+@newsdesk.command("watch")
+@click.option("--max-minutes", type=int, default=None, help="Stop after this long (default: run until Ctrl+C).")
+@click.pass_obj
+def newsdesk_watch(c: Ctx, max_minutes: Optional[int]) -> None:
+    """Run the desk continuously: a cycle every newsdesk.interval_minutes (default 30). Ctrl+C to stop."""
+    import time as _time
+
+    from .newsdesk.desk import run_cycle
+
+    pipe = _pipeline_or_exit(c)
+    interval = max(1, c.cfg.newsdesk.interval_minutes)
+    started = _time.monotonic()
+    console.print(f"newsdesk watching: a cycle every {interval} min. Ctrl+C to stop.")
+    try:
+        while True:
+            rep = run_cycle(c.cfg, pipe.llm)
+            console.print(f"[{utcnow_str()}] drafted {len(rep.drafted)}, published {rep.published or '-'}, "
+                          f"waiting review {rep.waiting_review}")
+            if max_minutes is not None and (_time.monotonic() - started) / 60 >= max_minutes:
+                break
+            _time.sleep(interval * 60)
+    except KeyboardInterrupt:
+        console.print("stopped")
+
+
+def utcnow_str() -> str:
+    from .util import utcnow
+    return utcnow().strftime("%Y-%m-%d %H:%M")
+
+
+@main.group()
 def site() -> None:
     """Publish the author's own work to a static website: the serial and a labelled-opinion blog.
     A byline is required and cannot impersonate an outlet; opinion is labelled; clickbait is refused."""
