@@ -2,6 +2,7 @@
 from .arc_keeper import ArcKeeper
 from .archivist import Archivist
 from .base import AgentReview, SceneContext, StoryAgent
+from .cast_tracker import CastTracker
 from .comedian import Comedian
 from .continuity_auditor import ContinuityAuditor
 from .council import ALL_AGENTS, AgentCouncil, build_council
@@ -22,4 +23,4 @@ from .theme import ThemeKeeper
 from .voice_coach import VoiceCoach
 
 __all__ = ["Archivist", "AgentReview", "SceneContext", "StoryAgent", "Comedian", "ALL_AGENTS", "AgentCouncil", "build_council",
-           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper", "VoiceCoach", "ReadabilityCoach", "SuitabilityChecker", "ArcKeeper", "SensoryEditor", "ContinuityAuditor", "CraftEditor"]
+           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper", "VoiceCoach", "ReadabilityCoach", "SuitabilityChecker", "ArcKeeper", "SensoryEditor", "ContinuityAuditor", "CraftEditor", "CastTracker"]

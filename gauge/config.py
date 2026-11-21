@@ -207,6 +207,7 @@ class AgentsConfig(BaseModel):
     sensory: bool = True  # grounds scenes in the senses; flags told-emotion and filter words
     continuity: bool = True  # checks physical/time-of-day/season consistency
     craft_editor: bool = True  # line-craft: clichés, weak verb+adverb, on-the-nose dialogue, tense drift, anachronisms
+    cast_tracker: bool = True  # keeps the ensemble alive: flags absent cast, flat wants/needs, frozen relationships
     sensitivity_rules: str = ""  # your platform's content rules, pasted
     sensitivity_categories: list[str] = Field(default_factory=list)
     block_on_sensitivity: bool = False  # severe flags force a revision instead of a warning

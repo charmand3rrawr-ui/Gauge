@@ -18,17 +18,17 @@ tested batches — not a promise that all 100 exist yet.
 9. [done] Concrete-verb pass: flag weak verb + adverb pairs ("walked slowly" → "trudged"). **S**
 10. [done] Period/register diction guard for historical settings (anachronism lexicon). **M** *(needs setting metadata)*
 
-## B. Characters and psychology
-11. Want-vs-need tracker per character across the arc; flag a protagonist with no visible need. **M**
-12. Relationship-graph drift: visualise and flag relationships that never change. **M**
+## B. Characters and psychology  — mostly done (gauge.write.ensemble + Cast Tracker); 15/17/19 need an LLM pass
+11. [done] Want-vs-need tracker per character across the arc; flag a protagonist with no visible need. **M**
+12. [done] Relationship-graph drift: visualise and flag relationships that never change. **M**
 13. Character secrets ledger: track who knows what; flag a reveal to someone who already knew. **M**
-14. Idiolect enforcement: per-character vocabulary/catchphrase adherence (extends Voice Coach). **M**
+14. [done] Idiolect enforcement: per-character vocabulary/catchphrase adherence (extends Voice Coach). **M**
 15. Off-page life: characters act when not on screen; a lightweight "what did they do this chapter" sim. **M**
-16. Physical tells: consistent gestures/habits per character, flagged when absent or swapped. **S**
+16. [done] Physical tells: consistent gestures/habits per character, flagged when absent or swapped. **S**
 17. Arc-plan auto-proposal: suggest a personality-drift plan from the bible for each major character. **S**
-18. Ensemble balance: flag a cast member who has vanished for N chapters. **S**
+18. [done] Ensemble balance: flag a cast member who has vanished for N chapters. **S**
 19. Antagonist competence meter (extends Schemer): flag a villain who only reacts. **M**
-20. Character voice embeddings: cluster dialogue to catch two characters converging in style. **M**
+20. [done] Character voice embeddings: cluster dialogue to catch two characters converging in style. **M**
 
 ## C. World and continuity
 21. Map/geography memory: a place graph with distances; flag impossible travel times. **M**

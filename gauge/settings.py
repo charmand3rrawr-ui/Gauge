@@ -55,6 +55,7 @@ SWITCHES: list[Switch] = [
     Switch("agents.sensory", "Sensory editor", "bool", "Grounds scenes in the senses; flags told-emotion, filter words and generic detail.", "The room"),
     Switch("agents.continuity", "Continuity auditor", "bool", "Checks physical, time-of-day and season consistency across chapters.", "The room"),
     Switch("agents.craft_editor", "Craft editor", "bool", "Line craft: cliches, weak verb+adverb, on-the-nose dialogue, tense drift, head-hopping, anachronisms.", "The room"),
+    Switch("agents.cast_tracker", "Cast tracker", "bool", "Keeps the ensemble alive: flags absent cast, flat wants/needs, frozen relationships and unused voices.", "The room"),
     Switch("agents.suitability_age_band", "Audience age band", "choice", "Sets a reading-ease floor: all = easiest, adult = densest allowed.", "The room", choices=["all", "teen", "adult"]),
     Switch("agents.suitability_heat_max", "Maximum heat level", "int", "0 none, 1 mild, 2 moderate, 3 explicit. Chapters above this are flagged.", "The room", 0, 3),
     Switch("agents.suitability_platform", "Target platform", "text", "Free text shown to the writer, e.g. Royal Road, Wattpad.", "The room"),
