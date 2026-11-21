@@ -1477,6 +1477,29 @@ def site_build(c: Ctx, project: str, byline: str, url: str, chapters: bool) -> N
                   f"{sum(1 for a in articles if a.kind == 'opinion')} opinion column(s). Upload the folder to your host.")
 
 
+@site.command("moderate")
+@click.argument("action", type=click.Choice(["submit", "list", "approve", "reject"]))
+@click.argument("value", required=False)
+@click.option("--author", default="anon")
+@click.pass_obj
+def site_moderate(c: Ctx, action: str, value: Optional[str], author: str) -> None:
+    """Moderate reader comments through the sanitiser: submit text, list the queue, approve/reject by id."""
+    from .site.moderation import ModerationQueue
+
+    q = ModerationQueue(c.cfg.root / "comments.json")
+    if action == "submit":
+        cm = q.submit(value or "", author)
+        console.print(f"[{'green' if cm.status == 'allow' else 'yellow'}]{cm.status}[/] {cm.id}"
+                      + (f"  ({'; '.join(cm.reasons)})" if cm.reasons else ""))
+    elif action == "list":
+        for cm in q.items():
+            console.print(f"  {cm.id}  {cm.status:<9} {cm.author}: {cm.text[:60]}" + (f"  [{', '.join(cm.reasons)}]" if cm.reasons else ""))
+    elif action == "approve":
+        console.print("approved" if q.approve(value or "") else "not found")
+    else:
+        console.print("rejected" if q.reject(value or "") else "not found")
+
+
 @site.command("headline")
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--angle", default="", help="Optional angle or framing.")
@@ -1559,6 +1582,20 @@ def market_plan(c: Ctx, project: str, url: str) -> None:
     out.write_text(plan, encoding="utf-8")
     console.print(f"[green]saved[/] a posting plan for {len(CHANNELS)} channels -> {out}")
     console.print("Gauge drafted these; you post them yourself, under your own account, following each venue's rules.")
+
+
+@market.command("links")
+@click.argument("url")
+@click.option("--campaign", default="", help="Campaign tag (e.g. launch).")
+@click.pass_obj
+def market_links(c: Ctx, url: str, campaign: str) -> None:
+    """Build UTM-tagged links for each channel so you can see which one sends readers (no reader tracking)."""
+    from .market.channels import CHANNELS
+    from .market.links import tagged_links
+
+    sources = [ch.key for ch in CHANNELS]
+    for src, link in tagged_links(url, sources, campaign=campaign).items():
+        console.print(f"  {src}: {link}")
 
 
 @market.command("social")

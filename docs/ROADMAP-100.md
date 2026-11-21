@@ -91,7 +91,7 @@ tested batches — not a promise that all 100 exist yet.
 70. Model-router: cheap model for bookkeeping, strong model for prose, learned per task. **M**
 
 ## H. Reader growth and analytics (legitimate marketing only)
-71. UTM-tagged links and a privacy-respecting click log for owned channels. **S**
+71. [done] UTM-tagged links and a privacy-respecting click log for owned channels. **S**
 72. Best-time-to-post learning from your own engagement history. **M** *(needs own data)*
 73. A/B subject lines for the opt-in newsletter (consented list only). **S**
 74. Reader-funnel report: chapters → follows → newsletter → retention. **M** *(needs feedback)*
@@ -110,7 +110,7 @@ tested batches — not a promise that all 100 exist yet.
 85. Newsdesk fact-check pass that cites for each claim before publishing *(needs Scout)*. **M**
 86. Topic-desk specialisation (finance, tech) with per-desk stances. **M**
 87. Scheduled digest email of the week's commentary to the opt-in list. **S**
-88. Comment moderation queue with the sanitiser already built. **S**
+88. [done] Comment moderation queue with the sanitiser already built. **S**
 89. RSS/Atom output for the opinion blog and the serial. **S** *(partly done)*
 90. Translation of the author's own pieces into other languages, labelled as translations. **M**
 
