@@ -448,11 +448,14 @@ def absorb(c: Ctx, n: Optional[int]) -> None:
 @click.argument("name")
 @click.option("--chapters", default=1, show_default=True)
 @click.option("--fresh", is_flag=True, help="Ignore a checkpointed draft and generate from scratch.")
+@click.option("--seed", type=int, default=None, help="Make this run reproducible (seeds RNGs and the bandit).")
 @click.pass_obj
-def write(c: Ctx, name: str, chapters: int, fresh: bool) -> None:
+def write(c: Ctx, name: str, chapters: int, fresh: bool, seed: Optional[int]) -> None:
     """Write the next chapter(s) of a project: draft -> score -> revise -> save."""
     from .write import WritePipeline
 
+    if seed is not None:
+        c.cfg.seed = seed
     pipe = WritePipeline(c.cfg, c.db)
     if not pipe.llm.available():
         console.print(f"[red]LLM not reachable[/] ({pipe.llm.describe()}). Run `gauge doctor`.")
@@ -1179,6 +1182,44 @@ def evaluate(c: Ctx, project: str) -> None:
         console.print("  lowest-retention chapters: " + ", ".join(f"ch{n} ({r})" for n, r in ev.worst_chapters))
     for note in ev.notes:
         console.print(f"  - {note}")
+
+
+@main.command()
+@click.option("--project", default=None, help="Limit to one project.")
+@click.option("--days", type=int, default=None, help="Only the last N days.")
+@click.pass_obj
+def profile(c: Ctx, project: Optional[str], days: Optional[int]) -> None:
+    """Where the time and tokens go: per-purpose LLM cost from telemetry, plus the slowest chapters."""
+    rows = c.db.call_summary(project=project, limit_days=days)
+    if not rows:
+        console.print("no telemetry yet; write a few chapters first")
+        return
+    table = Table(title="LLM cost by purpose")
+    for col in ("purpose", "model", "calls", "seconds", "avg_seconds", "prompt_tokens", "output_tokens", "failed"):
+        table.add_column(col, justify="right" if col not in ("purpose", "model") else "left")
+    tot_s = tot_c = tot_pt = tot_ot = 0.0
+    for r in rows:
+        table.add_row(r["purpose"], r["model"] or "-", str(r["calls"]), f"{r['seconds']:.1f}", f"{r['avg_seconds']:.1f}",
+                      str(r["prompt_tokens"] or 0), str(r["output_tokens"] or 0), str(r["failed"]))
+        tot_s += r["seconds"] or 0
+        tot_c += r["calls"] or 0
+        tot_pt += r["prompt_tokens"] or 0
+        tot_ot += r["output_tokens"] or 0
+    console.print(table)
+    console.print(f"total: {int(tot_c)} calls, {tot_s:.0f}s in model, {int(tot_pt)} prompt + {int(tot_ot)} output tokens")
+    # Slowest chapters, from each chapter's stored timing/seconds, when a project is given.
+    if project:
+        from .write.project import Project
+        if Project.exists(c.cfg.projects_dir, project):
+            proj = Project(c.cfg.projects_dir, project)
+            chapters = []
+            for n in range(1, proj.state.written + 1):
+                meta = proj.read_meta(n)
+                if isinstance(meta.get("seconds"), (int, float)):
+                    chapters.append((n, float(meta["seconds"])))
+            if chapters:
+                chapters.sort(key=lambda t: -t[1])
+                console.print("slowest chapters: " + ", ".join(f"ch{n} ({s:.0f}s)" for n, s in chapters[:5]))
 
 
 @main.command()

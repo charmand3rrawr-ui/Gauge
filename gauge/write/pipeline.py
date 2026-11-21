@@ -68,6 +68,9 @@ class WritePipeline:
     def __init__(self, cfg: GaugeConfig, db: Database, llm: Optional[LLM] = None, trainer: Optional[Trainer] = None,
                  fast_llm: Optional[LLM] = None):
         self.cfg = cfg
+        if cfg.seed is not None:
+            from ..util import seed_all
+            seed_all(cfg.seed)
         self.db = db
         self.calls = CallLog()
         self.llm = llm or make_llm(cfg.llm, "main", self.calls)
@@ -180,7 +183,7 @@ class WritePipeline:
 
     # ---- learning from your own serial ------------------------------------
     def bandit(self, project: Project) -> Optional[PromptBandit]:
-        return PromptBandit(project.dir / "bandit.json") if self.cfg.learn.bandit_enabled else None
+        return PromptBandit(project.dir / "bandit.json", seed=self.cfg.seed) if self.cfg.learn.bandit_enabled else None
 
     def _apply_settings(self, settings: dict) -> dict:
         """Apply a bandit draw to the knobs for this chapter; return the previous values."""

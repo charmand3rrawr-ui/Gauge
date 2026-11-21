@@ -220,6 +220,7 @@ class DaemonConfig(BaseModel):
 
 class GaugeConfig(BaseModel):
     data_dir: str = str(DEFAULT_DATA_DIR)
+    seed: Optional[int] = None  # when set, makes a run reproducible (seeds RNGs and the prompt bandit)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     learn: LearnConfig = Field(default_factory=LearnConfig)
