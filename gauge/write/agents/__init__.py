@@ -18,9 +18,10 @@ from .schemer import Schemer
 from .scout import ScoutAgent
 from .sensitivity import SensitivityReader
 from .showrunner import Showrunner
+from .structure_editor import StructureEditor
 from .suitability import SuitabilityChecker
 from .theme import ThemeKeeper
 from .voice_coach import VoiceCoach
 
 __all__ = ["Archivist", "AgentReview", "SceneContext", "StoryAgent", "Comedian", "ALL_AGENTS", "AgentCouncil", "build_council",
-           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper", "VoiceCoach", "ReadabilityCoach", "SuitabilityChecker", "ArcKeeper", "SensoryEditor", "ContinuityAuditor", "CraftEditor", "CastTracker"]
+           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper", "VoiceCoach", "ReadabilityCoach", "SuitabilityChecker", "ArcKeeper", "SensoryEditor", "ContinuityAuditor", "CraftEditor", "CastTracker", "StructureEditor"]
