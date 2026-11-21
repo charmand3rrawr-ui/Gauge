@@ -136,6 +136,33 @@ def parse_chapter_page(html: str) -> str:
     return normalize_whitespace(text)
 
 
+def parse_chapter_comments(html: str, limit: int = 60) -> list[dict[str, str]]:
+    """Reader comments rendered on a chapter page (author, text, time). Best effort: layouts change."""
+    soup = BeautifulSoup(html, "lxml")
+    out: list[dict[str, str]] = []
+    for node in soup.select(".comment, .comment-item, [class*='comment-']"):
+        body = node.select_one(".comment-body, .comment-content, .message, .text, p")
+        if body is None:
+            continue
+        text = normalize_whitespace(body.get_text(" ", strip=True))
+        if len(text) < 2:
+            continue
+        author_el = node.select_one(".comment-author, .username, .name, a[href*='/profile/']")
+        time_el = node.select_one("time")
+        out.append({"author": author_el.get_text(strip=True) if author_el else "", "text": text[:2000],
+                    "at": (time_el.get("datetime") or time_el.get("title") or "") if time_el else ""})
+        if len(out) >= limit:
+            break
+    # Deduplicate nested matches (a wrapper and its inner node can both match).
+    seen, uniq = set(), []
+    for c in out:
+        key = c["text"][:120]
+        if key not in seen:
+            seen.add(key)
+            uniq.append(c)
+    return uniq
+
+
 def parse_listing(html: str) -> list[str]:
     soup = BeautifulSoup(html, "lxml")
     urls = []
@@ -181,5 +208,7 @@ class RoyalRoad:
         text = parse_chapter_page(html)
         if len(text) < 200:
             return None
+        comments = parse_chapter_comments(html)
         return ChapterRecord(novel_key=novel.key, index=ref.index, source_chapter_id=ref.source_chapter_id,
-                             url=ref.url, title=ref.title, text=text, published_at=ref.published_at)
+                             url=ref.url, title=ref.title, text=text, published_at=ref.published_at,
+                             comments=len(comments) or None, comment_texts=comments)

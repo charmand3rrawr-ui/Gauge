@@ -20,15 +20,16 @@ from .scout import ScoutAgent
 from .sensitivity import SensitivityReader
 from .showrunner import Showrunner
 from .theme import ThemeKeeper
+from .voice_coach import VoiceCoach
 
 log = logging.getLogger(__name__)
 
 ALL_AGENTS: dict[str, type[StoryAgent]] = {
     ReaderPanel.name: ReaderPanel, Showrunner.name: Showrunner, Archivist.name: Archivist, Schemer.name: Schemer,
     LineEditor.name: LineEditor, Packager.name: Packager, ThemeKeeper.name: ThemeKeeper, SensitivityReader.name: SensitivityReader,
-    PacingDirector.name: PacingDirector, Librarian.name: Librarian, Comedian.name: Comedian, ScoutAgent.name: ScoutAgent,
+    PacingDirector.name: PacingDirector, Librarian.name: Librarian, Comedian.name: Comedian, ScoutAgent.name: ScoutAgent, VoiceCoach.name: VoiceCoach,
 }
-LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager"}
+LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach"}
 
 
 def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCouncil:

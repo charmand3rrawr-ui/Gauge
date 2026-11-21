@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from ..llm.client import LLM, generate_json
 from ..text import tail
 from . import prompts
+from .emotion import Mood, apply_event, baseline, drift_step, speech_directives
 from .schemas import BriefOut, MemoryOut, ReviewOut, SheetOut, schema_of
 
 log = logging.getLogger(__name__)
@@ -209,11 +210,16 @@ class Relationship(BaseModel):
     fear: float = 0.0
     stance: str = ""  # one line: "older brother she resents and would die for"
     history: list[str] = Field(default_factory=list)
+    # Second-order beliefs: what I think THIS person feels about others ("thinks Jun trusts the Broker").
+    beliefs: dict[str, str] = Field(default_factory=dict)
 
     def describe(self, other: str) -> str:
-        return (f"{other}: trust {self.trust:.1f}, affection {self.affection:.1f}, respect {self.respect:.1f}, "
+        base = (f"{other}: trust {self.trust:.1f}, affection {self.affection:.1f}, respect {self.respect:.1f}, "
                 f"fear {self.fear:.1f}" + (f"; {self.stance}" if self.stance else "")
                 + (f"; recent: {self.history[-1]}" if self.history else ""))
+        if self.beliefs:
+            base += "; I believe " + "; ".join(f"{other} feels about {k}: {v}" for k, v in list(self.beliefs.items())[:3])
+        return base
 
 
 class Memory(BaseModel):
@@ -232,6 +238,8 @@ class CharacterState(BaseModel):
     arc_progress: str = ""  # how far along their change they are
     last_seen_chapter: int = 0
     memories: list[Memory] = Field(default_factory=list)
+    mood_vec: Mood = Field(default_factory=Mood)  # pleasure / arousal / dominance, decays toward the matrix baseline
+    arc_plan: dict[str, dict] = Field(default_factory=dict)  # axis -> {"target": 0..1, "by": chapter}: planned drift
 
 
 class Character(BaseModel):
@@ -270,11 +278,15 @@ class Character(BaseModel):
         recent = self.state.memories[-3:]
         mem = "\n".join(f"- ch {m.chapter}: {'; '.join(m.events)}" + (f" ({m.feelings})" if m.feelings else "")
                         for m in recent) or "- (nothing yet)"
+        directives = speech_directives(self.state.mood_vec, self.voice)
+        mood = f"{self.state.mood} ({self.state.mood_vec.label()})"
+        if directives:
+            mood += ". Right now you " + "; ".join(directives)
         return prompts.CHARACTER_SYSTEM.format(
             name=self.name, role=self.role, concept=self.concept or "(no concept)",
             backstory=self.backstory or "(unknown)", appearance=self.appearance or "(unspecified)",
             matrix=self.matrix.describe(), voice=self.voice.describe(),
-            mood=self.state.mood, goal=self.state.goal or "(none stated)", location=self.state.location or "(unknown)",
+            mood=mood, goal=self.state.goal or "(none stated)", location=self.state.location or "(unknown)",
             knows="; ".join(self.state.knows) or "(nothing recorded)",
             secrets="; ".join(self.state.secrets) or "(none)",
             condition="; ".join(self.state.condition) or "(fine)",
@@ -300,6 +312,10 @@ class Character(BaseModel):
                  f"**State:** mood {self.state.mood}; goal {self.state.goal}; location {self.state.location}; "
                  f"arc {self.state.arc_progress}; last seen ch {self.state.last_seen_chapter}",
                  "**Knows:** " + "; ".join(self.state.knows), "**Secrets:** " + "; ".join(self.state.secrets), ""]
+        lines += [f"**Mood vector:** pleasure {self.state.mood_vec.pleasure:+.2f} arousal {self.state.mood_vec.arousal:+.2f} "
+                  f"dominance {self.state.mood_vec.dominance:+.2f} ({self.state.mood_vec.label()})"]
+        if self.state.arc_plan:
+            lines += ["**Arc plan:** " + "; ".join(f"{k} -> {v.get('target')} by ch {v.get('by')}" for k, v in self.state.arc_plan.items())]
         if self.relationships:
             lines += ["**Relationships:**"] + [f"- {r.describe(o)}" for o, r in self.relationships.items()] + [""]
         if self.state.memories:
@@ -371,6 +387,41 @@ class Roster:
     def ordered(self) -> list[Character]:
         rank = {"protagonist": 0, "antagonist": 1, "supporting": 2, "minor": 3}
         return sorted(self.characters.values(), key=lambda c: (rank.get(c.role, 9), c.name))
+
+    def graph_text(self) -> str:
+        """Every relationship edge with second-order beliefs: material for the Schemer and Showrunner."""
+        lines = []
+        for c in self.ordered():
+            for other, r in c.relationships.items():
+                lines.append(f"{c.name} -> {other}: trust {r.trust:.1f} affection {r.affection:.1f} fear {r.fear:.1f}"
+                             + (f" ({r.stance})" if r.stance else "")
+                             + (("; believes " + "; ".join(f"{other} feels about {k}: {v}" for k, v in list(r.beliefs.items())[:2])) if r.beliefs else ""))
+        return "\n".join(lines)
+
+    def triangles(self) -> list[dict[str, str]]:
+        """Exploitable misunderstandings: A believes B feels X about C, but B's actual relationship to C
+        says otherwise (trust/affection on the opposite side of 0.5 from the belief's tone)."""
+        out = []
+        pos = ("trust", "love", "loyal", "friend", "ally", "admire", "fond", "respect")
+        neg = ("hate", "fear", "distrust", "despise", "resent", "enemy", "betray", "suspect", "contempt")
+        for a in self.characters.values():
+            for b_name, rel_ab in a.relationships.items():
+                b = self.get(b_name)
+                if b is None:
+                    continue
+                for c_name, belief in rel_ab.beliefs.items():
+                    actual = b.relationships.get(c_name) or next((r for n, r in b.relationships.items() if n.lower() == c_name.lower()), None)
+                    if actual is None:
+                        continue
+                    low = belief.lower()
+                    believes_pos = any(w in low for w in pos) and not any(w in low for w in neg)
+                    believes_neg = any(w in low for w in neg)
+                    actual_pos = (actual.trust + actual.affection) / 2 >= 0.6
+                    actual_neg = (actual.trust + actual.affection) / 2 <= 0.4 or actual.fear >= 0.5
+                    if (believes_pos and actual_neg) or (believes_neg and actual_pos):
+                        out.append({"who": a.name, "about": b_name, "regarding": c_name, "believes": belief,
+                                    "truth": f"{b_name} actually {'trusts/likes' if actual_pos else 'distrusts/fears'} {c_name}"})
+        return out
 
     def present_in(self, texts: list[str], limit: int = 5, always_protagonist: bool = True) -> list[Character]:
         """Characters named in the scene plan / previous tail, most-mentioned first."""
@@ -515,6 +566,14 @@ class CharacterAgent:
                 st.condition.append(cond)
         st.condition = st.condition[-8:]
         st.last_seen_chapter = number
+        # Emotional model: decay toward the matrix baseline, then the chapter's push.
+        delta = d.get("mood_delta") if isinstance(d.get("mood_delta"), dict) else {}
+        st.mood_vec = apply_event(st.mood_vec, delta, baseline(self.c.matrix))
+        if not d.get("mood"):
+            st.mood = st.mood_vec.label()
+        # Planned personality drift along the character's arc.
+        if self.c.state.arc_plan:
+            drift_step(self.c.matrix, self.c.state.arc_plan, number)
         rel_changes = d.get("relationships")
         if isinstance(rel_changes, dict):
             for other, ch in rel_changes.items():
@@ -535,6 +594,10 @@ class CharacterAgent:
                 if ch.get("note"):
                     rel.history.append(f"ch {number}: {ch['note']}")
                     rel.history = rel.history[-10:]
+                beliefs = ch.get("believes_about")
+                if isinstance(beliefs, dict):
+                    for third, view in list(beliefs.items())[:4]:
+                        rel.beliefs[str(third)[:40]] = str(view)[:120]
 
     def chat(self, question: str, history: Optional[list[tuple[str, str]]] = None) -> str:
         convo = "\n".join(f"Author: {q}\n{self.c.name}: {a}" for q, a in (history or []))

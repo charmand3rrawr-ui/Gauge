@@ -101,3 +101,36 @@ plan and the previous chapter's ending. Give nicknames and titles as aliases so 
 - When a chapter feels flat, read the briefs (`character brief`) for the next one. If no
   character has a `conflict_with_plan`, the plan is probably too agreeable.
 - Edit `characters/<name>.json` freely. The agent reads it fresh every chapter.
+
+
+## Emotion, drift and what people believe about each other
+
+- **Emotional model.** Every character carries a mood vector (pleasure, arousal, dominance) that
+  decays toward a baseline set by their matrix (a neurotic character rests agitated; a dominant one
+  rests in command) and is pushed by each chapter's events (the memory update returns a
+  `mood_delta`). The vector is labelled (frightened, furious, giddy, grim, cowed...) and turned into
+  **speech directives** in the character's own prompt: high arousal means fragments and
+  interruptions, low dominance means hedging and apologies, a swearing character swears more
+  when agitated, verbal tics surface under stress.
+- **Planned drift.** `gauge character arc PROJECT NAME --trait courage=0.9 --by 40` makes a trait
+  axis move gradually toward a target over the remaining chapters, so a coward can become brave
+  across forty chapters instead of in one.
+- **Second-order beliefs.** Each relationship stores what the character believes the other person
+  feels about third parties. `Roster.triangles()` finds exploitable misunderstandings (A believes
+  B trusts C; B actually fears C), and the Schemer is handed the whole relationship graph and
+  those triangles to plot with.
+- **Scene improv.** Before drafting, the present characters play the scene out as a short turn-based
+  exchange, each answering only as themselves, with the World interjecting when its presence level
+  is high. The transcript is given to the drafter as raw material to rewrite, never to copy
+  (`write.improv_enabled`, `write.improv_rounds`, `write.improv_max_cast`).
+- **Voice Coach** (writing room). Attributes dialogue lines to speakers, measures each
+  character's style (line length, questions, contractions, swearing, long words, ellipses), and
+  flags two characters who sound alike in a chapter; profiles accumulate so the brief can warn
+  before it happens again.
+
+## The author persona
+
+`gauge persona build --from local:my-serial --blend 0.7` learns who is writing from your own
+chapters: a measured voice fingerprint, sample passages, and a described persona (stances, humour,
+taboos, favourite moves, sentence music). `write.persona_blend` sets how much it outweighs the
+data-driven style guide in the system prompt: 0 writes like the data, 1 writes like you.

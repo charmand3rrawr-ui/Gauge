@@ -147,6 +147,13 @@ class RelationshipDeltaOut(BaseModel):
     fear: float = 0.0
     stance: str = ""
     note: str = ""
+    believes_about: dict[str, str] = Field(default_factory=dict)
+
+
+class MoodDeltaOut(BaseModel):
+    pleasure: float = 0.0
+    arousal: float = 0.0
+    dominance: float = 0.0
 
 
 class MemoryOut(BaseModel):
@@ -159,6 +166,7 @@ class MemoryOut(BaseModel):
     new_secrets: list[str] = Field(default_factory=list)
     condition: list[str] = Field(default_factory=list)
     arc_progress: str = ""
+    mood_delta: MoodDeltaOut = Field(default_factory=MoodDeltaOut)
     relationships: dict[str, RelationshipDeltaOut] = Field(default_factory=dict)
 
 

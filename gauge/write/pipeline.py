@@ -1,6 +1,7 @@
 """The chapter loop: plan -> draft -> critique -> revise -> accept -> update memory."""
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -9,6 +10,10 @@ from typing import Optional
 
 from ..config import GaugeConfig
 from ..db import Database
+from ..learn.bandit import PromptBandit
+from ..learn.finetune import record_self_pair, save_accepted_copy
+from ..learn.lessons import distill, prompt_lines
+from ..learn.project_model import ProjectModel
 from ..learn.techniques import TechniqueLibrary
 from ..learn.trainer import Trainer
 from ..llm.client import LLM, CallLog, generate_json, make_llm
@@ -29,7 +34,9 @@ from .characters import (
 )
 from .critic import Critic, Critique
 from .drafter import Drafter
+from .improv import render_improv, run_improv
 from .muse import Muse, NoveltyReport, NoveltyTracker, direction_record
+from .persona import load_persona
 from .planner import Planner
 from .project import Project
 from .schemas import ContinueSummaryOut, SummaryOut, schema_of
@@ -71,6 +78,7 @@ class WritePipeline:
         if fast_llm is not None:
             fast_llm.calls = self.calls
         self._ctx: dict[str, object] = {"project": "", "chapter": None}
+        self._project_model_cache: dict[int, ProjectModel] = {}
         self.calls.sink = self._log_call
         self.trainer = trainer or Trainer(cfg, db)
         self.model = self.trainer.load_model()
@@ -81,6 +89,17 @@ class WritePipeline:
         from ..learn.style import compact_guide_for_prompt
 
         compact = compact_guide_for_prompt(self.guide) if self.guide else ""
+        self.persona = load_persona(cfg.models_dir)
+        persona_block = self.persona.prompt_block(cfg.write.persona_blend) if self.persona else ""
+        try:
+            lessons = prompt_lines(distill(db), cfg.learn.lessons_in_prompt) if cfg.learn.lessons_in_prompt > 0 else ""
+        except Exception:
+            lessons = ""
+        if lessons:
+            compact = (compact + "\n\nLessons from your own earlier chapters:\n" + lessons).strip()
+        if persona_block:
+            compact = (persona_block + "\n\n" + compact).strip()
+        self.guide_compact = compact
         self.planner = Planner(self.llm, self.exemplars, compact)
         self.drafter = Drafter(self.llm, self.exemplars, compact, cfg.write.exemplars_in_prompt)
         self.critic = Critic(self.fast_llm, self.model)
@@ -151,6 +170,63 @@ class WritePipeline:
                                          f"STORY SO FAR:\n{project.state.running_summary}").strip()
         project.save()
         return len(chapters)
+
+    # ---- learning from your own serial ------------------------------------
+    def bandit(self, project: Project) -> Optional[PromptBandit]:
+        return PromptBandit(project.dir / "bandit.json") if self.cfg.learn.bandit_enabled else None
+
+    def _apply_settings(self, settings: dict) -> dict:
+        """Apply a bandit draw to the knobs for this chapter; return the previous values."""
+        prev = {"exemplars": self.drafter.k, "temperature": self.cfg.llm.temperature, "techniques": self.cfg.write.techniques_in_prompt,
+                "world_agency": self.cfg.write.world_agency}
+        self.drafter.k = int(settings.get("exemplars", prev["exemplars"]))
+        self.cfg.llm.temperature = float(settings.get("temperature", prev["temperature"]))
+        self.cfg.write.techniques_in_prompt = int(settings.get("techniques", prev["techniques"]))
+        self.cfg.write.world_agency = float(settings.get("world_agency", prev["world_agency"]))
+        return prev
+
+    def _restore_settings(self, prev: dict) -> None:
+        self.drafter.k = prev["exemplars"]
+        self.cfg.llm.temperature = prev["temperature"]
+        self.cfg.write.techniques_in_prompt = prev["techniques"]
+        self.cfg.write.world_agency = prev["world_agency"]
+
+    def project_model(self, project: Project) -> ProjectModel:
+        return ProjectModel(project.dir, "retention")
+
+    def record_feedback(self, project: Project, chapter: int, views: Optional[float] = None, comments: Optional[float] = None,
+                        likes: Optional[float] = None) -> dict:
+        """Real reader numbers for a posted chapter: feed the panel, the bandit (delayed reward) and the project model."""
+        self.db.record_feedback(project.state.name, chapter, views, comments, likes)
+        fb = self.db.feedback(project.state.name)
+        out: dict = {"recorded": chapter}
+        council = self.council(project)
+        panel = council.get("reader_panel")
+        if panel is not None:
+            panel.record_actual(chapter, views, comments)
+            panel.save()
+            out["panel"] = panel.calibration()
+        b = self.bandit(project)
+        if b is not None:
+            prev = fb.get(chapter - 1, {}).get("views")
+            if prev and views:
+                retention = max(0.0, min(1.0, views / prev))
+                if b.update(chapter - 1, retention, weight=2.0, kind="retention"):
+                    out["bandit_reward"] = {"chapter": chapter - 1, "retention": round(retention, 3)}
+            b.save()
+        pm = self.project_model(project)
+        fitted = pm.fit(project, fb, min_chapters=self.cfg.learn.project_model_min_chapters)
+        out["project_model"] = {"n": fitted.n_train, "r2_cv": round(fitted.r2_cv, 3) if fitted.r2_cv == fitted.r2_cv else None} if fitted else "not enough labelled chapters"
+        return out
+
+    def _improv(self, project: Project, plan, roster: Roster, cast_names: list[str], world_state, level: float) -> str:
+        if not self.cfg.write.improv_enabled or not cast_names:
+            return ""
+        cast = [c for c in (roster.get(n) for n in cast_names) if c is not None]
+        situation = f"{plan.goal}. It opens: {plan.hook}. The turn: {plan.turn}."
+        transcript = run_improv(self.fast_llm, cast, situation, rounds=self.cfg.write.improv_rounds, world=world_state,
+                                world_level=level, max_cast=self.cfg.write.improv_max_cast)
+        return render_improv(transcript)
 
     # ---- the writing room --------------------------------------------------
     def council(self, project: Project) -> AgentCouncil:
@@ -348,11 +424,18 @@ class WritePipeline:
         previous_texts = project.previous_texts(n)
         council = self.council(project)
         ctx = SceneContext(project=project, number=n, plan=plan, prev_tail=" ".join(prev.split()[-250:]) if prev else "",
-                           summary=project.state.running_summary, genres=project.state.genres)
+                           summary=project.state.running_summary, genres=project.state.genres,
+                           extra={"graph": roster.graph_text() if roster.characters else "", "triangles": roster.triangles() if roster.characters else []})
+        bandit = self.bandit(project)
+        settings = bandit.sample(n) if bandit is not None else {}
+        prev_settings = self._apply_settings(settings) if settings else None
+        if settings and self.exemplars and self.cfg.write.world_enabled and world_state is not None:
+            pass
 
         # Resume from a checkpointed draft if the last run died after generating it.
         ckpt = None if fresh else project.load_checkpoint(n)
         resumed = False
+        first_draft = ""
         if ckpt and ckpt.get("plan_title") == plan.title:
             text = ckpt["text"]
             cast_names = list(ckpt.get("cast", []))
@@ -367,10 +450,17 @@ class WritePipeline:
             cast_names = [b.name for b in briefs]
             cast_text = render_cast(briefs, roster) if briefs else ""
             world_text = ""
+            world_level = 0.0
             if world_state is not None:
                 t0 = time.monotonic()
-                world_text = self._world_brief(project, plan, world_state, briefs).render()
+                wb = self._world_brief(project, plan, world_state, briefs)
+                world_text, world_level = wb.render(), wb.intervention_level
                 timings["world"] = time.monotonic() - t0
+            t0 = time.monotonic()
+            improv_text = self._improv(project, plan, roster, cast_names, world_state, world_level)
+            if improv_text:
+                timings["improv"] = time.monotonic() - t0
+                cast_text = (cast_text + "\n\n" + improv_text).strip()
             avoid_text, _prev_texts = self._avoid_list(project, n)
             ctx.cast_text, ctx.world_text = cast_text, world_text
             t0 = time.monotonic()
@@ -380,6 +470,7 @@ class WritePipeline:
             text = self.drafter.draft(project, plan, prev, words, cast=cast_text, world=world_text,
                                       techniques=self._technique_cards(plan), avoid=avoid_text, council=council_text)
             timings["draft"] = time.monotonic() - t0
+            first_draft = text
             revisions = 0
             if self.cfg.write.checkpoint_drafts:
                 project.save_checkpoint(n, "draft", text, {"plan_title": plan.title, "cast": cast_names, "revisions": 0})
@@ -388,6 +479,7 @@ class WritePipeline:
         crit, reviews, wrev, nov, agent_revs = self._critique(text, plan, n, roster, cast_names, world_state, previous_texts,
                                                               council=council, ctx=ctx)
         timings["critique"] = time.monotonic() - t0
+        first_score = crit.score
         best_text, best, best_reviews, best_wrev, best_nov, best_agents = text, crit, reviews, wrev, nov, agent_revs
         t_rev = 0.0
         while crit.score < self.cfg.write.min_acceptable_score and revisions < self.cfg.write.max_revisions:
@@ -450,6 +542,37 @@ class WritePipeline:
         project.clear_checkpoint(n)
         project.save()
         self.db.record_generated(project.name, n, best.score, best.features)
+        # Learning from this chapter: what the room complained about, a preference pair if revising
+        # helped, a copy of what was accepted (so your later edits can be learned from), and the
+        # bandit's immediate reward (reader-panel click-through when available, else the score).
+        notes = [(r.agent, i) for r in best_agents for i in r.issues[:2]] + [(f"character:{r.name}", i.problem) for r in best_reviews for i in r.issues[:1]]
+        if best_wrev:
+            notes += [("world", v["rule"]) for v in best_wrev.violations[:2]]
+        if best_nov:
+            notes += [("novelty", x) for x in best_nov.notes[:2]]
+        if notes:
+            self.db.add_notes(project.name, n, notes)
+        if self.cfg.learn.self_preference_pairs and first_draft and revisions and best_text != first_draft:
+            record_self_pair(self.cfg.models_dir / "datasets", project.name, n, f"Chapter {n} of {project.name}: {plan.goal}",
+                             first_draft, best_text, first_score, best.score)
+        save_accepted_copy(project, n, best_text)
+        if bandit is not None:
+            panel_rev = next((r for r in best_agents if r.agent == "reader_panel"), None)
+            reward = panel_rev.score if panel_rev is not None else best.score
+            bandit.update(n, reward, weight=1.0, kind="immediate")
+            bandit.save()
+            meta_settings = settings
+        else:
+            meta_settings = {}
+        if prev_settings is not None:
+            self._restore_settings(prev_settings)
+        if meta_settings:
+            # record the settings used in the chapter's front matter for later analysis
+            try:
+                front = path.read_text(encoding="utf-8")
+                path.write_text(front.replace("---\n\n# Chapter", f"settings: {json.dumps(meta_settings)}\n---\n\n# Chapter", 1), encoding="utf-8")
+            except OSError:
+                pass
         timings["total"] = time.monotonic() - t_all
         self._ctx = {"project": project.name, "chapter": None}
         return ChapterResult(number=n, title=plan.title, path=path, score=best.score, revisions=revisions, critique=best,
@@ -480,6 +603,15 @@ class WritePipeline:
             nov = self.novelty.report(text, previous_texts)
             w = self.cfg.write.novelty_weight
             crit.score = (1 - w) * crit.score + w * nov.score
+        pm = self._project_model_cache.get(id(ctx.project)) if ctx is not None else None
+        if ctx is not None and pm is None:
+            pm = self.project_model(ctx.project)
+            self._project_model_cache[id(ctx.project)] = pm
+        if pm is not None and pm.model is not None:
+            own = pm.score01(crit.features)
+            if own is not None:
+                crit.score = 0.6 * crit.score + 0.4 * own  # your readers outrank the corpus
+                crit.measured_issues.append(f"project model (your readers): {own:.2f}")
         agent_revs: list[AgentReview] = []
         if council is not None and council.agents and ctx is not None:
             agent_revs = council.review(text, ctx)

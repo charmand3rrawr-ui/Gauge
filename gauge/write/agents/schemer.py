@@ -64,8 +64,11 @@ Respond with ONLY JSON: {{"antagonist": "name of the main opposing force or pers
 The author plans chapter {ctx.number}: {ctx.plan_text}
 Cast in the scene:
 {ctx.cast_text[:800] or '(unknown)'}
+Relationship graph (who trusts whom, and what they believe about each other):
+{str(ctx.extra.get('graph', ''))[:1200] or '(unknown)'}
+Exploitable misunderstandings: {'; '.join(f"{t['who']} believes {t['believes']} but {t['truth']}" for t in ctx.extra.get('triangles', [])[:3]) or '(none known)'}
 
-What does the opposition do this chapter? Respond with ONLY JSON: {{"visible": "what the reader/protagonist can notice",
+What does the opposition do this chapter? Use a misunderstanding if one serves you. Respond with ONLY JSON: {{"visible": "what the reader/protagonist can notice",
 "hidden": "what happens off-page", "next_move": "the scheme step being executed", "wants_protagonist_to": "the reaction you are trying to provoke"}}""",
                          system=SYSTEM, temperature=0.7)
         if not d:

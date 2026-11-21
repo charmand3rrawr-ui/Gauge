@@ -359,6 +359,12 @@ class FakeLLM:
             return "Okay. Okay. You want the truth? I ran because the footsteps knew my name. One more time."
         if "answer as the world" in low:
             return "Rain since dusk. The market is closing; the vendor with one arm is still counting coins."
+        if low.startswith("[improv:turn]"):
+            m = re.search(r"next beat as ([^:]+):", prompt)
+            who = (m.group(1).strip() if m else "Someone")
+            return f"\"Okay. Okay,\" {who} said, and checked the exits first." if who.startswith("Rin") else f"{who} stepped between them and said nothing."
+        if low.startswith("[improv:world]"):
+            return "The alley's one working light cut out, and somewhere a shutter slammed down early."
         if json_mode:
             if "build the world state" in low:
                 return json.dumps({"name": "Lowmarket", "physics_rules": ["a rewind lasts ten seconds, no more", "rain never stops in the lower city"],
@@ -429,7 +435,14 @@ class FakeLLM:
                 return json.dumps({"events": ["ran from the footsteps", "saw my name on the wall"], "feelings": "shaken",
                                    "mood": "shaken", "goal": "find who wrote it", "location": "the alley", "learned": ["someone knows my name"],
                                    "new_secrets": [], "condition": ["bruised shoulder"], "arc_progress": "starting to doubt the rewind",
-                                   "relationships": {"Jun": {"trust": 0.0, "affection": 0.05, "note": "thought of her when running"}}})
+                                   "mood_delta": {"pleasure": -0.4, "arousal": 0.6, "dominance": -0.2},
+                                   "relationships": {"Jun": {"trust": 0.0, "affection": 0.05, "note": "thought of her when running",
+                                                             "believes_about": {"The Broker": "Jun trusts the Broker more than she admits"}}}})
+            if low.startswith("[persona:describe]"):
+                return json.dumps({"name": "Wet Neon", "stances": ["debt is a kind of weather", "sisters before everything"],
+                                   "humor": "deflecting, dry, worst possible moment", "taboos": ["no epigraphs", "no dream sequences"],
+                                   "favorite_moves": ["open on dialogue", "end on a sound stopping", "repeat a word under stress"],
+                                   "sentence_music": "short, then one long run", "register": "clipped street-level", "never": ["purple weather"]})
             if "running story summary" in low:
                 return json.dumps({"summary": "Rin rewound time and saw her own name on a wall.",
                                    "open_threads": ["Who wrote her name?", "Why tomorrow's date?"]})

@@ -71,6 +71,8 @@ class IngestRunner:
             if ch is None:
                 continue
             self.db.upsert_chapter(ch)
+            if ch.comment_texts:
+                self.db.add_comments(novel.key, ch.index, ch.comment_texts)
             got += 1
         self.db.touch_follow(url)
         log.info("%s: %d new chapters (%d total listed)", novel.title, got, len(refs))

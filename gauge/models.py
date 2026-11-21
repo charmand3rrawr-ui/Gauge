@@ -55,6 +55,7 @@ class ChapterRecord(BaseModel):
     views: Optional[int] = None
     comments: Optional[int] = None
     content_hash: str = ""
+    comment_texts: list[dict] = Field(default_factory=list)  # reader comments scraped with the chapter (not stored in chapters table)
     fetched_at: datetime = Field(default_factory=utcnow)
 
     def model_post_init(self, __context) -> None:  # type: ignore[override]

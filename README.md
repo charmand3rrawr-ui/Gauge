@@ -56,7 +56,13 @@ No cloud. No API bills. Your drafts never leave your machine.
    Librarian and a Comedian ([docs/AGENTS.md](docs/AGENTS.md)). A **Scout** searches open
    sources (Wikipedia, Wikivoyage, Project Gutenberg, arXiv, real climate data, your own SearXNG)
    for the real-world detail each scene needs, files it into the project, and fact-checks drafts
-   ([docs/RESEARCH.md](docs/RESEARCH.md)). When a character is in a scene their
+   ([docs/RESEARCH.md](docs/RESEARCH.md)). It **learns from your own serial**: real reader numbers
+   calibrate the panel, tune prompt settings with a bandit, and fit a per-project model; your hand
+   edits and its own improved revisions become fine-tuning data; a prediction ledger keeps the
+   corpus model honest; recurring complaints become lessons in every prompt. Characters carry an
+   emotional model, planned personality arcs, beliefs about each other, a scene improv before every
+   draft, and a Voice Coach, with an author persona that can outweigh the data
+   ([docs/LEARNING.md](docs/LEARNING.md), [docs/CHARACTERS.md](docs/CHARACTERS.md)). When a character is in a scene their
    agent is activated: they brief the drafter on what they want, would do, would say and would
    refuse, review the draft for out-of-character moments, and remember the chapter afterwards.
    Each chapter is planned, drafted with retrieved exemplars and the cast's briefs in context,
@@ -151,6 +157,9 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge agents list/show/enable/disable/setup` | the writing room; see [docs/AGENTS.md](docs/AGENTS.md) |
 | `gauge canon`, `gauge ledger`, `gauge readers`, `gauge feedback`, `gauge package`, `gauge research` | ask the Archivist, read the Showrunner's ledger, see Reader Panel predictions, record real reader numbers, get blurb and tags, search your notes |
 | `gauge scout ask/dossier/gutenberg/log` | open-source research; import public-domain books; see [docs/RESEARCH.md](docs/RESEARCH.md) |
+| `gauge feedback`, `gauge bandit`, `gauge lessons`, `gauge sync-edits`, `gauge finetune` | learn from your own serial: real numbers, prompt tuning, lessons, edit pairs, LoRA plan |
+| `gauge persona build/show/blend` | the author persona learned from your chapters |
+| `gauge character arc` | planned personality drift |
 | `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
 | `gauge bench` | measure model speed; estimate minutes per chapter |

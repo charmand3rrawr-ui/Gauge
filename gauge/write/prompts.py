@@ -231,8 +231,10 @@ Respond with ONLY JSON:
  "location": "where you are now, if clear", "learned": ["new facts you now know"],
  "new_secrets": ["anything you are now hiding"], "condition": ["injuries, gains, losses"],
  "arc_progress": "one line on how you have changed, if at all",
+ "mood_delta": {{"pleasure": -1..1, "arousal": -1..1, "dominance": -1..1}} (how this chapter moved you),
  "relationships": {{"<other name>": {{"trust": -1..1 change, "affection": -1..1 change, "respect": -1..1 change,
-   "fear": -1..1 change, "stance": "updated one-line stance", "note": "what happened between you"}}}}}}
+   "fear": -1..1 change, "stance": "updated one-line stance", "note": "what happened between you",
+   "believes_about": {{"<third person>": "what you now believe <other name> feels about them"}}}}}}}}
 
 CHAPTER:
 {text}"""

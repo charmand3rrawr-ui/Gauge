@@ -106,6 +106,21 @@ bibliography, and can import Project Gutenberg books as `gutenberg:` novels. The
 in the writing room decides the per-chapter questions and fact-checks drafts; the Librarian
 indexes what the Scout files. `GAUGE_OFFLINE=1` disables all sources.
 
+## Learning from your own serial and personality depth
+
+- `learn/bandit.py` (factored Thompson sampling over prompt knobs, per project), `learn/project_model.py`
+  (ridge on your chapters' features vs retention from `feedback`), `learn/ledger.py` (predictions
+  table, evaluation of old predictions), `learn/lessons.py` (themes from `chapter_notes`),
+  `learn/comments.py` (comment lexicon; Royal Road comments are parsed from chapter pages),
+  `learn/finetune.py` (self-preference pairs, author-edit pairs, plan/run for `scripts/finetune_lora.py`).
+- `write/persona.py` (author persona in the system prompt), `write/improv.py` (turn-based scene
+  improv), `write/emotion.py` (PAD mood, decay, speech directives, arc drift), `write/stylometry.py`
+  + `agents/voice_coach.py` (dialogue attribution and distinctness), `Relationship.beliefs` and
+  `Roster.triangles()` in `characters.py` (second-order beliefs for the Schemer).
+- `WritePipeline.write_next` order now: bandit draw -> plan -> character briefs -> world brief ->
+  improv -> technique cards + avoid list -> council briefs -> draft -> critic (+ project model) +
+  reviews -> revise -> memories -> notes, preference pair, accepted copy, bandit reward.
+
 ## Execution model
 
 - `llm/tokens.py`: token estimation and `PromptBudget`; `Drafter.build_draft_prompt` fits every

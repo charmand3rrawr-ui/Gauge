@@ -51,6 +51,11 @@ class LearnConfig(BaseModel):
     exemplar_count: int = 200
     min_chapters_for_training: int = 30
     absorb_per_cycle: int = 8  # chapters turned into technique cards per daemon cycle (needs the LLM)
+    # Learning from your own serial.
+    project_model_min_chapters: int = 30  # labelled chapters before a per-project model overrides the corpus model
+    bandit_enabled: bool = True  # tune prompt settings per project by reward (Thompson sampling)
+    self_preference_pairs: bool = True  # record draft-vs-accepted pairs for fine-tuning
+    lessons_in_prompt: int = 5  # recurring lessons shown to the writer
 
 
 class WriteConfig(BaseModel):
@@ -74,6 +79,12 @@ class WriteConfig(BaseModel):
     muse_directions: int = 3  # alternative directions proposed before each outline extension
     techniques_in_prompt: int = 3  # technique cards shown to the drafter
     novelty_weight: float = 0.15  # share of the chapter score from novelty against earlier chapters
+    # Scene improv: present characters play the scene out before it is written.
+    improv_enabled: bool = True
+    improv_rounds: int = 2
+    improv_max_cast: int = 4
+    # Author persona blend: 0 = write like the data, 1 = write like the author persona.
+    persona_blend: float = 0.5
 
 
 class ResearchConfig(BaseModel):
@@ -108,6 +119,7 @@ class AgentsConfig(BaseModel):
     librarian: bool = True
     comedian: bool = True  # attaches only when the genre or tone is comic
     scout: bool = True  # searches open sources for real-world detail (see research settings)
+    voice_coach: bool = True  # measures whether characters sound alike
     sensitivity_rules: str = ""  # your platform's content rules, pasted
     sensitivity_categories: list[str] = Field(default_factory=list)
     block_on_sensitivity: bool = False  # severe flags force a revision instead of a warning

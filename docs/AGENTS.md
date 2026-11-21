@@ -65,6 +65,12 @@ breathes, and complains about a third identical shape in a row.
 `research/` folder (`.md`, `.txt`) with embeddings; briefs the drafter with the notes relevant
 to the scene; `gauge research PROJECT "who built the sewers?"`.
 
+**Voice Coach** (`voice_coach`). No model calls. Attributes dialogue to speakers, measures each
+character's style, and penalises chapters where two characters sound alike. See CHARACTERS.md.
+
+**Scout** (`scout`). Open-source research for the scene and fact-checks of real-world claims. See
+RESEARCH.md.
+
 **Comedian** (`comedian`). Attaches itself only when the genres or tone are comic. Plans comic
 beats from character and situation, counts laughs, keeps running gags for callbacks.
 

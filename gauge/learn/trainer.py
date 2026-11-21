@@ -67,6 +67,12 @@ class Trainer:
             return None
         model = EngagementModel.fit(X, y, names, self.cfg.learn.target, alpha=self.cfg.learn.ridge_alpha)
         model.save(self.model_path)
+        try:
+            from .ledger import record_predictions
+
+            record_predictions(self.db, model, novels, nf)
+        except Exception as e:  # the ledger is bookkeeping; never fail a cycle for it
+            log.warning("prediction ledger failed: %s", e)
         return model
 
     def load_model(self) -> Optional[EngagementModel]:

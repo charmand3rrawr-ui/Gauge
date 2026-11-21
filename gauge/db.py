@@ -85,6 +85,20 @@ CREATE TABLE IF NOT EXISTS research_cache (
 CREATE TABLE IF NOT EXISTS research_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, project TEXT, chapter INTEGER, query TEXT, source TEXT, hits INTEGER, cached INTEGER
 );
+CREATE TABLE IF NOT EXISTS feedback (
+    project TEXT NOT NULL, chapter INTEGER NOT NULL, views REAL, comments REAL, likes REAL, at TEXT,
+    PRIMARY KEY (project, chapter)
+);
+CREATE TABLE IF NOT EXISTS comments (
+    novel_key TEXT NOT NULL, idx INTEGER NOT NULL, author TEXT, text TEXT, at TEXT, hash TEXT,
+    PRIMARY KEY (novel_key, idx, hash)
+);
+CREATE TABLE IF NOT EXISTS predictions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, novel_key TEXT, at TEXT, target TEXT, predicted REAL, observed_then REAL
+);
+CREATE TABLE IF NOT EXISTS chapter_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT, chapter INTEGER, agent TEXT, issue TEXT, at TEXT
+);
 CREATE TABLE IF NOT EXISTS generated (
     project TEXT NOT NULL,
     chapter INTEGER NOT NULL,
@@ -311,6 +325,74 @@ class Database:
             d["summary"] = json.loads(d["summary"] or "{}")
             out.append(d)
         return out
+
+    # ---- reader feedback on our own chapters ----------------------------------
+    def record_feedback(self, project: str, chapter: int, views: Optional[float] = None, comments: Optional[float] = None,
+                        likes: Optional[float] = None) -> None:
+        with self.tx() as c:
+            prev = c.execute("SELECT views, comments, likes FROM feedback WHERE project=? AND chapter=?", (project, chapter)).fetchone()
+            v = views if views is not None else (prev[0] if prev else None)
+            cm = comments if comments is not None else (prev[1] if prev else None)
+            lk = likes if likes is not None else (prev[2] if prev else None)
+            c.execute("INSERT OR REPLACE INTO feedback VALUES (?,?,?,?,?,?)", (project, chapter, v, cm, lk, utcnow().isoformat()))
+
+    def feedback(self, project: str) -> dict[int, dict[str, Optional[float]]]:
+        rows = self._conn.execute("SELECT chapter, views, comments, likes FROM feedback WHERE project=? ORDER BY chapter", (project,))
+        return {int(r[0]): {"views": r[1], "comments": r[2], "likes": r[3]} for r in rows}
+
+    # ---- reader comments on ingested chapters --------------------------------------
+    def add_comments(self, novel_key: str, idx: int, comments: list[dict[str, Any]]) -> int:
+        import hashlib
+
+        n = 0
+        with self.tx() as c:
+            for cm in comments:
+                text = str(cm.get("text", "")).strip()
+                if not text:
+                    continue
+                h = hashlib.sha1(f"{cm.get('author', '')}|{text}".encode()).hexdigest()[:16]
+                cur = c.execute("INSERT OR IGNORE INTO comments VALUES (?,?,?,?,?,?)",
+                                (novel_key, idx, str(cm.get("author", ""))[:80], text[:2000], str(cm.get("at", "") or ""), h))
+                n += cur.rowcount
+        return n
+
+    def comments_for(self, novel_key: str, idx: Optional[int] = None) -> list[dict[str, Any]]:
+        q, args = "SELECT novel_key, idx, author, text, at FROM comments WHERE novel_key=?", [novel_key]
+        if idx is not None:
+            q += " AND idx=?"
+            args.append(idx)
+        return [dict(r) for r in self._conn.execute(q + " ORDER BY idx, rowid", args)]
+
+    def comment_counts(self, novel_key: str) -> dict[int, int]:
+        rows = self._conn.execute("SELECT idx, COUNT(*) FROM comments WHERE novel_key=? GROUP BY idx", (novel_key,))
+        return {int(r[0]): int(r[1]) for r in rows}
+
+    def all_comments(self, limit: int = 5000) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._conn.execute("SELECT novel_key, idx, author, text FROM comments LIMIT ?", (limit,))]
+
+    # ---- prediction ledger ------------------------------------------------------------
+    def record_prediction(self, novel_key: str, target: str, predicted: float, observed_then: Optional[float]) -> None:
+        with self.tx() as c:
+            c.execute("INSERT INTO predictions (novel_key, at, target, predicted, observed_then) VALUES (?,?,?,?,?)",
+                      (novel_key, utcnow().isoformat(), target, predicted, observed_then))
+
+    def predictions(self, target: str, older_than_days: int = 0) -> list[dict[str, Any]]:
+        rows = self._conn.execute("SELECT * FROM predictions WHERE target=? AND replace(substr(at,1,19),'T',' ') <= datetime('now', ?) "
+                                  "ORDER BY at", (target, f"-{int(older_than_days)} days"))
+        return [dict(r) for r in rows]
+
+    # ---- chapter notes (what the room complained about) --------------------------------
+    def add_notes(self, project: str, chapter: int, notes: list[tuple[str, str]]) -> None:
+        with self.tx() as c:
+            for agent, issue in notes:
+                c.execute("INSERT INTO chapter_notes (project, chapter, agent, issue, at) VALUES (?,?,?,?,?)",
+                          (project, chapter, agent, issue[:400], utcnow().isoformat()))
+
+    def notes(self, project: Optional[str] = None, limit: int = 2000) -> list[dict[str, Any]]:
+        q, args = "SELECT project, chapter, agent, issue FROM chapter_notes", ()
+        if project:
+            q, args = q + " WHERE project=?", (project,)
+        return [dict(r) for r in self._conn.execute(q + " ORDER BY id DESC LIMIT ?", (*args, limit))]
 
     # ---- technique absorption ------------------------------------------------
     def absorbed_keys(self) -> set:

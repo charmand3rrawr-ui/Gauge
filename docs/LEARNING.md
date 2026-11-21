@@ -89,3 +89,44 @@ refit the model -> rebuild exemplars and the style guide -> export datasets -> o
 the next chapter of your active project with the fresh guide. `metric_history` records every
 observation of every novel's metrics, so growth-based targets (followers gained per chapter
 released) are a short addition when you want them. See `docs/ROADMAP.md`.
+
+
+## Learning from your own serial
+
+The corpus teaches what readers in general reward. Your posted chapters teach what *your*
+readers reward, and Gauge treats that as the stronger signal.
+
+- **`gauge feedback PROJECT CHAPTER --views N --comments N --likes N`** records real numbers for a
+  posted chapter. Three things happen: the Reader Panel compares its predicted click-through with
+  observed retention (views of the next chapter over this one) and learns a bias; the prompt
+  bandit receives retention as a delayed reward for the settings that wrote that chapter; and the
+  **per-project model** (`gauge report --project NAME`) is refitted on your chapter features and
+  retention labels. Once `learn.project_model_min_chapters` (30) chapters are labelled, the critic
+  blends it in ahead of the corpus model.
+- **Prompt bandit** (`gauge bandit PROJECT`). Five knobs (exemplars shown, temperature, technique
+  cards, world agency, style-guide lines) are sampled per chapter from Beta posteriors by Thompson
+  sampling. Reader Panel click-through is the immediate reward; real retention from `gauge feedback`
+  is a heavier delayed reward. The settings used are recorded in each chapter's front matter.
+- **Comments.** Royal Road chapter pages carry reader comments; ingestion now stores them. A small
+  lexicon turns them into per-chapter signals (excitement, confusion, complaint, prediction,
+  laughter) used to find reaction hotspots and to show the Reader Panel how real readers talk.
+- **Prediction ledger.** Each training cycle records a prediction for every novel. `gauge report`
+  compares predictions at least a week old with the novels' current numbers (correlation, error,
+  and correlation of predicted vs actual *growth*). If those are near zero, the model has learned
+  nothing you should trust.
+- **Lessons** (`gauge lessons [PROJECT]`). Everything the writing room complained about is kept in
+  `chapter_notes`; `lessons.md` distils recurring themes (openings, endings, pacing, repetition,
+  voice, world rules, prose, payoffs, readers) into advice that is shown to the writer in every
+  system prompt (`learn.lessons_in_prompt`).
+
+## Fine-tuning on your own work
+
+Two datasets now grow by themselves under `data/models/datasets/`:
+
+- `self_preference.jsonl`: first draft versus accepted revision whenever revising improved the score;
+- `author_edits.jsonl`: what Gauge accepted versus what you kept after editing a chapter by hand
+  (`gauge sync-edits PROJECT` compares `drafts/accepted/` with the files on disk).
+
+`gauge finetune` reports the data, checks for CUDA and Unsloth, and prints the exact command for
+`scripts/finetune_lora.py` (SFT then ORPO, GGUF export, `ollama create`). `--run` trains in place
+when the GPU toolchain is present. Gauge never trains silently.

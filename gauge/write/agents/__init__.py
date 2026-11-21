@@ -13,6 +13,7 @@ from .scout import ScoutAgent
 from .sensitivity import SensitivityReader
 from .showrunner import Showrunner
 from .theme import ThemeKeeper
+from .voice_coach import VoiceCoach
 
 __all__ = ["Archivist", "AgentReview", "SceneContext", "StoryAgent", "Comedian", "ALL_AGENTS", "AgentCouncil", "build_council",
-           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper"]
+           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper", "VoiceCoach"]

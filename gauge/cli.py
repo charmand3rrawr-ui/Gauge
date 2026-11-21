@@ -256,8 +256,9 @@ def train(c: Ctx, target: Optional[str]) -> None:
 @main.command()
 @click.option("--top", default=15, show_default=True)
 @click.option("--novel", default=None, help="Explain one novel by key, e.g. royalroad:12345")
+@click.option("--project", default=None, help="Show the per-project model learned from your readers.")
 @click.pass_obj
-def report(c: Ctx, top: int, novel: Optional[str]) -> None:
+def report(c: Ctx, top: int, novel: Optional[str], project: Optional[str]) -> None:
     """What has Gauge learned? Corpus stats, feature importances, leaderboard."""
     from .learn import Trainer
     from .report import corpus_summary, explain_novel, leaderboard
@@ -266,6 +267,18 @@ def report(c: Ctx, top: int, novel: Optional[str]) -> None:
     m = t.load_model()
     if novel:
         console.print(explain_novel(c.db, m, novel))
+        return
+    if project:
+        from .learn.project_model import ProjectModel
+        from .write.project import Project
+
+        if not Project.exists(c.cfg.projects_dir, project):
+            console.print(f"[red]no project named {project!r}[/]")
+            sys.exit(1)
+        pm = ProjectModel(Project(c.cfg.projects_dir, project).dir)
+        console.print(f"[bold]Your readers' model for {project}[/]\n{pm.explain()}")
+        fb = c.db.feedback(project)
+        console.print(f"labelled chapters: {len(fb)}")
         return
     console.print(f"Corpus: {corpus_summary(c.db)}")
     if m:
@@ -281,6 +294,11 @@ def report(c: Ctx, top: int, novel: Optional[str]) -> None:
         for r in rows:
             table.add_row(*[str(v) for v in r.values()])
         console.print(table)
+    from .learn.ledger import evaluate
+
+    led = evaluate(c.db, c.cfg.learn.target, older_than_days=7)
+    if led.get("pairs"):
+        console.print(f"\n[bold]Prediction ledger[/] (predictions >= 7 days old vs today's numbers): {led}")
     calls = c.db.call_summary(limit_days=30)
     if calls:
         table = Table(title="LLM time by purpose (last 30 days)")
@@ -736,6 +754,30 @@ def bench(c: Ctx, tokens: int, n_chars: int) -> None:
         console.print(f"  [yellow]num_ctx={c.cfg.llm.num_ctx} is small; prompts will be trimmed. 8192 is recommended.[/]")
 
 
+@character.command("arc")
+@click.argument("project")
+@click.argument("name")
+@click.option("--trait", "traits", multiple=True, required=True, help="axis=target, e.g. --trait courage=0.9 (repeatable)")
+@click.option("--by", "by_chapter", type=int, required=True, help="Chapter by which the trait should reach its target.")
+@click.pass_obj
+def character_arc(c: Ctx, project: str, name: str, traits: tuple, by_chapter: int) -> None:
+    """Plan personality drift: trait axes move gradually toward targets as chapters are written."""
+    from .write.characters import TRAIT_AXES
+
+    _, roster = _roster(c, project)
+    ch = roster.get(name)
+    if ch is None:
+        console.print(f"[red]no character {name!r}[/]")
+        sys.exit(1)
+    for t in traits:
+        axis, _, val = t.partition("=")
+        if axis not in TRAIT_AXES:
+            raise click.BadParameter(f"unknown axis {axis!r}")
+        ch.state.arc_plan[axis] = {"target": max(0.0, min(1.0, float(val))), "by": by_chapter}
+    roster.save()
+    console.print(f"[green]arc set[/] for {ch.name}: " + "; ".join(f"{k} -> {v['target']} by ch {v['by']}" for k, v in ch.state.arc_plan.items()))
+
+
 # ---------------------------------------------------------------------------- world
 @main.group()
 def world() -> None:
@@ -997,17 +1039,146 @@ def readers(c: Ctx, project: str) -> None:
 @click.argument("chapter", type=int)
 @click.option("--views", type=float, default=None)
 @click.option("--comments", type=float, default=None)
+@click.option("--likes", type=float, default=None)
 @click.pass_obj
-def feedback(c: Ctx, project: str, chapter: int, views: Optional[float], comments: Optional[float]) -> None:
-    """Record real reader numbers for a posted chapter; the Reader Panel calibrates itself against them."""
-    _, _, council = _council(c, project)
-    ag = council.get("reader_panel")
-    if ag is None:
-        console.print("[yellow]reader panel is disabled[/]")
+def feedback(c: Ctx, project: str, chapter: int, views: Optional[float], comments: Optional[float], likes: Optional[float]) -> None:
+    """Record real reader numbers for a posted chapter. Feeds the Reader Panel's calibration, the prompt
+    bandit (retention as delayed reward) and the per-project engagement model."""
+    pipe = _pipeline_or_exit(c)
+    out = pipe.record_feedback(pipe.open_project(project), chapter, views, comments, likes)
+    console.print_json(json.dumps(out, default=str))
+
+
+@main.command()
+@click.argument("project")
+@click.pass_obj
+def bandit(c: Ctx, project: str) -> None:
+    """How the prompt-settings bandit is doing for a project (posterior means per knob value)."""
+    pipe = _pipeline_or_exit(c)
+    b = pipe.bandit(pipe.open_project(project))
+    if b is None:
+        console.print("[yellow]bandit disabled[/] (learn.bandit_enabled)")
+        return
+    console.print(b.report())
+    console.print(f"current best: {b.best()}")
+
+
+@main.command()
+@click.argument("project", required=False)
+@click.pass_obj
+def lessons(c: Ctx, project: Optional[str]) -> None:
+    """Distil what the writing room keeps complaining about into lessons (shown to the writer)."""
+    from .learn.lessons import write_lessons
+
+    summary = write_lessons(c.db, c.cfg.models_dir / "lessons.md", project)
+    console.print((c.cfg.models_dir / "lessons.md").read_text(encoding="utf-8"))
+    console.print(f"[dim]{summary['total']} notes considered; saved to {c.cfg.models_dir / 'lessons.md'}[/]")
+
+
+@main.command("sync-edits")
+@click.argument("project")
+@click.pass_obj
+def sync_edits(c: Ctx, project: str) -> None:
+    """Learn from your hand edits: compare chapters on disk with what Gauge accepted; record preference pairs."""
+    from .learn.finetune import sync_author_edits
+    from .write.project import Project
+
+    if not Project.exists(c.cfg.projects_dir, project):
+        console.print(f"[red]no project named {project!r}[/]")
         sys.exit(1)
-    ag.record_actual(chapter, views, comments)
-    ag.save()
-    console.print(f"[green]recorded[/] ch {chapter}: views={views} comments={comments}  calibration={ag.calibration()}")
+    changes = sync_author_edits(Project(c.cfg.projects_dir, project), c.cfg.models_dir / "datasets")
+    if not changes:
+        console.print("no new edits found")
+        return
+    for ch in changes:
+        console.print(f"  ch {ch['chapter']}: {ch['words_changed']} words changed -> author_edits.jsonl")
+    console.print(f"[green]{len(changes)} pair(s) recorded[/]")
+
+
+@main.command()
+@click.option("--run", "do_run", is_flag=True, help="Actually train (needs CUDA + unsloth); default is to show the plan.")
+@click.option("--base", default="unsloth/llama-3.1-8b-instruct", show_default=True)
+@click.pass_obj
+def finetune(c: Ctx, do_run: bool, base: str) -> None:
+    """Check the fine-tuning datasets and run (or print) the LoRA training command."""
+    from .learn import finetune as ft
+
+    ds = c.cfg.models_dir / "datasets"
+    p = ft.plan(ds, base, c.cfg.models_dir / "lora")
+    table = Table(title="Fine-tuning data")
+    table.add_column("file")
+    table.add_column("rows")
+    for k, v in p["datasets"].items():
+        table.add_row(k, str(v))
+    console.print(table)
+    console.print(f"preference pairs: {p['preference_pairs']}  enough data: {p['enough_data']}  cuda: {p['cuda']}  unsloth: {p['unsloth']}  ollama: {p['ollama']}")
+    console.print(f"\ncommand:\n  {p['command']}")
+    if not do_run:
+        console.print("\nAdd --run to train here, or copy the command to a machine with an NVIDIA GPU (WSL2 works).")
+        return
+    if not (p["cuda"] and p["unsloth"]):
+        console.print("[red]cannot train here[/]: needs CUDA and `pip install unsloth trl datasets`.")
+        sys.exit(1)
+    sys.exit(ft.run(ds, base, c.cfg.models_dir / "lora"))
+
+
+@main.group()
+def persona() -> None:
+    """The author persona: who is writing, learned from your own novels."""
+
+
+@persona.command("build")
+@click.option("--from", "source", required=True, help="A novel key (e.g. local:my-serial) or a project name to learn the voice from.")
+@click.option("--blend", type=float, default=None, help="0 = write like the data, 1 = write like you (saved to config).")
+@click.pass_obj
+def persona_build(c: Ctx, source: str, blend: Optional[float]) -> None:
+    """Build the persona from your own chapters: measured fingerprint + a described voice."""
+    from .llm import make_llm
+    from .write.persona import build_persona, save_persona
+    from .write.project import Project
+
+    texts: list[str] = []
+    novel = c.db.get_novel(source)
+    if novel is not None:
+        texts = [ch.text for ch in c.db.chapters(novel.key)]
+    elif Project.exists(c.cfg.projects_dir, source):
+        p = Project(c.cfg.projects_dir, source)
+        texts = [t for n in range(1, p.state.written + 1) for t in [p.read_chapter(n)] if t]
+    if not texts:
+        console.print(f"[red]nothing to learn from[/]: {source!r} is neither a novel key (see `gauge novels`) nor a project with chapters")
+        sys.exit(1)
+    llm = make_llm(c.cfg.llm, "fast")
+    per = build_persona(llm if llm.available() else None, texts, source)
+    save_persona(c.cfg.models_dir, per)
+    if blend is not None:
+        c.cfg.write.persona_blend = max(0.0, min(1.0, blend))
+        c.cfg.save()
+    console.print(per.prompt_block(1.0))
+    console.print(f"\n[green]saved[/] {c.cfg.models_dir / 'persona.json'}  blend={c.cfg.write.persona_blend}")
+
+
+@persona.command("show")
+@click.pass_obj
+def persona_show(c: Ctx) -> None:
+    """Print the persona and the current blend."""
+    from .write.persona import load_persona
+
+    per = load_persona(c.cfg.models_dir)
+    console.print(per.prompt_block(1.0) if per else "(no persona yet; `gauge persona build --from local:my-serial`)")
+    console.print(f"blend: {c.cfg.write.persona_blend}")
+
+
+@persona.command("blend")
+@click.argument("value", type=float)
+@click.pass_obj
+def persona_blend(c: Ctx, value: float) -> None:
+    """Set how much the persona outweighs the data (0..1)."""
+    c.cfg.write.persona_blend = max(0.0, min(1.0, value))
+    c.cfg.save()
+    console.print(f"[green]persona blend[/] = {c.cfg.write.persona_blend}")
+
+
+
 
 
 @main.command()
