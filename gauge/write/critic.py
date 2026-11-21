@@ -41,12 +41,13 @@ _HEURISTIC_TARGETS = {
 
 class Critic:
     def __init__(self, llm: LLM, model: Optional[EngagementModel], novel_level_feats: Optional[dict[str, float]] = None,
-                 rebel: bool = False, retention_weight: float = 0.0):
+                 rebel: bool = False, retention_weight: float = 0.0, realism_weight: float = 0.0):
         self.llm = llm
         self.model = model
         self.novel_feats = novel_level_feats or {}
         self.rebel = rebel
         self.retention_weight = max(0.0, min(0.5, retention_weight))
+        self.realism_weight = max(0.0, min(0.5, realism_weight))
 
     def _measured(self, feats: dict[str, float]) -> (float, list[str]):  # type: ignore[valid-type]
         issues: list[str] = []
@@ -98,17 +99,25 @@ class Critic:
         measured, issues = self._measured(feats)
         judged, rubric, notes = self._judged(text, plan)
         retention = 0.0
+        base = 0.5 * measured + 0.5 * judged
+        parts = [(base, 1.0)]
         if self.retention_weight > 0:
             from ..learn.retention import shape
-
             rs = shape(text)
             retention = rs.score
             issues = (issues + rs.issues)[:8]
-            w = self.retention_weight
-            score = (1 - w) * (0.5 * measured + 0.5 * judged) + w * retention
-        else:
-            score = 0.5 * measured + 0.5 * judged
-        return Critique(score=score, measured=measured, judged=judged, rubric=rubric, notes=notes,
+            parts = [(base, 1.0 - self.retention_weight), (retention, self.retention_weight)]
+        realism = 0.0
+        if self.realism_weight > 0:
+            from .realism import sensory_profile, sensory_score
+            sp = sensory_profile(text)
+            realism = sensory_score(sp)
+            issues = (issues + sp.issues)[:10]
+            base_w = parts[0][1] - self.realism_weight
+            parts = [(p, w) for p, w in parts[1:]] + [(base, max(0.0, base_w)), (realism, self.realism_weight)]
+        total_w = sum(w for _, w in parts) or 1.0
+        score = sum(p * w for p, w in parts) / total_w
+        return Critique(score=round(score, 4), measured=measured, judged=judged, rubric=rubric, notes=notes,
                         measured_issues=issues, features=feats, retention=round(retention, 3))
 
     def problems(self, c: Critique) -> list[str]:

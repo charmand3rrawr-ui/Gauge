@@ -147,17 +147,24 @@ def intervention_level(plan_text: str, cast_conflicts: int, agency: float, chapt
 
 
 class WorldAgent:
-    def __init__(self, llm: LLM, state: WorldState, agency: float = 0.6):
+    def __init__(self, llm: LLM, state: WorldState, agency: float = 0.6, realism: bool = False):
         self.llm = llm
         self.w = state
         self.agency = agency
+        self.realism = realism  # ground physics/geography/procedure in the real world rather than inventing
+
+    _REALISM_NOTE = ("\nREALISM MODE: this is a real-world setting. Do not invent physics or magic. Ground geography, "
+                     "weather, institutions and how things work in the actual world; where a specific real detail is "
+                     "needed and unknown, note it as needing research rather than making it up.")
 
     def system_prompt(self) -> str:
-        return prompts.WORLD_SYSTEM.format(world=self.w.describe())
+        return prompts.WORLD_SYSTEM.format(world=self.w.describe()) + (self._REALISM_NOTE if self.realism else "")
 
     # ---- creation ----------------------------------------------------------
     def build(self, bible_md: str, premise: str = "") -> WorldState:
         prompt = prompts.WORLD_BUILD_PROMPT.format(bible=bible_md, premise=premise or "(none beyond the bible)")
+        if self.realism:
+            prompt += self._REALISM_NOTE
         try:
             d = generate_json(self.llm, prompt, schema=schema_of(WorldBuildOut), temperature=0.8, max_tokens=1400,
                               purpose="world:build")

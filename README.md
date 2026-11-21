@@ -168,6 +168,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge settings list/show/on/off/set/reset` | the switches; same catalog as the Studio panel; see [docs/SWITCHES.md](docs/SWITCHES.md) |
 | `gauge security seal/verify/status/log/lockdown/unlock/scan/check-text/range/drill/defense/deps` | defences, cyber-range and adversarial drill; see [docs/SECURITY.md](docs/SECURITY.md) |
 | `gauge market kit/plan/channels/policy/social/subscribers/newsletter` | marketing assets, a disclosed plan, owned-account posting and an opt-in mailing list; see [docs/MARKETING.md](docs/MARKETING.md) |
+| `gauge write ... ` (realism) | sensory editor, continuity auditor, grounding dossier, realism dial; see [docs/REALISM.md](docs/REALISM.md) |
 | `gauge newsdesk trends/draft/queue/show/approve/reject/run/watch` | multilingual trend discovery and original, sourced commentary on a schedule (default every 30 min), review-gated; see [docs/NEWSDESK.md](docs/NEWSDESK.md) |
 | `gauge site opinion/build` | publish the serial and a labelled-opinion blog as a static site; byline required, clickbait refused; see [docs/SITE.md](docs/SITE.md) |
 | `gauge code lang/binary/disasm` | read any language, read files at the binary level, disassemble Python |

@@ -152,6 +152,9 @@ class WriteConfig(BaseModel):
     techniques_in_prompt: int = 3  # technique cards shown to the drafter
     novelty_weight: float = 0.15  # share of the chapter score from novelty against earlier chapters
     retention_weight: float = 0.0  # share of the chapter score from retention-curve shape (hook/mid-spike/cliff); 0 = off
+    realism_weight: float = 0.0  # share of the chapter score from sensory grounding and show-dont-tell; 0 = off
+    world_realism: bool = False  # ground the World agent in the real world (geography, weather, procedures) rather than inventing
+    grounding: bool = False  # the Scout gathers sensory/procedural texture for each scene (needs research enabled)
     ab_titles: bool = False  # generate several chapter titles and keep the best-scoring one
     ab_hooks: bool = False  # generate several opening hooks and offer the best in the draft brief
     # Scene improv: present characters play the scene out before it is written.
@@ -201,6 +204,8 @@ class AgentsConfig(BaseModel):
     readability: bool = True  # measures burstiness, syllable load and paragraph rhythm; smooth-to-read as a number
     suitability: bool = True  # checks each chapter against the audience contract below
     arc_keeper: bool = True  # tracks the bible's long arc and flags when a serial drifts from it
+    sensory: bool = True  # grounds scenes in the senses; flags told-emotion and filter words
+    continuity: bool = True  # checks physical/time-of-day/season consistency
     sensitivity_rules: str = ""  # your platform's content rules, pasted
     sensitivity_categories: list[str] = Field(default_factory=list)
     block_on_sensitivity: bool = False  # severe flags force a revision instead of a warning

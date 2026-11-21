@@ -11,12 +11,14 @@ from .arc_keeper import ArcKeeper
 from .archivist import Archivist
 from .base import AgentReview, SceneContext, StoryAgent
 from .comedian import Comedian, wants_comedy
+from .continuity_auditor import ContinuityAuditor
 from .editor import LineEditor
 from .librarian import Librarian
 from .pacing import PacingDirector
 from .packager import Packager
 from .readability import ReadabilityCoach
 from .readers import ReaderPanel
+from .realism_editor import SensoryEditor
 from .schemer import Schemer
 from .scout import ScoutAgent
 from .sensitivity import SensitivityReader
@@ -32,9 +34,9 @@ ALL_AGENTS: dict[str, type[StoryAgent]] = {
     LineEditor.name: LineEditor, Packager.name: Packager, ThemeKeeper.name: ThemeKeeper, SensitivityReader.name: SensitivityReader,
     PacingDirector.name: PacingDirector, Librarian.name: Librarian, Comedian.name: Comedian, ScoutAgent.name: ScoutAgent,
     VoiceCoach.name: VoiceCoach, ReadabilityCoach.name: ReadabilityCoach, SuitabilityChecker.name: SuitabilityChecker,
-    ArcKeeper.name: ArcKeeper,
+    ArcKeeper.name: ArcKeeper, SensoryEditor.name: SensoryEditor, ContinuityAuditor.name: ContinuityAuditor,
 }
-LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability", "arc_keeper"}
+LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability", "arc_keeper", "sensory", "continuity"}
 
 
 def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCouncil:

@@ -112,7 +112,7 @@ class WritePipeline:
         self.guide_compact = compact
         self.planner = Planner(self.llm, self.exemplars, compact)
         self.drafter = Drafter(self.llm, self.exemplars, compact, cfg.write.exemplars_in_prompt)
-        self.critic = Critic(self.fast_llm, self.model, rebel=cfg.write.rebel, retention_weight=cfg.write.retention_weight)
+        self.critic = Critic(self.fast_llm, self.model, rebel=cfg.write.rebel, retention_weight=cfg.write.retention_weight, realism_weight=cfg.write.realism_weight)
         self.techniques = TechniqueLibrary(self.trainer.embedder)
         self.techniques.load(cfg.models_dir)
         self.novelty = NoveltyTracker()
@@ -284,7 +284,7 @@ class WritePipeline:
 
     def build_world(self, project: Project) -> WorldState:
         w = load_world(project.dir) or WorldState()
-        agent = WorldAgent(self.fast_llm, w, self.cfg.write.world_agency)
+        agent = WorldAgent(self.fast_llm, w, self.cfg.write.world_agency, realism=self.cfg.write.world_realism)
         agent.build(project.bible_markdown(), project.state.premise_doc)
         save_world(project.dir, w)
         return w
@@ -295,7 +295,7 @@ class WritePipeline:
         conflicts = sum(1 for b in briefs if b.conflict_with_plan)
         scene = {"number": plan.number, "title": plan.title, "goal": plan.goal, "hook": plan.hook, "turn": plan.turn,
                  "cliffhanger": plan.cliffhanger, "beats": plan.beats}
-        return WorldAgent(self.fast_llm, w, self.cfg.write.world_agency).brief(scene, cast_summary, conflicts)
+        return WorldAgent(self.fast_llm, w, self.cfg.write.world_agency, realism=self.cfg.write.world_realism).brief(scene, cast_summary, conflicts)
 
     # ---- creativity --------------------------------------------------------
     def _pick_direction(self, project: Project) -> str:
@@ -486,6 +486,15 @@ class WritePipeline:
                 timings["improv"] = time.monotonic() - t0
                 cast_text = (cast_text + "\n\n" + improv_text).strip()
             avoid_text, _prev_texts = self._avoid_list(project, n)
+            if self.cfg.write.grounding and self.scout is not None:
+                try:
+                    from .grounding import build_dossier
+                    setting = world_state.current_location if world_state else ""
+                    dossier = build_dossier(self.scout, plan.plan_text if hasattr(plan, "plan_text") else plan.title, setting)
+                    if dossier.notes:
+                        world_text = (world_text + "\n\n" + dossier.render()).strip()
+                except Exception as e:
+                    log.warning("grounding dossier failed for ch %d: %s", n, e)
             ctx.cast_text, ctx.world_text = cast_text, world_text
             t0 = time.monotonic()
             council_text = council.brief(ctx) if council.agents else ""
@@ -535,7 +544,7 @@ class WritePipeline:
         if roster.characters:
             roster.save()
         if world_state is not None:
-            WorldAgent(self.fast_llm, world_state, self.cfg.write.world_agency).remember(best_text, n)
+            WorldAgent(self.fast_llm, world_state, self.cfg.write.world_agency, realism=self.cfg.write.world_realism).remember(best_text, n)
             save_world(project.dir, world_state)
             promotable = [f.tag for f in world_state.promotable()]
             if promotable:
@@ -630,7 +639,7 @@ class WritePipeline:
             crit.score = (1 - w) * crit.score + w * self._consistency(reviews)
         wrev = None
         if world_state is not None and self.cfg.write.world_weight > 0:
-            wrev = WorldAgent(self.fast_llm, world_state, self.cfg.write.world_agency).review(text, n)
+            wrev = WorldAgent(self.fast_llm, world_state, self.cfg.write.world_agency, realism=self.cfg.write.world_realism).review(text, n)
             w = self.cfg.write.world_weight
             crit.score = (1 - w) * crit.score + w * wrev.consistency
         nov = None
