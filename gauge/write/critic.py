@@ -25,6 +25,7 @@ class Critique:
     notes: str = ""
     measured_issues: list[str] = field(default_factory=list)
     features: dict[str, float] = field(default_factory=dict)
+    retention: float = 0.0  # 0..1 retention-curve shape (inert unless retention_weight > 0)
 
 
 # Sensible defaults when no model has been trained yet: what a chapter should look like.
@@ -40,11 +41,12 @@ _HEURISTIC_TARGETS = {
 
 class Critic:
     def __init__(self, llm: LLM, model: Optional[EngagementModel], novel_level_feats: Optional[dict[str, float]] = None,
-                 rebel: bool = False):
+                 rebel: bool = False, retention_weight: float = 0.0):
         self.llm = llm
         self.model = model
         self.novel_feats = novel_level_feats or {}
         self.rebel = rebel
+        self.retention_weight = max(0.0, min(0.5, retention_weight))
 
     def _measured(self, feats: dict[str, float]) -> (float, list[str]):  # type: ignore[valid-type]
         issues: list[str] = []
@@ -95,9 +97,19 @@ class Critic:
         feats = chapter_features(ChapterRecord(novel_key="draft", index=plan.number, title=title or plan.title, text=text))
         measured, issues = self._measured(feats)
         judged, rubric, notes = self._judged(text, plan)
-        score = 0.5 * measured + 0.5 * judged
+        retention = 0.0
+        if self.retention_weight > 0:
+            from ..learn.retention import shape
+
+            rs = shape(text)
+            retention = rs.score
+            issues = (issues + rs.issues)[:8]
+            w = self.retention_weight
+            score = (1 - w) * (0.5 * measured + 0.5 * judged) + w * retention
+        else:
+            score = 0.5 * measured + 0.5 * judged
         return Critique(score=score, measured=measured, judged=judged, rubric=rubric, notes=notes,
-                        measured_issues=issues, features=feats)
+                        measured_issues=issues, features=feats, retention=round(retention, 3))
 
     def problems(self, c: Critique) -> list[str]:
         out = []

@@ -341,6 +341,16 @@ def score(c: Ctx, path: str) -> None:
                   f"dialogue={feats['dialogue_ratio']:.0%}  measured engagement score={measured:.2f}")
     for i in issues:
         console.print(f"  - {i}")
+    from .learn.retention import shape as _ret_shape
+    from .write.agents.readability import measure as _readability
+    rs = _ret_shape(text)
+    console.print(f"retention curve: opening={rs.opening:.2f} middle={rs.middle:.2f} ending={rs.ending:.2f} "
+                  f"sag={rs.sag:.2f} -> shape={rs.score:.2f}")
+    for i in rs.issues:
+        console.print(f"  - {i}")
+    rm = _readability(text)
+    console.print(f"readability: Flesch={rm['flesch']:.0f} burstiness={rm['burstiness']:.2f} "
+                  f"syll/word={rm['syllables_per_word']:.2f} walls={rm['wall_paragraph_ratio']:.0%}")
     comp = compare_to_corpus(feats, c.db.features("chapter"))
     if comp:
         table = Table(title="vs. ingested corpus")
@@ -646,6 +656,62 @@ def character_remove(c: Ctx, project: str, name: str) -> None:
     if ok:
         roster.save()
     console.print(f"[green]Removed[/] {name}" if ok else f"[red]no character {name!r}[/]")
+
+
+@character.command("mood")
+@click.argument("project")
+@click.argument("name")
+@click.pass_obj
+def character_mood(c: Ctx, project: str, name: str) -> None:
+    """Audit a character's emotional continuity: flag mood jumps the chapters never earned."""
+    from .write.emotion_continuity import audit, summary
+
+    _, roster = _roster(c, project)
+    ch = roster.get(name)
+    if ch is None:
+        console.print(f"[red]no character {name!r}[/]")
+        sys.exit(1)
+    hist = ch.state.mood_history
+    console.print(f"[bold]{ch.name}[/]: {summary(hist)}")
+    for f in audit(hist):
+        console.print(f"  - ch {f.chapter} [{f.kind}] {f.detail}")
+
+
+@character.command("remember-across")
+@click.argument("project")
+@click.pass_obj
+def character_remember_across(c: Ctx, project: str) -> None:
+    """Fold this project's characters into the cross-book memory (scars, habits, grudges)."""
+    from .write.character_memory import GlobalCharacterMemory
+
+    _, roster = _roster(c, project)
+    mem = GlobalCharacterMemory(c.cfg.models_dir)
+    for ch in roster.ordered():
+        led = mem.absorb(ch, project)
+        console.print(f"[green]remembered[/] {ch.name}: {len(led.scars)} scars, {len(led.habits)} habits, {len(led.grudges)} grudges")
+
+
+@character.command("ledger")
+@click.argument("name", required=False)
+@click.pass_obj
+def character_ledger(c: Ctx, name: Optional[str]) -> None:
+    """Show the cross-book memory for one character, or list everyone remembered."""
+    from .write.character_memory import GlobalCharacterMemory
+
+    mem = GlobalCharacterMemory(c.cfg.models_dir)
+    if name:
+        led = mem.get(name)
+        if led is None:
+            console.print(f"[red]nobody named {name!r} in the cross-book memory[/]")
+            return
+        console.print_json(led.model_dump_json())
+    else:
+        all_ = mem.all()
+        if not all_:
+            console.print("(cross-book memory is empty; run `gauge character remember-across <project>`)")
+            return
+        for led in all_:
+            console.print(f"{led.name}: books={', '.join(led.books) or '-'}; scars={len(led.scars)}; grudges={len(led.grudges)}")
 
 
 @character.command("chat")

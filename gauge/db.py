@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -133,10 +134,32 @@ class Database:
     def __init__(self, path: Path | str):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(SCHEMA)
+        # The parallel agent pool runs DB calls from many threads. SQLite forbids sharing one
+        # connection's cursors across threads, so each thread gets its own connection (below), and
+        # every write transaction is serialised by this reentrant lock so two threads never commit
+        # at once ("cannot commit - no transaction is active").
+        self._lock = threading.RLock()
+        self._local = threading.local()
+        self._all_conns: list[sqlite3.Connection] = []
+        conn = self._conn  # opens the first connection on this thread
+        conn.executescript(SCHEMA)
         self._migrate()
+
+    def _open(self) -> sqlite3.Connection:
+        c = sqlite3.connect(str(self.path), check_same_thread=False, timeout=30.0)
+        c.row_factory = sqlite3.Row
+        c.execute("PRAGMA busy_timeout=30000")
+        with self._lock:
+            self._all_conns.append(c)
+        self._local.conn = c
+        return c
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        c = getattr(self._local, "conn", None)
+        if c is None:
+            c = self._open()
+        return c
 
     def _migrate(self) -> None:
         """Add columns introduced after the first release to existing databases."""
@@ -149,16 +172,24 @@ class Database:
         self._conn.commit()
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            for c in self._all_conns:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+            self._all_conns.clear()
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
-        try:
-            yield self._conn
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+        conn = self._conn
+        with self._lock:
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     # ---- novels ------------------------------------------------------------
     def upsert_novel(self, n: NovelRecord) -> None:

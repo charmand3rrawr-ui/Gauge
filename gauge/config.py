@@ -131,6 +131,7 @@ class WriteConfig(BaseModel):
     max_active_characters: int = 5
     character_review: bool = True
     character_weight: float = 0.2  # share of the chapter score that comes from in-character consistency
+    carry_characters: bool = False  # seed new characters from the cross-book memory (scars, habits, grudges)
     min_mentions_for_review: int = 2  # characters named fewer times than this skip review/memory (protagonist never skips)
     checkpoint_drafts: bool = True  # save raw drafts so a crash never loses a generation
     # The World agent: physics, weather, crowds and consequences, present in every scene.
@@ -142,6 +143,9 @@ class WriteConfig(BaseModel):
     muse_directions: int = 3  # alternative directions proposed before each outline extension
     techniques_in_prompt: int = 3  # technique cards shown to the drafter
     novelty_weight: float = 0.15  # share of the chapter score from novelty against earlier chapters
+    retention_weight: float = 0.0  # share of the chapter score from retention-curve shape (hook/mid-spike/cliff); 0 = off
+    ab_titles: bool = False  # generate several chapter titles and keep the best-scoring one
+    ab_hooks: bool = False  # generate several opening hooks and offer the best in the draft brief
     # Scene improv: present characters play the scene out before it is written.
     improv_enabled: bool = True
     improv_rounds: int = 2
@@ -186,9 +190,17 @@ class AgentsConfig(BaseModel):
     comedian: bool = True  # attaches only when the genre or tone is comic
     scout: bool = True  # searches open sources for real-world detail (see research settings)
     voice_coach: bool = True  # measures whether characters sound alike
+    readability: bool = True  # measures burstiness, syllable load and paragraph rhythm; smooth-to-read as a number
+    suitability: bool = True  # checks each chapter against the audience contract below
     sensitivity_rules: str = ""  # your platform's content rules, pasted
     sensitivity_categories: list[str] = Field(default_factory=list)
     block_on_sensitivity: bool = False  # severe flags force a revision instead of a warning
+    # Audience contract for the Suitability Checker.
+    suitability_platform: str = ""  # free text, e.g. "Royal Road", "Wattpad"
+    suitability_age_band: str = "teen"  # all | teen | adult (sets a reading-ease floor)
+    suitability_heat_max: int = 1  # 0 none, 1 mild, 2 moderate, 3 explicit
+    suitability_content_lines: list[str] = Field(default_factory=list)  # phrases that must never appear
+    suitability_block: bool = False  # a crossed content line forces a revision instead of a warning
 
 
 class DaemonConfig(BaseModel):

@@ -470,6 +470,13 @@ class FakeLLM:
                     for i in range(start, min(end, start + 2) + 1)]})
             if "score this chapter" in low:
                 return json.dumps({"hook": 7, "momentum": 6, "payoff": 6, "cliffhanger": 8, "clarity": 7, "notes": "Tighten the middle."})
+            if "generate opening hooks" in low:
+                return json.dumps({"variants": [
+                    "\"Don't open it,\" Rin said, and the bag was already humming.",
+                    "She had ten seconds, and she had already wasted six of them.",
+                    "The seal that should not have been broken was broken."]})
+            if "generate chapter titles" in low:
+                return json.dumps({"variants": ["Ten Seconds", "The Broken Seal", "One More Time", "Her Own Voice"]})
             if "series bible" in low:
                 return json.dumps({"premise": "A debt-ridden courier discovers she can rewind ten seconds.",
                                    "protagonist": "Rin, a courier who owes the wrong people",

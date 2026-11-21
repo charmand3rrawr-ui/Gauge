@@ -240,6 +240,7 @@ class CharacterState(BaseModel):
     memories: list[Memory] = Field(default_factory=list)
     mood_vec: Mood = Field(default_factory=Mood)  # pleasure / arousal / dominance, decays toward the matrix baseline
     arc_plan: dict[str, dict] = Field(default_factory=dict)  # axis -> {"target": 0..1, "by": chapter}: planned drift
+    mood_history: list[dict] = Field(default_factory=list)  # per-appearance {chapter, pleasure, arousal, dominance, event}: for continuity audits
 
 
 class Character(BaseModel):
@@ -571,6 +572,11 @@ class CharacterAgent:
         st.mood_vec = apply_event(st.mood_vec, delta, baseline(self.c.matrix))
         if not d.get("mood"):
             st.mood = st.mood_vec.label()
+        # Record the mood and how big the chapter's emotional event was, for the continuity auditor.
+        event_energy = sum(abs(float(delta.get(k, 0.0) or 0.0)) for k in ("pleasure", "arousal", "dominance"))
+        st.mood_history.append({"chapter": number, "pleasure": st.mood_vec.pleasure, "arousal": st.mood_vec.arousal,
+                                "dominance": st.mood_vec.dominance, "event": round(event_energy, 3)})
+        st.mood_history = st.mood_history[-200:]
         # Planned personality drift along the character's arc.
         if self.c.state.arc_plan:
             drift_step(self.c.matrix, self.c.state.arc_plan, number)

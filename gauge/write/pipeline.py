@@ -109,7 +109,7 @@ class WritePipeline:
         self.guide_compact = compact
         self.planner = Planner(self.llm, self.exemplars, compact)
         self.drafter = Drafter(self.llm, self.exemplars, compact, cfg.write.exemplars_in_prompt)
-        self.critic = Critic(self.fast_llm, self.model, rebel=cfg.write.rebel)
+        self.critic = Critic(self.fast_llm, self.model, rebel=cfg.write.rebel, retention_weight=cfg.write.retention_weight)
         self.techniques = TechniqueLibrary(self.trainer.embedder)
         self.techniques.load(cfg.models_dir)
         self.novelty = NoveltyTracker()
@@ -334,6 +334,18 @@ class WritePipeline:
     def roster(self, project: Project) -> Roster:
         return Roster.load(project.dir)
 
+    def _carry_character(self, c: Character) -> None:
+        """When carry_characters is on, seed a new character from their cross-book memory."""
+        if not self.cfg.write.carry_characters:
+            return
+        try:
+            from .character_memory import GlobalCharacterMemory
+
+            if GlobalCharacterMemory(self.cfg.models_dir).carry_into(c):
+                log.info("carried cross-book memory into %s", c.name)
+        except Exception as e:
+            log.warning("could not carry character memory for %s: %s", c.name, e)
+
     def sync_characters(self, project: Project) -> list[str]:
         """Create agents for every character named in the bible that has no sheet yet."""
         roster = self.roster(project)
@@ -353,6 +365,7 @@ class WritePipeline:
                 continue
             c = creator.from_concept(name, concept, role, project.bible_markdown(), roster.names())
             c.created_chapter = project.state.written
+            self._carry_character(c)
             roster.add(c)
             created.append(c.name)
         if created:
@@ -365,6 +378,7 @@ class WritePipeline:
         seed_matrix = PersonalityMatrix.random(seed) if seed is not None else None
         c = CharacterCreator(self.llm).from_concept(name, concept, role, project.bible_markdown(), roster.names(), seed_matrix)
         c.created_chapter = project.state.written
+        self._carry_character(c)
         roster.add(c)
         roster.save()
         return c
@@ -532,6 +546,17 @@ class WritePipeline:
         if new_title:
             log.info("packager retitled ch %d: %r -> %r", n, plan.title, new_title)
             plan.title = new_title
+        if self.cfg.write.ab_titles:
+            try:
+                from .variants import VariantLog, best_title
+
+                chosen, ranked = best_title(self.llm, plan.plan_text if hasattr(plan, "plan_text") else plan.title, best_text, n=5)
+                if chosen and ranked:
+                    VariantLog(project.dir).record("title", n, chosen, ranked[1:], ranked[0].score)
+                    log.info("A/B title for ch %d: %r (from %d candidates)", n, chosen, len(ranked))
+                    plan.title = chosen
+            except Exception as e:
+                log.warning("A/B titling failed for ch %d: %s", n, e)
 
         meta = {
             "title": plan.title, "score": round(best.score, 3), "measured": round(best.measured, 3),

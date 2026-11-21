@@ -14,11 +14,13 @@ from .editor import LineEditor
 from .librarian import Librarian
 from .pacing import PacingDirector
 from .packager import Packager
+from .readability import ReadabilityCoach
 from .readers import ReaderPanel
 from .schemer import Schemer
 from .scout import ScoutAgent
 from .sensitivity import SensitivityReader
 from .showrunner import Showrunner
+from .suitability import SuitabilityChecker
 from .theme import ThemeKeeper
 from .voice_coach import VoiceCoach
 
@@ -27,9 +29,10 @@ log = logging.getLogger(__name__)
 ALL_AGENTS: dict[str, type[StoryAgent]] = {
     ReaderPanel.name: ReaderPanel, Showrunner.name: Showrunner, Archivist.name: Archivist, Schemer.name: Schemer,
     LineEditor.name: LineEditor, Packager.name: Packager, ThemeKeeper.name: ThemeKeeper, SensitivityReader.name: SensitivityReader,
-    PacingDirector.name: PacingDirector, Librarian.name: Librarian, Comedian.name: Comedian, ScoutAgent.name: ScoutAgent, VoiceCoach.name: VoiceCoach,
+    PacingDirector.name: PacingDirector, Librarian.name: Librarian, Comedian.name: Comedian, ScoutAgent.name: ScoutAgent,
+    VoiceCoach.name: VoiceCoach, ReadabilityCoach.name: ReadabilityCoach, SuitabilityChecker.name: SuitabilityChecker,
 }
-LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach"}
+LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability"}
 
 
 def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCouncil:
@@ -50,6 +53,10 @@ def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCou
         opts: dict[str, Any] = {}
         if name == "sensitivity":
             opts = {"rules": a.sensitivity_rules, "block_on_flags": a.block_on_sensitivity, "categories": a.sensitivity_categories or None}
+        if name == "suitability":
+            opts = {"platform": a.suitability_platform, "age_band": a.suitability_age_band, "heat_max": a.suitability_heat_max,
+                    "content_lines": a.suitability_content_lines, "block": a.suitability_block,
+                    "word_target": cfg.write.target_chapter_words}
         if name == "scout":
             if scout is None or not cfg.research.enabled:
                 continue

@@ -138,6 +138,7 @@ def test_technique_library_and_absorber(cfg, db, chapter_text):
 
 # ------------------------------------------------------------------ pipeline integration
 def test_pipeline_world_muse_techniques_novelty(cfg, db, chapter_text):
+    cfg.learn.bandit_enabled = False  # this test asserts exact technique kinds; the bandit randomises techniques_in_prompt
     t = _trained(cfg, db, chapter_text)
     fast = FakeLLM()
     # a technique library on disk is picked up by the pipeline
