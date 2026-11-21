@@ -161,6 +161,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge persona build/show/blend` | the author persona learned from your chapters |
 | `gauge character arc` | planned personality drift |
 | `gauge native presets/bench/train/distill/eval/continue/status/sample/tokenizer` | GaugeLM, the built-in model; see [docs/NATIVE.md](docs/NATIVE.md) |
+| `gauge compute scan/watch/token/discover/add/list/remove`, `gauge worker` | sense GPUs; pool the machines you own; see [docs/COMPUTE.md](docs/COMPUTE.md) |
 | `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
@@ -206,6 +207,15 @@ see [docs/NATIVE.md](docs/NATIVE.md).
 .\gauge.bat init --provider native
 ```
 
+## GPUs and your other machines
+
+`gauge compute scan` senses NVIDIA, AMD and Intel GPUs, says which backend drives each and what
+to install, and the daemon switches GaugeLM to a GPU the moment one is usable, including an
+external GPU plugged in later. `gauge worker` lends another machine you own to the pool: workers
+announce themselves on your LAN with a shared token, and Gauge spreads generation and
+model-averaging training rounds across them. It never scans networks or touches machines you
+have not set up. See [docs/COMPUTE.md](docs/COMPUTE.md).
+
 ## Using a different local model
 
 Any Ollama model works: `gauge init --model qwen2.5:14b`. Any OpenAI-compatible server (LM
@@ -231,11 +241,12 @@ gauge/
   learn/           engagement.py (model), exemplars.py, techniques.py (absorber), style.py, dataset.py, trainer.py
   research/        sources.py (Wikipedia, Wikivoyage, Gutenberg, arXiv, climate, SearXNG), scout.py (cache, filing, dossiers)
   native/          GaugeLM: tokenizer.py, model.py (numpy transformer + backprop), train.py, client.py
+  compute/         detect.py (GPU sensing), worker.py, pool.py (discovery, PoolLLM, distributed rounds)
   write/           project, characters (matrix, agents), world (physics, crowds), muse (directions, novelty),
                    agents/ (the writing room: 11 agents + council), planner, drafter, critic, pipeline, prompts, schemas
   llm/             ollama / openai-compatible / fake clients, embeddings
   daemon.py  report.py  cli.py  db.py (sqlite)  config.py
-docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, RESEARCH, NATIVE, WINDOWS, ETHICS, ROADMAP
+docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, RESEARCH, NATIVE, COMPUTE, WINDOWS, ETHICS, ROADMAP
 installer/         double-click installer (bootstrap.ps1) and Gauge Studio GUI launcher
 tests/             pytest suite, runs offline with a fake LLM
 ```

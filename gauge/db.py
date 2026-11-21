@@ -99,6 +99,9 @@ CREATE TABLE IF NOT EXISTS predictions (
 CREATE TABLE IF NOT EXISTS chapter_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT, chapter INTEGER, agent TEXT, issue TEXT, at TEXT
 );
+CREATE TABLE IF NOT EXISTS workers (
+    url TEXT PRIMARY KEY, name TEXT, devices_json TEXT, llm TEXT, added_at TEXT, last_seen TEXT, alive INTEGER, health_json TEXT
+);
 CREATE TABLE IF NOT EXISTS generated (
     project TEXT NOT NULL,
     chapter INTEGER NOT NULL,
@@ -325,6 +328,28 @@ class Database:
             d["summary"] = json.loads(d["summary"] or "{}")
             out.append(d)
         return out
+
+    # ---- compute pool --------------------------------------------------------------
+    def upsert_worker(self, url: str, name: str, devices_json: str, llm: str) -> None:
+        with self.tx() as c:
+            c.execute("""INSERT INTO workers (url, name, devices_json, llm, added_at, last_seen, alive, health_json)
+                         VALUES (?,?,?,?,?,?,1,'{}')
+                         ON CONFLICT(url) DO UPDATE SET name=excluded.name, devices_json=excluded.devices_json, llm=excluded.llm,
+                         last_seen=excluded.last_seen, alive=1""", (url, name, devices_json, llm, utcnow().isoformat(), utcnow().isoformat()))
+
+    def remove_worker(self, url: str) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM workers WHERE url=?", (url,))
+
+    def touch_worker(self, url: str, alive: bool, health_json: str = "{}") -> None:
+        with self.tx() as c:
+            if alive:
+                c.execute("UPDATE workers SET alive=1, last_seen=?, health_json=? WHERE url=?", (utcnow().isoformat(), health_json, url))
+            else:
+                c.execute("UPDATE workers SET alive=0 WHERE url=?", (url,))
+
+    def workers(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._conn.execute("SELECT * FROM workers ORDER BY added_at")]
 
     # ---- reader feedback on our own chapters ----------------------------------
     def record_feedback(self, project: str, chapter: int, views: Optional[float] = None, comments: Optional[float] = None,

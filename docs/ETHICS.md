@@ -22,6 +22,13 @@ cache so nothing is fetched twice. The drafter is told to use facts and texture 
 copy sentences; the bibliography in each project's `research/sources.md` records what was
 consulted. General web search is only available through a SearXNG instance you run yourself.
 
+## Other people's computers
+
+The compute pool uses only machines where you have started `gauge worker` with your token.
+Discovery listens for those workers' announcements; it does not scan address ranges, probe
+ports or try credentials, and Gauge never enrols in cloud services on its own. Lending someone
+else's machine to the pool requires their consent and their action: they must run the worker.
+
 ## Stories
 
 Gauge is built to learn **patterns**, not to copy text:

@@ -52,6 +52,29 @@ class Daemon:
                     out["absorb"] = f"failed: {e}"
             else:
                 out["absorb"] = "skipped: LLM not reachable"
+        # Sense compute: switch GaugeLM to a GPU that appeared, and find workers that announced themselves.
+        if self.cfg.compute.auto_device:
+            try:
+                from .compute import scan, summary
+
+                use = summary(scan())["use"]
+                if use != self.cfg.native.device and self.cfg.native.device != "cpu":
+                    log.info("compute: switching native.device %s -> %s", self.cfg.native.device, use)
+                    self.cfg.native.device = use
+                    self.cfg.save()
+                out["device"] = use
+            except Exception as e:
+                log.warning("device scan failed: %s", e)
+        if self.cfg.compute.token:
+            try:
+                from .compute import Pool
+
+                pool = Pool(self.db, self.cfg.compute.token)
+                found = pool.discover_and_register(self.cfg.compute.discover_seconds, self.cfg.compute.announce_port)
+                alive = pool.refresh()
+                out["workers"] = {"announced": len(found), "alive": [w["name"] for w in alive]}
+            except Exception as e:
+                log.warning("worker discovery failed: %s", e)
         # Keep the built-in model learning from whatever arrived this cycle.
         if self.cfg.native.daemon_steps > 0:
             from .native import NativeTrainer, gather_texts
@@ -64,6 +87,18 @@ class Daemon:
                         gather_texts(self.db, self.cfg.projects_dir, self.cfg.models_dir / "datasets")
                     out["native"] = tr.continue_training(docs, self.cfg.native.daemon_steps, time_budget_s=self.cfg.native.daemon_minutes * 60,
                                                          device=self.cfg.native.device)
+                    if self.cfg.compute.distributed_training and self.cfg.compute.token:
+                        from .compute import DistributedTrainer, Pool
+                        from .native.train import encode_corpus
+
+                        pool = Pool(self.db, self.cfg.compute.token)
+                        if pool.clients():
+                            model, tok = tr.load(device=self.cfg.native.device)
+                            tokens = encode_corpus(tok, docs, 5_000_000)
+                            rnd = DistributedTrainer(pool, self.cfg.native.device).round(model, tokens, steps=max(10, self.cfg.native.daemon_steps // 4),
+                                                                                       lr=self.cfg.native.lr / 3)
+                            model.save(self.cfg.native_dir, {"step": tr.status().get("step", 0)})
+                            out["distributed"] = rnd
                 except Exception as e:
                     log.exception("native training failed: %s", e)
                     out["native"] = f"failed: {e}"

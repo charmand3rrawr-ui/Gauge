@@ -61,6 +61,18 @@ class NativeConfig(BaseModel):
     distill_rows: int = 200  # teacher answers to collect per `gauge native distill` run
 
 
+class ComputeConfig(BaseModel):
+    """Sensing GPUs and using the other machines you own (gauge worker)."""
+
+    auto_device: bool = True  # re-scan each daemon cycle and switch GaugeLM to a GPU when one appears
+    token: str = ""  # shared secret for your workers; `gauge compute token` generates one
+    announce_port: int = 47631
+    worker_port: int = 47632
+    discover_seconds: float = 3.0
+    distributed_training: bool = True  # use live workers for native training rounds
+    pool_generation: bool = True  # spread LLM calls over workers that serve a model
+
+
 class IngestConfig(BaseModel):
     user_agent: str = "Gauge/0.1 (open-source web novel research tool)"
     request_delay_seconds: float = 2.5
@@ -165,6 +177,7 @@ class GaugeConfig(BaseModel):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     native: NativeConfig = Field(default_factory=NativeConfig)
+    compute: ComputeConfig = Field(default_factory=ComputeConfig)
 
     @property
     def native_dir(self) -> Path:

@@ -80,6 +80,11 @@ class WritePipeline:
         self._ctx: dict[str, object] = {"project": "", "chapter": None}
         self._project_model_cache: dict[int, ProjectModel] = {}
         self.calls.sink = self._log_call
+        # Spread prose generation over your workers that serve a model (opt-in, token required).
+        if llm is None and cfg.compute.pool_generation and cfg.compute.token and db.workers():
+            from ..compute import Pool, PoolLLM
+
+            self.llm = PoolLLM(self.llm, Pool(db, cfg.compute.token), self.calls)
         self.trainer = trainer or Trainer(cfg, db)
         self.model = self.trainer.load_model()
         self.exemplars = self.trainer.load_exemplars()

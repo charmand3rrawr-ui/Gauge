@@ -1338,8 +1338,11 @@ def _native_docs(c: Ctx, since: Optional[str] = None):
 @click.option("--device", type=click.Choice(["auto", "cuda", "cpu"]), default=None)
 @click.option("--resume", is_flag=True, help="Continue from the saved weights instead of starting over.")
 @click.option("--minutes", type=float, default=None, help="Stop after this many minutes (checkpoint is saved).")
+@click.option("--distributed", is_flag=True, help="After local training, run model-averaging rounds with live workers.")
+@click.option("--rounds", type=int, default=3, show_default=True, help="Distributed rounds (with --distributed).")
 @click.pass_obj
-def native_train(c: Ctx, size, steps, layers, embd, heads, kv_heads, block, vocab, batch, accum, arch, device, resume, minutes) -> None:
+def native_train(c: Ctx, size, steps, layers, embd, heads, kv_heads, block, vocab, batch, accum, arch, device, resume, minutes,
+                 distributed, rounds) -> None:
     """Train (or keep training) GaugeLM on everything Gauge has read plus your own chapters."""
     from .native import ModelConfig, NativeTrainer, TrainConfig, preset_config
 
@@ -1383,6 +1386,22 @@ def native_train(c: Ctx, size, steps, layers, embd, heads, kv_heads, block, voca
         console.print("[yellow]stopped; last checkpoint kept[/]")
         return
     console.print_json(json.dumps(res))
+    if distributed:
+        from .compute import DistributedTrainer, Pool
+        from .native.train import encode_corpus
+
+        pool = Pool(c.db, c.cfg.compute.token)
+        model, tok = tr.load(device=tcfg.device)
+        tokens = encode_corpus(tok, docs, tcfg.max_corpus_chars)
+        dt = DistributedTrainer(pool, tcfg.device)
+        for r in range(rounds):
+            try:
+                out = dt.round(model, tokens, steps=max(10, (steps or n.steps) // 10), lr=n.lr / 3, batch_size=tcfg.batch_size)
+            except Exception as e:
+                console.print(f"[yellow]distributed round {r + 1} skipped[/]: {e}")
+                break
+            console.print(f"  round {r + 1}: participants {out['participants']} loss {out['loss']}")
+            model.save(c.cfg.native_dir, {"step": res["step"], "distributed_rounds": r + 1})
     console.print(f"[green]saved[/] {c.cfg.native_dir}. Use it with: gauge init --provider native")
 
 
@@ -1507,6 +1526,171 @@ def native_tokenizer(c: Ctx, text: str) -> None:
     tok = BPETokenizer.load(path)
     ids = tok.encode(text)
     console.print(f"{len(ids)} tokens (vocab {tok.vocab_size}): " + " | ".join(tok.decode([i]) for i in ids))
+
+
+# ---------------------------------------------------------------------------- compute (GPUs and your other machines)
+@main.group()
+def compute() -> None:
+    """Sense GPUs on this machine and use the other machines you own (gauge worker)."""
+
+
+@compute.command("scan")
+@click.option("--apply", is_flag=True, help="Save the best device into native.device.")
+@click.pass_obj
+def compute_scan(c: Ctx, apply: bool) -> None:
+    """List CPU and GPUs, which backend could drive each, and what to install if one is missing."""
+    from .compute import scan, summary
+
+    devs = scan()
+    s = summary(devs)
+    table = Table(title="Compute on this machine")
+    for col in ("kind", "vendor", "name", "memory", "backend", "ready", "source"):
+        table.add_column(col)
+    for d in devs:
+        table.add_row(d.kind, d.vendor, d.name[:48], f"{d.memory_mb} MB" if d.memory_mb else "", d.backend, "yes" if d.backend_ready else "no", d.source)
+    console.print(table)
+    for d in devs:
+        if d.install_hint:
+            console.print(f"  [yellow]{d.name}[/]: {d.install_hint}")
+    console.print(f"GaugeLM would use: [bold]{s['use']}[/] ({s['chosen']})  backends: {s['backends']}")
+    if apply:
+        c.cfg.native.device = s["use"]
+        c.cfg.save()
+        console.print(f"[green]saved[/] native.device = {s['use']}")
+
+
+@compute.command("watch")
+@click.option("--interval", type=float, default=30.0, show_default=True)
+@click.option("--max-minutes", type=float, default=None)
+@click.pass_obj
+def compute_watch(c: Ctx, interval: float, max_minutes: Optional[float]) -> None:
+    """Wait for a usable GPU to appear (e.g. an external GPU plugged in), then switch GaugeLM to it."""
+    from .compute import summary, watch
+
+    def on_change(devs):
+        console.print("devices now: " + ", ".join(f"{d.name}{' (ready)' if d.backend_ready else ''}" for d in devs if d.kind == "gpu"))
+
+    console.print(f"watching for a GPU every {interval:.0f}s ... Ctrl+C to stop")
+    try:
+        devs = watch(on_change, interval_s=interval, max_seconds=max_minutes * 60 if max_minutes is not None else None)
+    except KeyboardInterrupt:
+        return
+    if devs:
+        use = summary(devs)["use"]
+        c.cfg.native.device = use
+        c.cfg.save()
+        console.print(f"[green]GPU ready[/]; native.device = {use}")
+    else:
+        console.print("no usable GPU appeared")
+
+
+@compute.command("token")
+@click.pass_obj
+def compute_token(c: Ctx) -> None:
+    """Generate (or show) the shared token your workers must be started with."""
+    import secrets
+
+    if not c.cfg.compute.token:
+        c.cfg.compute.token = secrets.token_urlsafe(24)
+        c.cfg.save()
+    console.print(f"token: {c.cfg.compute.token}\nStart a worker on another machine you own with:\n"
+                  f"  gauge worker --token {c.cfg.compute.token} --name \"office-pc\"")
+
+
+@compute.command("discover")
+@click.option("--seconds", type=float, default=None)
+@click.pass_obj
+def compute_discover(c: Ctx, seconds: Optional[float]) -> None:
+    """Listen for your workers' announcements on the LAN and register them (no scanning, no probing)."""
+    from .compute import Pool
+
+    if not c.cfg.compute.token:
+        console.print("[yellow]no token yet[/]: run `gauge compute token` first and start workers with it")
+        sys.exit(1)
+    found = Pool(c.db, c.cfg.compute.token).discover_and_register(seconds or c.cfg.compute.discover_seconds, c.cfg.compute.announce_port)
+    if not found:
+        console.print("no workers announced themselves (are they started with the same token, on this network?)")
+        return
+    for f in found:
+        console.print(f"[green]found[/] {f['name']} at {f['url']}  llm={f['llm'] or '-'}  devices={[d.get('name') for d in f['devices']]}")
+
+
+@compute.command("add")
+@click.argument("url")
+@click.option("--name", default="")
+@click.pass_obj
+def compute_add(c: Ctx, url: str, name: str) -> None:
+    """Register a worker by URL (for machines on another network segment)."""
+    from .compute import Pool, WorkerClient
+
+    if not c.cfg.compute.token:
+        console.print("[yellow]no token yet[/]: run `gauge compute token`")
+        sys.exit(1)
+    h = WorkerClient(url, c.cfg.compute.token).health()
+    if h is None:
+        console.print(f"[red]no worker answered at {url}[/] (wrong token, or not running)")
+        sys.exit(1)
+    Pool(c.db, c.cfg.compute.token).add(url, name or h.get("name", url), h.get("devices", []), h.get("llm", ""))
+    console.print(f"[green]added[/] {h.get('name')} at {url}: {h.get('use')} {h.get('llm') or ''}")
+
+
+@compute.command("list")
+@click.pass_obj
+def compute_list(c: Ctx) -> None:
+    """Registered workers and whether they answer right now."""
+    from .compute import Pool
+
+    pool = Pool(c.db, c.cfg.compute.token)
+    alive = {w["url"] for w in pool.refresh()} if c.cfg.compute.token else set()
+    rows = pool.workers()
+    if not rows:
+        console.print("(no workers; `gauge compute discover` or `gauge compute add URL`)")
+        return
+    table = Table(title="Compute pool")
+    for col in ("name", "url", "alive", "llm", "devices", "last seen"):
+        table.add_column(col)
+    for w in rows:
+        devs = ", ".join(d.get("name", "?")[:24] for d in json.loads(w["devices_json"] or "[]"))
+        table.add_row(w["name"], w["url"], "yes" if w["url"] in alive else "no", (w["llm"] or "")[:30], devs, (w["last_seen"] or "")[:16])
+    console.print(table)
+
+
+@compute.command("remove")
+@click.argument("url")
+@click.pass_obj
+def compute_remove(c: Ctx, url: str) -> None:
+    """Forget a worker."""
+    from .compute import Pool
+
+    Pool(c.db, c.cfg.compute.token).remove(url)
+    console.print(f"[green]removed[/] {url}")
+
+
+@main.command()
+@click.option("--token", required=True, help="The shared token from `gauge compute token` on the coordinator.")
+@click.option("--name", default=None)
+@click.option("--port", type=int, default=None)
+@click.option("--host", default="0.0.0.0", show_default=True)
+@click.option("--no-llm", is_flag=True, help="Lend compute for training only; do not serve a model.")
+@click.option("--no-announce", is_flag=True)
+@click.pass_obj
+def worker(c: Ctx, token: str, name: Optional[str], port: Optional[int], host: str, no_llm: bool, no_announce: bool) -> None:
+    """Lend this machine to your other Gauge installation: serves its model and runs training shards."""
+    import socket
+
+    from .compute import Worker
+    from .llm import make_llm
+
+    llm = None
+    if not no_llm:
+        cand = make_llm(c.cfg.llm)
+        llm = cand if cand.available() else None
+    w = Worker(c.cfg, name or socket.gethostname(), token, host=host, port=port or c.cfg.compute.worker_port, llm=llm,
+               announce=not no_announce, announce_port=c.cfg.compute.announce_port)
+    console.print(f"worker [bold]{w.state.name}[/] on {host}:{w.port}  model: {llm.describe() if llm else '(none, training only)'}  "
+                  f"devices: {[d.name for d in w.state.devices]}")
+    console.print("announcing on the LAN; the coordinator finds this with `gauge compute discover`. Ctrl+C to stop.")
+    w.serve()
 
 
 # ---------------------------------------------------------------------------- gui
