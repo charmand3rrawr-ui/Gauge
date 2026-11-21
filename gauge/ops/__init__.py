@@ -5,6 +5,7 @@ a config schema changes between versions, and an operator needs to know in plain
 automations are on and what each can reach.
 """
 from .backup import make_backup, restore_backup, verify_backup
+from .dashboard import dashboard_html
 from .report import audit_report, render_report
 
-__all__ = ["make_backup", "verify_backup", "restore_backup", "audit_report", "render_report"]
+__all__ = ["make_backup", "verify_backup", "restore_backup", "audit_report", "render_report", "dashboard_html"]

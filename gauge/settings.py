@@ -74,6 +74,7 @@ SWITCHES: list[Switch] = [
     Switch("llm.provider", "Model provider", "choice", "ollama (default), openai-compatible server, or native GaugeLM.", "Model", choices=["ollama", "openai", "native", "fake"]),
     Switch("llm.model", "Writer model", "text", "Ollama model name for prose (e.g. llama3.1:8b, qwen2.5:14b).", "Model"),
     Switch("llm.fast_model", "Fast model for bookkeeping", "text", "Small model for briefs, reviews, memory (e.g. llama3.2:3b). Empty = same as writer.", "Model"),
+    Switch("llm.cache", "Cache repeated calls", "bool", "Reuse the answer to an identical deterministic/bookkeeping request instead of paying again. Prose is never cached.", "Model"),
     Switch("native.device", "GaugeLM device", "choice", "auto picks a GPU when one is usable.", "Model", choices=["auto", "cuda", "cpu"]),
     Switch("compute.auto_device", "Switch to a GPU when one appears", "bool", "The daemon re-scans every cycle.", "Model"),
     Switch("compute.pool_generation", "Use your workers for generation", "bool", "Spread prose calls over machines you started `gauge worker` on.", "Model"),

@@ -557,22 +557,30 @@ def make_llm(cfg: LLMConfig, role: str = "main", calls: Optional[CallLog] = None
     model = cfg.fast_model if (role == "fast" and cfg.fast_model) else cfg.model
     p = cfg.provider.lower()
     if p == "ollama":
-        return OllamaLLM(cfg, model, calls)
-    if p in {"openai", "lmstudio", "llamacpp", "vllm"}:
-        return OpenAICompatLLM(cfg, model, calls)
-    if p == "fake":
+        base: LLM = OllamaLLM(cfg, model, calls)
+    elif p in {"openai", "lmstudio", "llamacpp", "vllm"}:
+        base = OpenAICompatLLM(cfg, model, calls)
+    elif p == "fake":
         f = FakeLLM(cfg)
         if calls is not None:
             f.calls = calls
-        return f
-    if p == "native":
+        base = f
+    elif p == "native":
         from pathlib import Path
 
         from ..native.client import NativeLLM
 
-        return NativeLLM(cfg, Path(cfg.native_dir) if getattr(cfg, "native_dir", None) else Path("data/models/native"), calls,
+        base = NativeLLM(cfg, Path(cfg.native_dir) if getattr(cfg, "native_dir", None) else Path("data/models/native"), calls,
                          device=getattr(cfg, "native_device", "cpu") or "cpu")
-    raise ValueError(f"unknown llm provider: {cfg.provider}")
+    else:
+        raise ValueError(f"unknown llm provider: {cfg.provider}")
+    if getattr(cfg, "cache", False) and getattr(cfg, "cache_dir", ""):
+        from pathlib import Path
+
+        from .cache import CachingLLM
+
+        return CachingLLM(base, Path(cfg.cache_dir))
+    return base
 
 
 def extract_json(text: str) -> dict[str, Any]:

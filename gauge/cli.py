@@ -2461,6 +2461,18 @@ def audit(c: Ctx) -> None:
 
 
 @main.command()
+@click.option("--out", default="gauge-dashboard.html", show_default=True, help="Output HTML path.")
+@click.pass_obj
+def dashboard(c: Ctx, out: str) -> None:
+    """Write a static telemetry dashboard (cost by purpose, chapter scores over time) you open in a browser."""
+    from .ops import dashboard_html
+
+    html_text = dashboard_html(c.db, c.cfg.projects_dir)
+    Path(out).write_text(html_text, encoding="utf-8")
+    console.print(f"[green]wrote[/] {out}  (open it in a browser)")
+
+
+@main.command()
 @click.option("--host", default=None, help="Bind address. Default 127.0.0.1 (loopback). 0.0.0.0 exposes it to the network.")
 @click.option("--port", type=int, default=None, help="Port (default 8800 or server.port).")
 @click.option("--token", default=None, help="API token. Default: server.token, else a generated one printed at start.")

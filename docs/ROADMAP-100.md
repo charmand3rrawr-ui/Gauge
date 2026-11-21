@@ -79,7 +79,7 @@ tested batches — not a promise that all 100 exist yet.
 60. Native embeddings so the whole stack can run with no external model. **M**
 
 ## G. Compute and performance
-61. Prompt/response caching keyed by content hash to cut repeat calls. **S**
+61. [done] Prompt/response caching keyed by content hash to cut repeat calls. **S**
 62. Batched agent reviews in one model call where schemas allow. **M**
 63. Streaming drafts to disk so a crash never loses tokens (extends checkpoints). **S**
 64. Per-chapter cost budget with graceful degradation when exceeded. **S**
@@ -87,7 +87,7 @@ tested batches — not a promise that all 100 exist yet.
 66. GPU auto-tuning of batch size from the device detected. **S**
 67. Incremental embedding index instead of full rebuilds. **M**
 68. Async pipeline so research and drafting overlap. **M**
-69. Telemetry dashboard (static HTML) of cost/latency/scores over time. **S**
+69. [done] Telemetry dashboard (static HTML) of cost/latency/scores over time. **S**
 70. Model-router: cheap model for bookkeeping, strong model for prose, learned per task. **M**
 
 ## H. Reader growth and analytics (legitimate marketing only)

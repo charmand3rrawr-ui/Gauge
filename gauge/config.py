@@ -36,6 +36,8 @@ class LLMConfig(BaseModel):
     retry_backoff_seconds: float = 2.0
     structured_output: bool = True  # JSON-schema constrained output when the server supports it
     native_dir: str = ""  # filled in by GaugeConfig.load: where the built-in GaugeLM lives
+    cache: bool = False  # cache deterministic/bookkeeping LLM calls to avoid paying twice for the same request
+    cache_dir: str = ""  # filled in by GaugeConfig.load
     native_device: str = "cpu"  # filled in by GaugeConfig.load from native.device
 
 
@@ -348,4 +350,5 @@ class GaugeConfig(BaseModel):
             cfg = cls(data_dir=str(root))
         cfg.llm.native_dir = str(cfg.native_dir)
         cfg.llm.native_device = cfg.native.device
+        cfg.llm.cache_dir = str(cfg.models_dir / "llm_cache")
         return cfg
