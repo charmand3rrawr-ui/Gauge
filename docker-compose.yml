@@ -1,0 +1,18 @@
+# Gauge headless. The data volume persists projects, models and config across restarts.
+# Set GAUGE_SERVER_TOKEN in a .env file or your shell before `docker compose up`.
+services:
+  gauge:
+    build: .
+    image: gauge-novel:latest
+    restart: unless-stopped
+    environment:
+      - GAUGE_DATA_DIR=/data
+      - GAUGE_SERVER_TOKEN=${GAUGE_SERVER_TOKEN:?set GAUGE_SERVER_TOKEN in your environment or a .env file}
+    volumes:
+      - gauge-data:/data
+    # Publish to loopback on the host by default. Change to "8800:8800" ONLY behind a VPN or a
+    # reverse proxy that terminates TLS; never expose the control API to the open internet.
+    ports:
+      - "127.0.0.1:8800:8800"
+volumes:
+  gauge-data:

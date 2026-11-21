@@ -174,6 +174,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge code lang/binary/disasm` | read any language, read files at the binary level, disassemble Python |
 | `gauge feedback` / `gauge feedback-import` / `gauge evaluate` / `gauge profile` | record real reader numbers, bulk-import them, check score-vs-retention, see cost/latency |
 | `gauge build-sft PROJECT` | curate instruction-tuning data from accepted chapters |
+| `gauge serve [--host H] [--port P] [--token T]` | run headless with an HTTP API + web dashboard; on a server, VPS or container; see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge write NAME [--chapters N] [--fresh] [--seed S]` | draft, score, revise, save; resumes checkpointed drafts; `--seed` makes it reproducible |
 | `gauge bench` | measure model speed; estimate minutes per chapter |

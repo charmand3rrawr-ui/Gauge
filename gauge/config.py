@@ -235,6 +235,15 @@ class NewsdeskConfig(BaseModel):
     max_source_overlap: float = 0.25  # more than this share of a source reproduced = too close; flagged
 
 
+class ServerConfig(BaseModel):
+    """Run Gauge headless and drive it over HTTP — on a home server, a VPS or a container. See docs/DEPLOY.md."""
+
+    host: str = "127.0.0.1"  # loopback by default; 0.0.0.0 exposes it to the network (needs a token and a warning)
+    port: int = 8800
+    token: str = ""  # required for every API call; generated and printed on first start if empty
+    enabled: bool = False
+
+
 class DaemonConfig(BaseModel):
     cycle_minutes: int = 180
     write_after_learning: bool = False
@@ -256,6 +265,7 @@ class GaugeConfig(BaseModel):
     code: CodeConfig = Field(default_factory=CodeConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     newsdesk: NewsdeskConfig = Field(default_factory=NewsdeskConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
 
     @property
     def security_dir(self) -> Path:

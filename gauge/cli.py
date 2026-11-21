@@ -2414,6 +2414,23 @@ def worker(c: Ctx, token: str, name: Optional[str], port: Optional[int], host: s
     w.serve()
 
 
+@main.command()
+@click.option("--host", default=None, help="Bind address. Default 127.0.0.1 (loopback). 0.0.0.0 exposes it to the network.")
+@click.option("--port", type=int, default=None, help="Port (default 8800 or server.port).")
+@click.option("--token", default=None, help="API token. Default: server.token, else a generated one printed at start.")
+@click.pass_obj
+def serve(c: Ctx, host: Optional[str], port: Optional[int], token: Optional[str]) -> None:
+    """Run Gauge headless with an HTTP control API and a web dashboard, so you can drive it from another
+    machine, a phone, a server or a container. Loopback and token-gated by default; see docs/DEPLOY.md."""
+    from .server import serve as run_server
+
+    try:
+        run_server(c.cfg, host=host, port=port, token=token)
+    except ValueError as e:
+        console.print(f"[red]{e}[/]")
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------------------- code: bots, knowledge, self
 def _kb(c: Ctx, with_self: bool = False):
     from .code import KnowledgeBase, repo_root
