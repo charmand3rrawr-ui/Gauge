@@ -95,6 +95,19 @@ class StudioController:
             return f"I don't know anyone called {character}."
         return CharacterAgent(pipe.fast_llm, c).chat(question)
 
+    # ---- switches ------------------------------------------------------------------
+    def switches(self) -> list[dict[str, Any]]:
+        from . import settings as st
+
+        return st.state(self.cfg)
+
+    def set_switch(self, key: str, value: Any) -> Any:
+        from . import settings as st
+
+        v = st.set_value(self.cfg, key, value)
+        self._pipe = None  # the next job picks up the new settings
+        return v
+
     def export_story(self, name: str) -> Path:
         """One readable Markdown file of the whole story so far."""
         from .write.project import Project
@@ -259,12 +272,70 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         if state["project"]:
             messagebox.showinfo("Gauge", f"Saved the whole story to:\n{ctl.export_story(state['project'])}")
 
+    def on_switches() -> None:
+        """A window of every switch, grouped, built from the catalog. Changes save immediately."""
+        win = tk.Toplevel(root)
+        win.title("Gauge Switches")
+        win.geometry("760x680")
+        canvas = tk.Canvas(win, highlightthickness=0)
+        scroll = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas, padding=12)
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        status = tk.StringVar(value="Changes are saved as soon as you make them.")
+        ttk.Label(inner, textvariable=status, font=("Segoe UI", 11, "italic")).pack(anchor="w", pady=(0, 8))
+
+        def apply(key: str, value: Any, label: str) -> None:
+            try:
+                v = ctl.set_switch(key, value)
+                status.set(f"{label} = {v}")
+            except Exception as e:
+                status.set(f"Could not set {label}: {e}")
+
+        rows = ctl.switches()
+        for group in sorted({r["group"] for r in rows}, key=lambda g: [r["group"] for r in rows].index(g)):
+            ttk.Label(inner, text=group, font=("Segoe UI", 15, "bold")).pack(anchor="w", pady=(12, 4))
+            for r in [x for x in rows if x["group"] == group]:
+                frame = ttk.Frame(inner)
+                frame.pack(fill="x", pady=3)
+                if r["kind"] == "bool":
+                    var = tk.BooleanVar(value=bool(r["value"]))
+                    ttk.Checkbutton(frame, text=r["label"], variable=var,
+                                    command=lambda k=r["key"], v=var, lab=r["label"]: apply(k, v.get(), lab)).pack(anchor="w")
+                elif r["kind"] in ("float", "int"):
+                    ttk.Label(frame, text=f"{r['label']}  ({r['value']})").pack(anchor="w")
+                    var = tk.DoubleVar(value=float(r["value"]))
+                    res = 1 if r["kind"] == "int" else 0.05
+                    sc = ttk.Scale(frame, from_=r["minimum"] or 0, to=r["maximum"] or 1, variable=var, orient="horizontal", length=320)
+                    sc.pack(anchor="w")
+                    sc.bind("<ButtonRelease-1>", lambda e, k=r["key"], v=var, lab=r["label"], step=res: apply(k, round(v.get() / step) * step, lab))
+                elif r["kind"] == "choice":
+                    ttk.Label(frame, text=r["label"]).pack(anchor="w")
+                    var = tk.StringVar(value=str(r["value"]))
+                    cb = ttk.Combobox(frame, textvariable=var, values=r["choices"], state="readonly", width=24)
+                    cb.pack(anchor="w")
+                    cb.bind("<<ComboboxSelected>>", lambda e, k=r["key"], v=var, lab=r["label"]: apply(k, v.get(), lab))
+                else:
+                    ttk.Label(frame, text=r["label"]).pack(anchor="w")
+                    var = tk.StringVar(value=str(r["value"]))
+                    ent = ttk.Entry(frame, textvariable=var, width=36)
+                    ent.pack(anchor="w")
+                    ent.bind("<Return>", lambda e, k=r["key"], v=var, lab=r["label"]: apply(k, v.get(), lab))
+                    ent.bind("<FocusOut>", lambda e, k=r["key"], v=var, lab=r["label"]: apply(k, v.get(), lab))
+                ttk.Label(frame, text=r["description"], wraplength=680, font=("Segoe UI", 10)).pack(anchor="w")
+                if r["warning"]:
+                    ttk.Label(frame, text="! " + r["warning"], wraplength=680, foreground="#b00020", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+
     buttons.extend([
         ttk.Button(left, text="START MY STORY", style="Big.TButton", command=on_start),
         ttk.Button(left, text="WRITE THE NEXT CHAPTER", style="Big.TButton", command=on_write),
         ttk.Button(left, text="Talk to a character", style="Big.TButton", command=on_chat),
         ttk.Button(left, text="Open another story", style="Big.TButton", command=on_open),
         ttk.Button(left, text="Save story as one file", style="Big.TButton", command=on_export),
+        ttk.Button(left, text="Switches", style="Big.TButton", command=on_switches),
     ])
     for b in buttons:
         b.pack(fill="x", pady=4)

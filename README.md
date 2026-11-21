@@ -165,6 +165,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge bot new/list/run/test/schedule/remove` | bots: standalone programs written and tested by the Engineer; see [docs/BOTS.md](docs/BOTS.md) |
 | `gauge code cards/search/learn` | programming knowledge cards and your own notes |
 | `gauge self propose/test/apply/rollback/list/journal/heal` | guarded self-modification; see [docs/SELF.md](docs/SELF.md) |
+| `gauge settings list/show/on/off/set/reset` | the switches; same catalog as the Studio panel; see [docs/SWITCHES.md](docs/SWITCHES.md) |
 | `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
@@ -219,6 +220,13 @@ announce themselves on your LAN with a shared token, and Gauge spreads generatio
 model-averaging training rounds across them. It never scans networks or touches machines you
 have not set up. See [docs/COMPUTE.md](docs/COMPUTE.md).
 
+## The switches
+
+Every behaviour you might want to flip is a labelled switch with a description and, where it
+matters, a warning: rebel craft mode (conventions become suggestions), the room's weights, the
+Scout, robots.txt, workers, self-heal, auto-apply. Flip them in **Gauge Studio -> Switches** or
+with `gauge settings on|off|set KEY`. See [docs/SWITCHES.md](docs/SWITCHES.md).
+
 ## Bots and self-modification
 
 Gauge knows programming: built-in reference cards for Python, PowerShell, batch, Bash,
@@ -261,7 +269,7 @@ gauge/
                    agents/ (the writing room: 11 agents + council), planner, drafter, critic, pipeline, prompts, schemas
   llm/             ollama / openai-compatible / fake clients, embeddings
   daemon.py  report.py  cli.py  db.py (sqlite)  config.py
-docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, RESEARCH, NATIVE, COMPUTE, BOTS, SELF, WINDOWS, ETHICS, ROADMAP
+docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, RESEARCH, NATIVE, COMPUTE, BOTS, SELF, SWITCHES, WINDOWS, ETHICS, ROADMAP
 installer/         double-click installer (bootstrap.ps1) and Gauge Studio GUI launcher
 tests/             pytest suite, runs offline with a fake LLM
 ```

@@ -104,15 +104,17 @@ class WritePipeline:
             compact = (compact + "\n\nLessons from your own earlier chapters:\n" + lessons).strip()
         if persona_block:
             compact = (persona_block + "\n\n" + compact).strip()
+        if cfg.write.rebel:
+            compact = (prompts.REBEL_BLOCK.format(level=cfg.write.rebel_level) + "\n\n" + compact).strip()
         self.guide_compact = compact
         self.planner = Planner(self.llm, self.exemplars, compact)
         self.drafter = Drafter(self.llm, self.exemplars, compact, cfg.write.exemplars_in_prompt)
-        self.critic = Critic(self.fast_llm, self.model)
+        self.critic = Critic(self.fast_llm, self.model, rebel=cfg.write.rebel)
         self.techniques = TechniqueLibrary(self.trainer.embedder)
         self.techniques.load(cfg.models_dir)
         self.novelty = NoveltyTracker()
         hint = "\n".join(t.card() for t in self.techniques.items[:12]) if self.techniques.items else ""
-        self.muse = Muse(self.fast_llm, hint)
+        self.muse = Muse(self.fast_llm, hint, rebel_level=cfg.write.rebel_level if cfg.write.rebel else 0.0)
         if cfg.write.muse_enabled:
             self.planner.direction_for = self._pick_direction
 

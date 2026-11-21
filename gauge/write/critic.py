@@ -39,10 +39,12 @@ _HEURISTIC_TARGETS = {
 
 
 class Critic:
-    def __init__(self, llm: LLM, model: Optional[EngagementModel], novel_level_feats: Optional[dict[str, float]] = None):
+    def __init__(self, llm: LLM, model: Optional[EngagementModel], novel_level_feats: Optional[dict[str, float]] = None,
+                 rebel: bool = False):
         self.llm = llm
         self.model = model
         self.novel_feats = novel_level_feats or {}
+        self.rebel = rebel
 
     def _measured(self, feats: dict[str, float]) -> (float, list[str]):  # type: ignore[valid-type]
         issues: list[str] = []
@@ -70,6 +72,8 @@ class Critic:
 
     def _judged(self, text: str, plan: ChapterPlan) -> (float, dict[str, float], str):  # type: ignore[valid-type]
         prompt = prompts.CRITIC_PROMPT.format(hook=plan.hook, turn=plan.turn, cliffhanger=plan.cliffhanger, text=text)
+        if self.rebel:
+            prompt = prompts.REBEL_CRITIC_LINE + "\n\n" + prompt
         try:
             data = generate_json(self.llm, prompt, schema=schema_of(CriticOut), temperature=0.2, max_tokens=400,
                                  purpose="critic")

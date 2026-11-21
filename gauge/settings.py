@@ -1,0 +1,144 @@
+"""The switches: every setting a person might flip, with a label, a description and a warning where
+one is due. One catalog drives both the Studio's Switches panel and `gauge settings`, so they
+cannot disagree. Values are validated and coerced here; the CLI and GUI only display and collect.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+from .config import GaugeConfig
+
+
+@dataclass
+class Switch:
+    key: str  # dotted path into GaugeConfig, e.g. "write.rebel"
+    label: str
+    kind: str  # bool | float | int | choice | text
+    description: str
+    group: str = "Writing"
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+    choices: list[str] = field(default_factory=list)
+    warning: str = ""  # shown in red: this affects other people, your machine, or safety
+
+
+SWITCHES: list[Switch] = [
+    # ---- craft ---------------------------------------------------------------------------
+    Switch("write.rebel", "Rebel craft mode", "bool",
+           "Conventions become suggestions: the muse proposes directions that break genre, pacing and style rules on purpose, "
+           "and the judges score effect over compliance. Breaks only rules of craft, never rules about other people."),
+    Switch("write.rebel_level", "How rebellious", "float", "0 = gentle nudges, 1 = every chapter should break something.", minimum=0, maximum=1),
+    Switch("write.persona_blend", "Write like me vs. like the data", "float", "0 = the data-driven style guide; 1 = your author persona dominates.", minimum=0, maximum=1),
+    Switch("write.novelty_weight", "Punish repetition", "float", "Share of the chapter score that comes from not repeating earlier chapters.", minimum=0, maximum=0.5),
+    Switch("write.min_acceptable_score", "Quality bar", "float", "Chapters below this score are revised (up to the revision limit).", minimum=0, maximum=1),
+    Switch("write.max_revisions", "Revision limit", "int", "How many rewrites a chapter may get before the best version is kept.", minimum=0, maximum=5),
+    # ---- the room -------------------------------------------------------------------------
+    Switch("write.characters_enabled", "Characters as agents", "bool", "Each character briefs, reviews and remembers as themselves.", "The room"),
+    Switch("write.character_weight", "Characters' say in the score", "float", "Share of the score from in-character consistency.", "The room", 0, 0.5),
+    Switch("write.improv_enabled", "Scene improv before drafting", "bool", "Present characters play the scene out first; the transcript feeds the draft.", "The room"),
+    Switch("write.world_enabled", "World agent", "bool", "Physics, weather, crowds and consequences act in every scene.", "The room"),
+    Switch("write.world_agency", "How much the world intervenes", "float", "0 = backdrop, 1 = the world constantly acts.", "The room", 0, 1),
+    Switch("write.world_weight", "World's say in the score", "float", "Share of the score from world-rule consistency.", "The room", 0, 0.5),
+    Switch("write.muse_enabled", "Muse", "bool", "Divergent directions proposed and rated before each outline extension.", "The room"),
+    Switch("agents.profile", "Writing room size", "choice", "full = every agent; lean = the cheap ones; off = none.", "The room", choices=["full", "lean", "off"]),
+    Switch("agents.weight", "Writing room's say in the score", "float", "Share of the chapter score the council controls.", "The room", 0, 0.6),
+    Switch("agents.block_on_sensitivity", "Content flags block", "bool", "Severe content flags force a revision instead of only warning.", "The room"),
+    # ---- learning -------------------------------------------------------------------------
+    Switch("learn.bandit_enabled", "Tune prompt settings by reward", "bool", "Thompson-sampling bandit over exemplars, temperature, techniques, world agency.", "Learning"),
+    Switch("learn.self_preference_pairs", "Collect fine-tuning pairs", "bool", "Save draft-vs-accepted pairs for later fine-tuning.", "Learning"),
+    Switch("learn.lessons_in_prompt", "Lessons shown to the writer", "int", "How many recurring lessons go into every prompt.", "Learning", 0, 10),
+    Switch("research.enabled", "Scout research", "bool", "Look up real-world detail for scenes in open sources.", "Learning"),
+    Switch("research.respect_robots_txt", "Honour robots.txt", "bool",
+           "When off, arXiv and Open-Meteo lookups work (their robots.txt disallow all bots even though their API terms allow identified clients).",
+           "Learning", warning="Turning this off means fetching from sites whose robots.txt says no. Your call, not the software's."),
+    Switch("research.fact_check", "Fact-check drafts", "bool", "Verify up to three real-world claims per chapter.", "Learning"),
+    # ---- model & compute --------------------------------------------------------------------
+    Switch("llm.provider", "Model provider", "choice", "ollama (default), openai-compatible server, or native GaugeLM.", "Model", choices=["ollama", "openai", "native", "fake"]),
+    Switch("llm.model", "Writer model", "text", "Ollama model name for prose (e.g. llama3.1:8b, qwen2.5:14b).", "Model"),
+    Switch("llm.fast_model", "Fast model for bookkeeping", "text", "Small model for briefs, reviews, memory (e.g. llama3.2:3b). Empty = same as writer.", "Model"),
+    Switch("native.device", "GaugeLM device", "choice", "auto picks a GPU when one is usable.", "Model", choices=["auto", "cuda", "cpu"]),
+    Switch("compute.auto_device", "Switch to a GPU when one appears", "bool", "The daemon re-scans every cycle.", "Model"),
+    Switch("compute.pool_generation", "Use your workers for generation", "bool", "Spread prose calls over machines you started `gauge worker` on.", "Model"),
+    Switch("compute.distributed_training", "Use your workers for training", "bool", "Model-averaging rounds across your workers.", "Model"),
+    # ---- automation -----------------------------------------------------------------------
+    Switch("daemon.write_after_learning", "Daemon writes chapters", "bool", "Each learning cycle also writes the next chapter of the active project.", "Automation"),
+    Switch("code.bots_enabled", "Run scheduled bots", "bool", "The daemon runs the bots whose schedule is due.", "Automation"),
+    Switch("code.self_heal", "Self-heal proposals", "bool", "Recurring errors become tested proposals to fix Gauge's own code (not applied).", "Automation",
+           warning="Gauge will write proposals to change its own source. They are tested in isolation and wait for you unless auto-apply is on."),
+    Switch("code.auto_apply", "Auto-apply self-fixes", "bool", "Apply proposals that pass the full test suite without asking you.", "Automation",
+           warning="Gauge will commit changes to its own code while you are not watching. Protected files and tests stay out of reach; rollback exists. Keep off unless you trust it."),
+]
+
+BY_KEY = {s.key: s for s in SWITCHES}
+
+
+def get(cfg: GaugeConfig, key: str) -> Any:
+    obj: Any = cfg
+    for part in key.split("."):
+        obj = getattr(obj, part)
+    return obj
+
+
+def coerce(sw: Switch, value: Any) -> Any:
+    if sw.kind == "bool":
+        if isinstance(value, bool):
+            return value
+        v = str(value).strip().lower()
+        if v in ("1", "true", "yes", "on", "y"):
+            return True
+        if v in ("0", "false", "no", "off", "n"):
+            return False
+        raise ValueError(f"{sw.key}: expected on/off, got {value!r}")
+    if sw.kind in ("float", "int"):
+        try:
+            num = float(value)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"{sw.key}: expected a number, got {value!r}") from e
+        if sw.minimum is not None and num < sw.minimum or sw.maximum is not None and num > sw.maximum:
+            raise ValueError(f"{sw.key}: {num} is outside {sw.minimum}..{sw.maximum}")
+        return int(round(num)) if sw.kind == "int" else round(num, 3)
+    if sw.kind == "choice":
+        v = str(value).strip().lower()
+        if v not in sw.choices:
+            raise ValueError(f"{sw.key}: choose one of {', '.join(sw.choices)}")
+        return v
+    return str(value).strip()
+
+
+def set_value(cfg: GaugeConfig, key: str, value: Any, save: bool = True) -> Any:
+    sw = BY_KEY.get(key)
+    if sw is None:
+        raise KeyError(f"unknown switch {key!r}; see `gauge settings list`")
+    v = coerce(sw, value)
+    obj: Any = cfg
+    parts = key.split(".")
+    for part in parts[:-1]:
+        obj = getattr(obj, part)
+    setattr(obj, parts[-1], v)
+    if key == "native.device":
+        cfg.llm.native_device = v
+    if save:
+        cfg.save()
+    return v
+
+
+def state(cfg: GaugeConfig) -> list[dict[str, Any]]:
+    out = []
+    for sw in SWITCHES:
+        out.append({"key": sw.key, "label": sw.label, "kind": sw.kind, "group": sw.group, "value": get(cfg, sw.key),
+                    "description": sw.description, "warning": sw.warning, "minimum": sw.minimum, "maximum": sw.maximum, "choices": sw.choices})
+    return out
+
+
+def groups() -> list[str]:
+    seen: list[str] = []
+    for sw in SWITCHES:
+        if sw.group not in seen:
+            seen.append(sw.group)
+    return seen
+
+
+def reset(cfg: GaugeConfig, key: str, save: bool = True) -> Any:
+    default = get(GaugeConfig(data_dir=cfg.data_dir), key)
+    return set_value(cfg, key, default, save)

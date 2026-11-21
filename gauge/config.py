@@ -131,6 +131,9 @@ class WriteConfig(BaseModel):
     improv_max_cast: int = 4
     # Author persona blend: 0 = write like the data, 1 = write like the author persona.
     persona_blend: float = 0.5
+    # Rebel craft mode: conventions are suggestions. Breaks rules of craft only, never rules about people.
+    rebel: bool = False
+    rebel_level: float = 0.6
 
 
 class ResearchConfig(BaseModel):

@@ -402,3 +402,17 @@ Be concrete and consistent with everything you know. Do not invent names for bac
 
 Author: {question}
 World:"""
+
+
+# ------------------------------------------------------------------------------ rebel craft mode
+REBEL_BLOCK = """REBEL MODE ({level:.0%}). Every rule of craft in this prompt is a default, not a law. Break a convention when breaking
+it is more alive than keeping it: open on stillness when every chapter has opened in motion; refuse the cliffhanger and
+end on a quiet sentence that hurts more; let a scene run long; let the villain be right; change tense, form or point of
+view for a chapter; put the reveal first; let a chapter be a letter, a list, a transcript. The one law that remains:
+the break must be earned on the page and must leave the reader wanting the next chapter more, not less."""
+
+REBEL_MUSE_LINE = """At least {n} of the directions must deliberately break a convention this story has been obeying (structure, genre
+expectation, pacing rhythm, point of view, tone) and say which one and why the break is earned."""
+
+REBEL_CRITIC_LINE = """Rebel mode is on: judge effect, not compliance. A chapter that breaks a convention and lands is a 9 or 10; one that
+breaks it and fumbles is a 3. Do not penalise a missing cliffhanger if the ending is stronger without one."""

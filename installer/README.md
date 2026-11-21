@@ -12,7 +12,7 @@ That is all. No accounts, no API keys, nothing leaves your computer.
 Type what your story is about in the big box. Press **START MY STORY**. Then press
 **WRITE THE NEXT CHAPTER** whenever you want more. Click a chapter on the left to read it.
 **Talk to a character** lets you ask the people in your story questions, and they answer as
-themselves. **Save story as one file** makes one document you can print or share.
+themselves. **Save story as one file** makes one document you can print or share. **Switches** opens every setting as checkboxes and sliders, with a warning on the ones that matter.
 
 ## What the installer does
 

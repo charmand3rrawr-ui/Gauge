@@ -56,15 +56,18 @@ def overlap(a: str, b: str, n: int = 3) -> float:
 
 
 class Muse:
-    def __init__(self, llm: LLM, techniques_hint: str = ""):
+    def __init__(self, llm: LLM, techniques_hint: str = "", rebel_level: float = 0.0):
         self.llm = llm
         self.techniques_hint = techniques_hint
+        self.rebel_level = rebel_level
 
     def directions(self, bible_md: str, summary: str, threads: list[str], past: list[str], k: int = 3) -> list[Direction]:
         prompt = prompts.MUSE_PROMPT.format(k=k, bible=bible_md, summary=summary or "(the story is beginning)",
                                             threads="\n".join(f"- {t}" for t in threads) or "(none)",
                                             past="\n".join(f"- {p}" for p in past[-8:]) or "(none yet)",
                                             techniques=self.techniques_hint or "(no technique library yet)")
+        if self.rebel_level > 0:
+            prompt += "\n\n" + prompts.REBEL_MUSE_LINE.format(n=max(1, round(k * self.rebel_level)))
         try:
             d = generate_json(self.llm, prompt, schema=schema_of(MuseDirectionsOut), temperature=1.0, max_tokens=1200, purpose="muse")
         except Exception as e:

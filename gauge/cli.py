@@ -1965,6 +1965,99 @@ def self_heal(c: Ctx, do_apply: bool) -> None:
         console.print(f"proposal {r['proposal']}: files {r['files']} tested={r['tested']} applied={r.get('applied')}")
 
 
+# ---------------------------------------------------------------------------- settings (the switches)
+@main.group()
+def settings() -> None:
+    """The switches: flip any behaviour on or off. Same catalog as the Studio's Switches panel."""
+
+
+@settings.command("list")
+@click.option("--group", default=None, help="Writing | The room | Learning | Model | Automation")
+@click.pass_obj
+def settings_list(c: Ctx, group: Optional[str]) -> None:
+    """Every switch with its current value."""
+    from . import settings as st
+
+    table = Table(title="Switches")
+    for col in ("key", "value", "label", "group", "note"):
+        table.add_column(col)
+    for row in st.state(c.cfg):
+        if group and row["group"].lower() != group.lower():
+            continue
+        note = ("[red]! " + row["warning"] + "[/]") if row["warning"] else row["description"]
+        table.add_row(row["key"], str(row["value"]), row["label"], row["group"], note[:90])
+    console.print(table)
+    console.print("gauge settings on KEY | off KEY | set KEY VALUE | reset KEY | show KEY")
+
+
+@settings.command("show")
+@click.argument("key")
+@click.pass_obj
+def settings_show(c: Ctx, key: str) -> None:
+    """Full description of one switch."""
+    from . import settings as st
+
+    sw = st.BY_KEY.get(key)
+    if sw is None:
+        console.print(f"[red]unknown switch {key!r}[/]")
+        sys.exit(1)
+    console.print(f"[bold]{sw.label}[/] ({sw.key}) = {st.get(c.cfg, key)}\n{sw.description}")
+    if sw.kind in ("float", "int"):
+        console.print(f"range {sw.minimum}..{sw.maximum}")
+    if sw.choices:
+        console.print("choices: " + ", ".join(sw.choices))
+    if sw.warning:
+        console.print(f"[red]! {sw.warning}[/]")
+
+
+@settings.command("set")
+@click.argument("key")
+@click.argument("value")
+@click.pass_obj
+def settings_set(c: Ctx, key: str, value: str) -> None:
+    """Set a switch (validated, saved to config.json)."""
+    from . import settings as st
+
+    try:
+        v = st.set_value(c.cfg, key, value)
+    except (KeyError, ValueError) as e:
+        console.print(f"[red]{e}[/]")
+        sys.exit(1)
+    sw = st.BY_KEY[key]
+    console.print(f"[green]{key}[/] = {v}" + (f"\n[red]! {sw.warning}[/]" if sw.warning and v not in (False, 0) else ""))
+
+
+@settings.command("on")
+@click.argument("key")
+@click.pass_context
+def settings_on(ctx: click.Context, key: str) -> None:
+    """Turn a boolean switch on."""
+    ctx.invoke(settings_set, key=key, value="on")
+
+
+@settings.command("off")
+@click.argument("key")
+@click.pass_context
+def settings_off(ctx: click.Context, key: str) -> None:
+    """Turn a boolean switch off."""
+    ctx.invoke(settings_set, key=key, value="off")
+
+
+@settings.command("reset")
+@click.argument("key")
+@click.pass_obj
+def settings_reset(c: Ctx, key: str) -> None:
+    """Put a switch back to its default."""
+    from . import settings as st
+
+    try:
+        v = st.reset(c.cfg, key)
+    except KeyError as e:
+        console.print(f"[red]{e}[/]")
+        sys.exit(1)
+    console.print(f"[green]{key}[/] reset to {v}")
+
+
 # ---------------------------------------------------------------------------- gui
 @main.command()
 @click.pass_obj
