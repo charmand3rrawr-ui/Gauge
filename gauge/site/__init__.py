@@ -14,7 +14,7 @@ from .integrity import (
     flag_claims,
 )
 from .opinion import draft_opinion
-from .publisher import Article, build_site
+from .publisher import Article, accessibility_report, build_site
 from .stance import (
     EditorialStance,
     balance_check,
@@ -26,6 +26,6 @@ from .stance import (
 )
 
 __all__ = ["check_byline", "check_headline", "flag_claims", "OPINION_DISCLAIMER", "IMPERSONATION_DENYLIST",
-           "draft_opinion", "Article", "build_site",
+           "draft_opinion", "Article", "build_site", "accessibility_report",
            "Headline", "suggest_headlines", "rank_headlines", "in_context", "score_headline",
            "EditorialStance", "default_stance", "stance_guidance", "balance_check", "load_stance", "save_stance", "editorial_page_body"]

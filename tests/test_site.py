@@ -58,10 +58,10 @@ def test_build_site_renders_and_labels_opinion(tmp_path):
     written = build_site("Rin Writes", arts, tmp_path / "site", base_url="https://me")
     assert (tmp_path / "site" / "index.html").exists() and (tmp_path / "site" / "feed.xml").exists()
     op_html = (tmp_path / "site" / "articles" / "op1.html").read_text(encoding="utf-8")
-    assert "Opinion" in op_html and "By Jane Doe" in op_html  # opinion is labelled and bylined
+    assert "Opinion" in op_html and "Jane Doe" in op_html and "authors/jane-doe.html" in op_html  # labelled, bylined, linked
     index = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
     assert "Ten Seconds" in index and "og:title" in index
-    assert len(written) == 4
+    assert len(written) >= 4 and any(p.name == "sitemap.xml" for p in written)
 
 
 def test_build_site_refuses_impersonation_and_clickbait(tmp_path):
