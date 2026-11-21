@@ -1693,6 +1693,278 @@ def worker(c: Ctx, token: str, name: Optional[str], port: Optional[int], host: s
     w.serve()
 
 
+# ---------------------------------------------------------------------------- code: bots, knowledge, self
+def _kb(c: Ctx, with_self: bool = False):
+    from .code import KnowledgeBase, repo_root
+
+    kb = KnowledgeBase(extra_dir=c.cfg.knowledge_dir)
+    if with_self:
+        kb.index_self(repo_root() / "gauge")
+    return kb
+
+
+@main.group()
+def bot() -> None:
+    """Bots: standalone programs Gauge writes and tests; they run without a model unless the task needs one."""
+
+
+@bot.command("new")
+@click.argument("name")
+@click.option("--task", required=True, help="What the bot should do, in plain words.")
+@click.option("--language", type=click.Choice(["python", "powershell", "batch", "javascript"]), default=None)
+@click.option("--needs-ai/--no-ai", default=None, help="Override the Engineer's judgement about needing a model.")
+@click.option("--schedule", default=None, help="hourly | daily | every:N (minutes) | on-cycle | '' ")
+@click.pass_obj
+def bot_new(c: Ctx, name: str, task: str, language: Optional[str], needs_ai: Optional[bool], schedule: Optional[str]) -> None:
+    """Have the Engineer write, test and register a bot."""
+    from .code import Engineer
+    from .llm import make_llm
+
+    llm = make_llm(c.cfg.llm, "main")
+    if not llm.available():
+        console.print(f"[red]LLM not reachable[/] ({llm.describe()}); the Engineer needs a model to write code (the bot itself may not).")
+        sys.exit(1)
+    eng = Engineer(llm, _kb(c), c.cfg.bots_dir, max_fix_rounds=c.cfg.code.max_fix_rounds)
+    res = eng.build(name, task, needs_ai=needs_ai, language=language, schedule=schedule,
+                    progress=lambda r: console.print(f"  attempt {r['attempt']}: tests {'passed' if r['passed'] else 'failed'}"))
+    console.print_json(json.dumps(res))
+    if not res["tests_passed"]:
+        console.print("[yellow]the bot's tests did not pass; it is saved for you to inspect but will not be scheduled[/]")
+
+
+@bot.command("list")
+@click.pass_obj
+def bot_list(c: Ctx) -> None:
+    """Registered bots, schedules and last results."""
+    from .code import BotRegistry
+
+    rows = BotRegistry(c.cfg.bots_dir).list()
+    if not rows:
+        console.print("(no bots; `gauge bot new NAME --task ...`)")
+        return
+    table = Table(title="Bots")
+    for col in ("name", "language", "ai", "schedule", "tests", "runs", "last run", "status", "task"):
+        table.add_column(col)
+    for m in rows:
+        table.add_row(m["name"], m.get("language", ""), "yes" if m.get("needs_ai") else "no", m.get("schedule") or "-",
+                      "ok" if m.get("tests_passed") else "FAIL", str(m.get("runs", 0)), (m.get("last_run") or "")[:16],
+                      str(m.get("last_status") if m.get("last_status") is not None else ""), m.get("task", "")[:50])
+    console.print(table)
+
+
+@bot.command("run")
+@click.argument("name")
+@click.argument("args", nargs=-1)
+@click.pass_obj
+def bot_run(c: Ctx, name: str, args: tuple) -> None:
+    """Run a bot now (deterministic bots cannot reach the model)."""
+    from .code import BotRegistry
+
+    reg = BotRegistry(c.cfg.bots_dir)
+    if not reg.exists(name):
+        console.print(f"[red]no bot {name!r}[/]")
+        sys.exit(1)
+    res = reg.run(name, list(args), env_extra={"GAUGE_DATA_DIR": str(c.cfg.root)})
+    console.print(res["stdout"] or "")
+    if res["stderr"]:
+        console.print(f"[dim]{res['stderr']}[/]")
+    console.print(f"exit {res['exit']} in {res['seconds']}s")
+    sys.exit(res["exit"])
+
+
+@bot.command("test")
+@click.argument("name")
+@click.pass_obj
+def bot_test(c: Ctx, name: str) -> None:
+    """Run a bot's own tests."""
+    from .code import BotRegistry, run_tests
+
+    reg = BotRegistry(c.cfg.bots_dir)
+    ok, report = run_tests(reg.path(name))
+    console.print(report)
+    console.print("[green]passed[/]" if ok else "[red]failed[/]")
+    sys.exit(0 if ok else 1)
+
+
+@bot.command("schedule")
+@click.argument("name")
+@click.argument("schedule")
+@click.pass_obj
+def bot_schedule(c: Ctx, name: str, schedule: str) -> None:
+    """Set when the daemon runs a bot: hourly | daily | every:N | on-cycle | off."""
+    from .code import BotRegistry
+
+    reg = BotRegistry(c.cfg.bots_dir)
+    if not reg.exists(name):
+        console.print(f"[red]no bot {name!r}[/]")
+        sys.exit(1)
+    man = reg.manifest(name)
+    man["schedule"] = "" if schedule == "off" else schedule
+    (reg.path(name) / "manifest.json").write_text(json.dumps(man, indent=2), encoding="utf-8")
+    console.print(f"[green]{name}[/] schedule = {man['schedule'] or 'off'}")
+
+
+@bot.command("remove")
+@click.argument("name")
+@click.pass_obj
+def bot_remove(c: Ctx, name: str) -> None:
+    """Delete a bot."""
+    from .code import BotRegistry
+
+    console.print("[green]removed[/]" if BotRegistry(c.cfg.bots_dir).remove(name) else f"[red]no bot {name!r}[/]")
+
+
+@main.group()
+def code() -> None:
+    """What Gauge knows about programming: reference cards, your notes, and its own source."""
+
+
+@code.command("cards")
+@click.pass_obj
+def code_cards(c: Ctx) -> None:
+    """List the knowledge cards."""
+    kb = _kb(c)
+    for card in kb.cards:
+        console.print(f"[bold]{card.key}[/]  {card.title}  [dim]({card.source}, {len(card.text)} chars)[/]")
+
+
+@code.command("search")
+@click.argument("query")
+@click.option("-k", default=2, show_default=True)
+@click.option("--self", "with_self", is_flag=True, help="Include Gauge's own source index.")
+@click.pass_obj
+def code_search(c: Ctx, query: str, k: int, with_self: bool) -> None:
+    """Show the cards most relevant to a question."""
+    kb = _kb(c, with_self)
+    console.print(kb.render(kb.search(query, k)))
+
+
+@code.command("learn")
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_obj
+def code_learn(c: Ctx, path: str) -> None:
+    """Add your own notes or a code file to the knowledge base (split on # headings)."""
+    cards = _kb(c).learn_file(Path(path))
+    console.print(f"[green]learned[/] {len(cards)} card(s): " + ", ".join(x.key for x in cards))
+
+
+@main.group(name="self")
+def self_group() -> None:
+    """Self-modification with guardrails: propose -> test in isolation -> apply (human-approved by default) -> rollback."""
+
+
+def _selfp(c: Ctx):
+    from .code import SelfProgrammer
+    from .llm import make_llm
+
+    llm = make_llm(c.cfg.llm, "main")
+    return SelfProgrammer(llm, _kb(c, with_self=True), c.cfg.self_dir)
+
+
+@self_group.command("propose")
+@click.argument("instruction")
+@click.option("--file", "files", multiple=True, help="Restrict to these repo-relative files.")
+@click.pass_obj
+def self_propose(c: Ctx, instruction: str, files: tuple) -> None:
+    """Draft a change to Gauge's own source as a reviewable proposal (nothing is modified)."""
+    sp = _selfp(c)
+    if not sp.llm.available():
+        console.print(f"[red]LLM not reachable[/] ({sp.llm.describe()})")
+        sys.exit(1)
+    prop = sp.propose(instruction, list(files) or None)
+    console.print(f"[bold]{prop.id}[/]  files: {list(prop.files)}  rationale: {prop.rationale}")
+    if prop.meta.get("refused"):
+        console.print("[yellow]refused parts:[/] " + "; ".join(prop.meta["refused"]))
+    console.print(prop.diff[:4000] or "(no diff)")
+    console.print(f"next: gauge self test {prop.id}")
+
+
+@self_group.command("test")
+@click.argument("proposal_id")
+@click.pass_obj
+def self_test(c: Ctx, proposal_id: str) -> None:
+    """Run ruff and the whole test suite on an isolated copy with the proposal applied."""
+    sp = _selfp(c)
+    prop = sp.load(proposal_id)
+    ok, report = sp.test(prop)
+    console.print(report[-3000:])
+    console.print("[green]passed[/] -> gauge self apply " + proposal_id if ok else "[red]failed[/]; not applicable")
+    sys.exit(0 if ok else 1)
+
+
+@self_group.command("apply")
+@click.argument("proposal_id")
+@click.option("--no-commit", is_flag=True)
+@click.pass_obj
+def self_apply(c: Ctx, proposal_id: str, no_commit: bool) -> None:
+    """Apply a proposal that passed its tests; originals are backed up for rollback."""
+    sp = _selfp(c)
+    prop = sp.load(proposal_id)
+    try:
+        res = sp.apply(prop, commit=not no_commit)
+    except PermissionError as e:
+        console.print(f"[red]{e}[/]")
+        sys.exit(1)
+    console.print_json(json.dumps(res))
+
+
+@self_group.command("rollback")
+@click.argument("proposal_id")
+@click.pass_obj
+def self_rollback(c: Ctx, proposal_id: str) -> None:
+    """Restore the files a proposal changed."""
+    console.print_json(json.dumps(_selfp(c).rollback(proposal_id)))
+
+
+@self_group.command("list")
+@click.pass_obj
+def self_list(c: Ctx) -> None:
+    """Proposals and their state."""
+    rows = _selfp(c).list()
+    if not rows:
+        console.print("(no proposals)")
+        return
+    table = Table(title="Self proposals")
+    for col in ("id", "source", "tested", "applied", "instruction"):
+        table.add_column(col)
+    for r in rows:
+        table.add_row(r["id"], r.get("source") or "", str(r.get("tested")), str(r.get("applied")), (r.get("instruction") or "")[:60])
+    console.print(table)
+
+
+@self_group.command("journal")
+@click.option("--all", "show_all", is_flag=True)
+@click.pass_obj
+def self_journal(c: Ctx, show_all: bool) -> None:
+    """Errors Gauge recorded about itself (what self-heal works from)."""
+    rows = c.db.journal(unresolved_only=not show_all)
+    if not rows:
+        console.print("(journal is empty)")
+        return
+    for r in rows[:30]:
+        console.print(f"{r['at'][:19]}  [{r['kind']}] {r['message'][:120]}")
+    rec = c.db.recurring_errors(c.cfg.code.min_recurrences)
+    if rec:
+        console.print("\nrecurring: " + "; ".join(f"{x['message'][:60]} (x{x['n']})" for x in rec))
+
+
+@self_group.command("heal")
+@click.option("--apply", "do_apply", is_flag=True, help="Apply proposals that pass tests (otherwise they wait for you).")
+@click.pass_obj
+def self_heal(c: Ctx, do_apply: bool) -> None:
+    """Turn recurring journal errors into tested proposals."""
+    sp = _selfp(c)
+    if not sp.llm.available():
+        console.print(f"[red]LLM not reachable[/] ({sp.llm.describe()})")
+        sys.exit(1)
+    entries = c.db.recurring_errors(c.cfg.code.min_recurrences)
+    if not entries:
+        console.print("nothing recurring in the journal")
+        return
+    for r in sp.heal(entries, auto_apply=do_apply):
+        console.print(f"proposal {r['proposal']}: files {r['files']} tested={r['tested']} applied={r.get('applied')}")
+
+
 # ---------------------------------------------------------------------------- gui
 @main.command()
 @click.pass_obj

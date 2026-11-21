@@ -102,6 +102,9 @@ CREATE TABLE IF NOT EXISTS chapter_notes (
 CREATE TABLE IF NOT EXISTS workers (
     url TEXT PRIMARY KEY, name TEXT, devices_json TEXT, llm TEXT, added_at TEXT, last_seen TEXT, alive INTEGER, health_json TEXT
 );
+CREATE TABLE IF NOT EXISTS journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, kind TEXT, message TEXT, traceback TEXT, resolved INTEGER DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS generated (
     project TEXT NOT NULL,
     chapter INTEGER NOT NULL,
@@ -328,6 +331,26 @@ class Database:
             d["summary"] = json.loads(d["summary"] or "{}")
             out.append(d)
         return out
+
+    # ---- error journal (feeds self-healing) ------------------------------------------
+    def add_journal(self, kind: str, message: str, traceback_text: str = "") -> None:
+        with self.tx() as c:
+            c.execute("INSERT INTO journal (at, kind, message, traceback) VALUES (?,?,?,?)",
+                      (utcnow().isoformat(), kind[:40], message[:500], traceback_text[:8000]))
+
+    def journal(self, unresolved_only: bool = True, limit: int = 50) -> list[dict[str, Any]]:
+        q = "SELECT * FROM journal" + (" WHERE resolved=0" if unresolved_only else "") + " ORDER BY id DESC LIMIT ?"
+        return [dict(r) for r in self._conn.execute(q, (limit,))]
+
+    def recurring_errors(self, min_count: int = 2) -> list[dict[str, Any]]:
+        rows = self._conn.execute("SELECT message, COUNT(*) AS n, MAX(traceback) AS traceback, MAX(kind) AS kind FROM journal "
+                                  "WHERE resolved=0 GROUP BY substr(message, 1, 80) HAVING n >= ? ORDER BY n DESC", (min_count,))
+        return [dict(r) for r in rows]
+
+    def resolve_journal(self, message_prefix: str) -> int:
+        with self.tx() as c:
+            cur = c.execute("UPDATE journal SET resolved=1 WHERE substr(message, 1, 80)=?", (message_prefix[:80],))
+        return cur.rowcount
 
     # ---- compute pool --------------------------------------------------------------
     def upsert_worker(self, url: str, name: str, devices_json: str, llm: str) -> None:

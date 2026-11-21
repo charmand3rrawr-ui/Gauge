@@ -73,6 +73,16 @@ class ComputeConfig(BaseModel):
     pool_generation: bool = True  # spread LLM calls over workers that serve a model
 
 
+class CodeConfig(BaseModel):
+    """Bots and self-modification."""
+
+    bots_enabled: bool = True  # the daemon runs scheduled bots
+    max_fix_rounds: int = 2  # how many times the Engineer may rewrite a bot whose tests fail
+    self_heal: bool = False  # let the daemon turn recurring errors into tested proposals
+    auto_apply: bool = False  # apply proposals that pass tests without a human (off by default; keep it off unless you trust it)
+    min_recurrences: int = 3  # an error must repeat this often before self-heal proposes a fix
+
+
 class IngestConfig(BaseModel):
     user_agent: str = "Gauge/0.1 (open-source web novel research tool)"
     request_delay_seconds: float = 2.5
@@ -178,6 +188,19 @@ class GaugeConfig(BaseModel):
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     native: NativeConfig = Field(default_factory=NativeConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
+    code: CodeConfig = Field(default_factory=CodeConfig)
+
+    @property
+    def bots_dir(self) -> Path:
+        return self.root / "bots"
+
+    @property
+    def self_dir(self) -> Path:
+        return self.root / "self"
+
+    @property
+    def knowledge_dir(self) -> Path:
+        return self.models_dir / "knowledge"
 
     @property
     def native_dir(self) -> Path:

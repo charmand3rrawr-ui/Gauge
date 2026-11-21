@@ -29,6 +29,14 @@ Discovery listens for those workers' announcements; it does not scan address ran
 ports or try credentials, and Gauge never enrols in cloud services on its own. Lending someone
 else's machine to the pool requires their consent and their action: they must run the worker.
 
+## Code that writes code
+
+Bots are plain programs you can read; deterministic ones are refused a model at run time.
+Self-modification is proposal-based, tested in isolation, and applied by you unless you switch
+on automatic mode; protected files and existing tests are out of reach either way, and every
+change is backed up and reversible. Gauge does not install software, change system settings or
+touch files outside its repository and data folder on its own.
+
 ## Stories
 
 Gauge is built to learn **patterns**, not to copy text:

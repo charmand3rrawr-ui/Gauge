@@ -162,6 +162,9 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge character arc` | planned personality drift |
 | `gauge native presets/bench/train/distill/eval/continue/status/sample/tokenizer` | GaugeLM, the built-in model; see [docs/NATIVE.md](docs/NATIVE.md) |
 | `gauge compute scan/watch/token/discover/add/list/remove`, `gauge worker` | sense GPUs; pool the machines you own; see [docs/COMPUTE.md](docs/COMPUTE.md) |
+| `gauge bot new/list/run/test/schedule/remove` | bots: standalone programs written and tested by the Engineer; see [docs/BOTS.md](docs/BOTS.md) |
+| `gauge code cards/search/learn` | programming knowledge cards and your own notes |
+| `gauge self propose/test/apply/rollback/list/journal/heal` | guarded self-modification; see [docs/SELF.md](docs/SELF.md) |
 | `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
@@ -216,6 +219,17 @@ announce themselves on your LAN with a shared token, and Gauge spreads generatio
 model-averaging training rounds across them. It never scans networks or touches machines you
 have not set up. See [docs/COMPUTE.md](docs/COMPUTE.md).
 
+## Bots and self-modification
+
+Gauge knows programming: built-in reference cards for Python, PowerShell, batch, Bash,
+JavaScript, SQL, regex, HTML, testing and Windows automation, plus its own internals.
+`gauge bot new NAME --task "..."` has the Engineer decide whether a chore needs a model at all
+(most do not), write a standalone program with tests, run the tests, and schedule it; deterministic
+bots are refused a model at run time. `gauge self propose "..."` lets Gauge change its own source
+as a reviewable proposal tested in an isolated copy of the repository, applied only when the
+whole suite passes, with backups and rollback; protected files and tests cannot be weakened. See
+[docs/BOTS.md](docs/BOTS.md) and [docs/SELF.md](docs/SELF.md).
+
 ## Using a different local model
 
 Any Ollama model works: `gauge init --model qwen2.5:14b`. Any OpenAI-compatible server (LM
@@ -242,11 +256,12 @@ gauge/
   research/        sources.py (Wikipedia, Wikivoyage, Gutenberg, arXiv, climate, SearXNG), scout.py (cache, filing, dossiers)
   native/          GaugeLM: tokenizer.py, model.py (numpy transformer + backprop), train.py, client.py
   compute/         detect.py (GPU sensing), worker.py, pool.py (discovery, PoolLLM, distributed rounds)
+  code/            knowledge.py (cards), toolkit.py, engineer.py (bots), selfmod.py (guarded self-modification)
   write/           project, characters (matrix, agents), world (physics, crowds), muse (directions, novelty),
                    agents/ (the writing room: 11 agents + council), planner, drafter, critic, pipeline, prompts, schemas
   llm/             ollama / openai-compatible / fake clients, embeddings
   daemon.py  report.py  cli.py  db.py (sqlite)  config.py
-docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, RESEARCH, NATIVE, COMPUTE, WINDOWS, ETHICS, ROADMAP
+docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, RESEARCH, NATIVE, COMPUTE, BOTS, SELF, WINDOWS, ETHICS, ROADMAP
 installer/         double-click installer (bootstrap.ps1) and Gauge Studio GUI launcher
 tests/             pytest suite, runs offline with a fake LLM
 ```

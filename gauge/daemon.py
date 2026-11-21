@@ -30,11 +30,23 @@ class Daemon:
         log.info("stop requested; finishing current step")
         self._stop = True
 
+    def _journal(self, kind: str, e: Exception) -> None:
+        import traceback
+
+        try:
+            self.db.add_journal(kind, f"{type(e).__name__}: {e}", traceback.format_exc())
+        except Exception:  # journaling must never raise
+            pass
+
     def once(self, write: Optional[bool] = None) -> dict[str, object]:
         started = utcnow()
         out: dict[str, object] = {}
         ingest = IngestRunner(self.cfg, self.db)
-        out["ingest"] = ingest.run()
+        try:
+            out["ingest"] = ingest.run()
+        except Exception as e:
+            self._journal("ingest", e)
+            out["ingest"] = f"failed: {e}"
         trainer = Trainer(self.cfg, self.db)
         out["train"] = trainer.cycle()
         # Absorb craft techniques from the strongest unread chapters (needs the LLM; skipped when offline).
@@ -113,6 +125,36 @@ class Daemon:
                 out["write"] = {"chapter": res.number, "score": round(res.score, 3), "path": str(res.path)}
             else:
                 out["write"] = f"skipped: LLM not reachable ({pipe.llm.describe()})"
+        # Scheduled bots (plain programs; deterministic ones cannot reach the model).
+        if self.cfg.code.bots_enabled:
+            try:
+                from .code import BotRegistry
+
+                reg = BotRegistry(self.cfg.bots_dir)
+                ran = {}
+                for name in reg.due():
+                    if not reg.manifest(name).get("tests_passed", True):
+                        continue
+                    ran[name] = reg.run(name, env_extra={"GAUGE_DATA_DIR": str(self.cfg.root)})["exit"]
+                if ran:
+                    out["bots"] = ran
+            except Exception as e:
+                self._journal("bots", e)
+        # Self-healing: recurring errors become tested proposals; applied only if you allow it.
+        if self.cfg.code.self_heal:
+            try:
+                entries = self.db.recurring_errors(self.cfg.code.min_recurrences)
+                if entries:
+                    from .code import KnowledgeBase, SelfProgrammer, repo_root
+                    from .llm import make_llm
+
+                    llm = make_llm(self.cfg.llm, "main")
+                    if llm.available():
+                        kb = KnowledgeBase(extra_dir=self.cfg.knowledge_dir)
+                        kb.index_self(repo_root() / "gauge")
+                        out["self_heal"] = SelfProgrammer(llm, kb, self.cfg.self_dir).heal(entries, auto_apply=self.cfg.code.auto_apply)
+            except Exception as e:
+                self._journal("self_heal", e)
         self.db.log_run("daemon_cycle", started, out)
         return out
 
@@ -129,6 +171,7 @@ class Daemon:
                 log.info("cycle done: %s", summary)
             except Exception as e:  # never let one bad cycle kill the loop
                 log.exception("cycle failed: %s", e)
+                self._journal("cycle", e)
             wait = max(60.0, self.cfg.daemon.cycle_minutes * 60 - (time.monotonic() - t0))
             log.info("sleeping %.0f minutes", wait / 60)
             end = time.monotonic() + wait

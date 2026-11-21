@@ -648,7 +648,19 @@ class WritePipeline:
             project.state.running_summary = (project.state.running_summary + f"\nCh {n}: " + " ".join(text.split()[:60]))[-2000:]
 
     def write_many(self, project: Project, count: int, fresh: bool = False) -> list[ChapterResult]:
-        return [self.write_next(project, fresh=fresh and i == 0) for i in range(count)]
+        out = []
+        for i in range(count):
+            try:
+                out.append(self.write_next(project, fresh=fresh and i == 0))
+            except Exception as e:
+                import traceback
+
+                try:
+                    self.db.add_journal("write", f"{type(e).__name__}: {e}", traceback.format_exc())
+                except Exception:
+                    pass
+                raise
+        return out
 
     def status(self, project: Project) -> dict[str, object]:
         gens = self.db.generated(project.name)

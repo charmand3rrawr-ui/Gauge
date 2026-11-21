@@ -360,6 +360,20 @@ class FakeLLM:
             return "Okay. Okay. You want the truth? I ran because the footsteps knew my name. One more time."
         if "answer as the world" in low:
             return "Rain since dusk. The market is closing; the vendor with one arm is still counting coins."
+        if low.startswith("[engineer:classify]"):
+            m = re.search(r"task: (.*)", low)
+            task = m.group(1) if m else low
+            ai = any(w in task for w in ("summar", "rewrite", "critique", "tone", "write a chapter"))
+            return json.dumps({"needs_ai": ai, "language": "powershell" if "powershell" in task else "python", "why": "fake",
+                               "schedule": "daily" if "daily" in task else ""})
+        if low.startswith("[engineer:write]"):
+            from ..code.fakes import FAKE_BOT_FILES
+
+            return json.dumps({"files": FAKE_BOT_FILES, "notes": "counts words with the toolkit"})
+        if low.startswith("[self:propose]"):
+            from ..code.fakes import fake_proposal
+
+            return json.dumps(fake_proposal(prompt))
         if low.startswith("[improv:turn]"):
             m = re.search(r"next beat as ([^:]+):", prompt)
             who = (m.group(1).strip() if m else "Someone")
@@ -485,7 +499,12 @@ class FakeLLM:
 # --------------------------------------------------------------------------------------
 def make_llm(cfg: LLMConfig, role: str = "main", calls: Optional[CallLog] = None) -> LLM:
     """``role='fast'`` returns a client on ``cfg.fast_model`` (or the main model when unset).
-    Both roles share one CallLog when you pass it, so telemetry covers the whole pipeline."""
+    Both roles share one CallLog when you pass it, so telemetry covers the whole pipeline.
+    Deterministic bots run with GAUGE_NO_LLM=1 and are refused a model here on purpose."""
+    import os
+
+    if os.environ.get("GAUGE_NO_LLM"):
+        raise LLMError("this program is a deterministic bot (GAUGE_NO_LLM=1): it may not use a language model")
     model = cfg.fast_model if (role == "fast" and cfg.fast_model) else cfg.model
     p = cfg.provider.lower()
     if p == "ollama":
