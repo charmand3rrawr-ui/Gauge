@@ -79,6 +79,16 @@ caught. The "attacks" are test inputs, like testing a smoke detector with a litt
 usable weapon and none leaves the machine. Gaps it finds are how the defences get hardened: the range
 is the blue-team training loop — fire, find the hole, close it, re-verify.
 
+`gauge security drill` runs that loop as adversarial self-play. Every round it **mutates** the attacks
+(leetspeak, zero-width characters, keyword-splitting, synonyms, aliased imports, new combinations) and
+**randomises the defence parameters** (body cap, rate limit, lockout threshold, injection action), with
+a different seed each round, so the defences are never measured twice on the same inputs and cannot
+overfit to a fixed test set. Attacks that slip past are logged as *evasions* — the exact holes to harden
+next. Building this surfaced real evasions, now fixed: obfuscated injections, synonym rephrasings, an
+aliased `import subprocess as sp` that dodged the shell rule, and secret-over-network exfiltration. The
+same hard limits hold: every payload is a test input for Gauge's own detectors, never executed, never
+sent, never written out as a tool.
+
 ## What Gauge is entitled to refuse
 
 Treat this as Gauge's standing policy, enforced in code rather than promised in prose:
@@ -103,6 +113,7 @@ unlock`. The same steps are a knowledge card the Engineer reads, so bots it writ
 gauge security seal | verify | status | log [--min 2] | lockdown "reason" | unlock [--no-restore]
 gauge security scan PATH | check-text FILE
 gauge security range                         # fire synthetic attacks at the defences, score what is caught
+gauge security drill [--rounds N] [--seed S]  # adversarial self-play: mutate attacks + vary defences each round
 gauge security defense [--plant api-key] [--evidence]   # show the posture; plant honeytokens; list evidence
 gauge compute token [--rotate] [--reveal]
 gauge settings list --group Security

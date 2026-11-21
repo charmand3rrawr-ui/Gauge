@@ -12,6 +12,8 @@ from dataclasses import dataclass
 PY_RULES: list[tuple[str, str, int]] = [
     (r"\b(eval|exec)\s*\(", "dynamic code execution", 3),
     (r"subprocess\.[a-zA-Z_]+\([^)]*shell\s*=\s*True", "shell=True subprocess", 3),
+    (r"\b[\w.]+\.(run|Popen|call|check_output|check_call)\s*\([^)]*shell\s*=\s*True", "shell=True subprocess (aliased)", 3),
+    (r"import\s+subprocess\s+as\s+\w+", "aliased subprocess import", 1),
     (r"\bos\.system\s*\(", "os.system", 3),
     (r"\b(shutil\.rmtree|os\.remove|os\.unlink|os\.rmdir)\s*\(", "deletes files", 2),
     (r"\b(base64\.b64decode|codecs\.decode\([^)]*rot)", "decodes hidden payload", 3),

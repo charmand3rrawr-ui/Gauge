@@ -180,7 +180,11 @@ tarpit (slow responses to a suspicious peer), honeytokens (fake secrets that ale
 decoys (a plausible-but-fake response to a rejected prober), and evidence capture (durable bundles for the owner; abuse_report_draft
 drafts a report to send, never sends it). None of it reaches another system; there is no hack-back. The defensive cyber-range
 (`gauge security range`) fires synthetic attacks at the sanitiser, code scanner, worker Guard and array unpacker and scores what is
-caught, surfacing gaps to harden. `gauge security defense` shows the posture and plants honeytokens.""",
+caught, surfacing gaps to harden. The adversarial drill (`gauge security drill`) goes further: every round it MUTATES the attacks
+(leetspeak, zero-width, keyword-splitting, synonyms, aliased imports) and RANDOMISES the defence parameters (body cap, rate limit,
+lockout, injection action), so the defences cannot overfit to a fixed test set; attacks that slip past are logged as evasions to
+harden next. All of it is inward: generated payloads are test inputs for Gauge's own detectors, never executed, never sent, never
+written out as a tool. `gauge security defense` shows the posture and plants honeytokens.""",
 
     "programming-languages": """READING MANY LANGUAGES (gauge.code.languages). Gauge writes bots in Python but reads many languages to understand
 dependencies and port idioms. detect(filename, code) ids the language (extension first, then Pygments); analyze(filename, code) ->

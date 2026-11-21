@@ -2320,6 +2320,31 @@ def security_range(c: Ctx) -> None:
         console.print(f"  [yellow]- {lesson}[/]")
 
 
+@security.command("drill")
+@click.option("--rounds", type=int, default=None, help="How many adversarial rounds (default: config).")
+@click.option("--seed", type=int, default=None, help="Base seed for reproducibility (default: random each run).")
+@click.option("--show", type=int, default=6, show_default=True, help="How many evasions to list.")
+@click.pass_obj
+def security_drill(c: Ctx, rounds: Optional[int], seed: Optional[int], show: int) -> None:
+    """Adversarial self-play: mutate the attacks and vary the defence parameters every round, then
+    report which mutated attacks slipped through so they can be hardened. All inward; nothing is run or sent."""
+    from .security.adversary import run_drill
+
+    n = rounds if rounds is not None else c.cfg.security.drill_rounds
+    rep = run_drill(rounds=n, base_seed=seed, audit=_audit(c))
+    console.print(f"[bold]Adversarial drill[/]: {rep.detected}/{rep.fired} mutated attacks caught "
+                  f"(detection {rep.score:.1%}) over {len(rep.rounds)} rounds; base seed {rep.base_seed}")
+    for r in rep.rounds:
+        console.print(f"  round {r.index}: {r.detected}/{r.fired} caught; cats={','.join(r.plan.categories)}; "
+                      f"depth={r.plan.depth}; cap={r.defense.body_cap // 1024}k, lockout={r.defense.lockout_failures}, action={r.defense.injection_action}")
+    if rep.evasions:
+        console.print(f"[yellow]{len(rep.evasions)} evasion(s) to harden:[/]")
+        for e in rep.evasions[:show]:
+            console.print(f"  [yellow]- {e.category} via {e.mutation}: {e.payload[:80]!r}[/]")
+    else:
+        console.print("[green]no evasions: the defences held against every mutated attack this drill[/]")
+
+
 @security.command("defense")
 @click.option("--plant", default=None, help="Plant a honeytoken with this label (e.g. api-key).")
 @click.option("--evidence", "show_evidence", is_flag=True, help="List captured evidence.")
