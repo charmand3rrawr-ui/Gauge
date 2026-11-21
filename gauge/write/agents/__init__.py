@@ -9,9 +9,10 @@ from .pacing import PacingDirector
 from .packager import Packager
 from .readers import ReaderPanel
 from .schemer import Schemer
+from .scout import ScoutAgent
 from .sensitivity import SensitivityReader
 from .showrunner import Showrunner
 from .theme import ThemeKeeper
 
 __all__ = ["Archivist", "AgentReview", "SceneContext", "StoryAgent", "Comedian", "ALL_AGENTS", "AgentCouncil", "build_council",
-           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "SensitivityReader", "Showrunner", "ThemeKeeper"]
+           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper"]

@@ -1,5 +1,8 @@
+import os
 import sys
 from pathlib import Path
+
+os.environ.setdefault("GAUGE_OFFLINE", "1")  # CLI tests must never reach the network
 
 import pytest
 
@@ -16,6 +19,7 @@ def cfg(tmp_path):
     c = GaugeConfig(data_dir=str(tmp_path / "data"))
     c.llm.provider = "fake"
     c.learn.min_chapters_for_training = 5
+    c.research.sources = []  # no network in tests; research tests inject fake sources
     c.ensure_dirs()
     return c
 

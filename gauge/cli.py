@@ -1035,6 +1035,106 @@ def research(c: Ctx, project: str, question: str) -> None:
     console.print(ag.ask(question) if ag else "[yellow]librarian is disabled[/]")
 
 
+# ---------------------------------------------------------------------------- scout (research)
+@main.group()
+def scout() -> None:
+    """The Scout: open-source research that makes scenes concrete (Wikipedia, Wikivoyage, Gutenberg, arXiv, climate)."""
+
+
+def _scout(c: Ctx):
+    from .research import Scout
+
+    s = Scout(c.cfg, c.db)
+    if not s.sources:
+        console.print("[yellow]no research sources available[/] (GAUGE_OFFLINE set, or research.sources empty in config)")
+    return s
+
+
+@scout.command("ask")
+@click.argument("query")
+@click.option("--source", default="wikipedia", help="wikipedia | wikivoyage | gutenberg | arxiv | climate | searx")
+@click.option("--project", default=None, help="Also file the findings into this project's research folder.")
+@click.option("-k", default=3, show_default=True)
+@click.pass_obj
+def scout_ask(c: Ctx, query: str, source: str, project: Optional[str], k: int) -> None:
+    """Look something up: `gauge scout ask "medieval courier guild"`, `gauge scout ask "Lisbon in November" --source climate`."""
+    from .research.scout import Dossier
+
+    s = _scout(c)
+    f = s.search(query, source, k=k)
+    c.db.research_log(project or "", None, f.query, f.source, len(f.snippets), f.cached)
+    if not f.snippets:
+        console.print("(nothing found)")
+        return
+    for sn in f.snippets:
+        console.print(f"[bold]{sn.title}[/]  [dim]{sn.url}[/]\n{sn.text}\n[dim]{sn.license}[/]\n")
+    if project:
+        from .write.project import Project
+
+        if not Project.exists(c.cfg.projects_dir, project):
+            console.print(f"[red]no project named {project!r}[/]")
+            sys.exit(1)
+        path = s.file(Project(c.cfg.projects_dir, project).dir, Dossier([f]), query)
+        console.print(f"[green]filed[/] {path}")
+
+
+@scout.command("dossier")
+@click.argument("project")
+@click.option("--topic", "topics", multiple=True, help="Topics to look up (default: proper nouns and trades from the bible).")
+@click.option("--source", "sources", multiple=True, default=("wikipedia",), show_default=True)
+@click.pass_obj
+def scout_dossier(c: Ctx, project: str, topics: tuple, sources: tuple) -> None:
+    """Build or extend the project's background dossier in research/scout/."""
+    pipe = _pipeline_or_exit(c)
+    p = pipe.open_project(project)
+    path = pipe.build_dossier(p, list(topics) or None, tuple(sources))
+    console.print(f"[green]dossier[/] {path}" if path else "(nothing found)")
+
+
+@scout.command("gutenberg")
+@click.argument("query")
+@click.option("--import", "do_import", is_flag=True, help="Import the matching public-domain book(s) into the corpus.")
+@click.option("--max-books", default=1, show_default=True)
+@click.pass_obj
+def scout_gutenberg(c: Ctx, query: str, do_import: bool, max_books: int) -> None:
+    """Find public-domain books on Project Gutenberg; with --import, add them as novels Gauge learns from."""
+    s = _scout(c)
+    src = s.sources.get("gutenberg")
+    if src is None:
+        console.print("[yellow]gutenberg source disabled[/]")
+        sys.exit(1)
+    books = src.find_books(query, k=max(max_books, 5))
+    if not books:
+        console.print("(no books found)")
+        return
+    table = Table(title=f"Project Gutenberg: {query}")
+    for col in ("id", "title", "authors", "downloads", "text"):
+        table.add_column(col)
+    for b in books:
+        table.add_row(str(b["id"]), b["title"][:60], ", ".join(b["authors"])[:40], str(b["downloads"]), "yes" if b["text_url"] else "no")
+    console.print(table)
+    if do_import:
+        keys = s.import_gutenberg(None, query, max_books)
+        console.print(f"[green]imported[/] {', '.join(keys) or 'nothing (too short or no text)'}  -> run `gauge train` / `gauge absorb`")
+
+
+@scout.command("log")
+@click.option("--project", default=None)
+@click.pass_obj
+def scout_log(c: Ctx, project: Optional[str]) -> None:
+    """What the Scout has looked up recently."""
+    rows = c.db.research_history(project, limit=30)
+    if not rows:
+        console.print("(no research yet)")
+        return
+    table = Table(title="Research log")
+    for col in ("when", "project", "ch", "source", "query", "hits", "cached"):
+        table.add_column(col)
+    for r in rows:
+        table.add_row(r["at"][:16], r["project"] or "", str(r["chapter"] or ""), r["source"], r["query"], str(r["hits"]), "yes" if r["cached"] else "")
+    console.print(table)
+
+
 # ---------------------------------------------------------------------------- gui
 @main.command()
 @click.pass_obj

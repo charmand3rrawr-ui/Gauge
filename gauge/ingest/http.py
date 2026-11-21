@@ -56,7 +56,7 @@ class Fetcher:
             time.sleep(wait)
         self._last_request[host] = time.monotonic()
 
-    def get(self, url: str, retries: int = 3, **kwargs) -> Optional[str]:
+    def get(self, url: str, retries: int = 4, **kwargs) -> Optional[str]:
         if not self.allowed(url):
             log.warning("robots.txt disallows %s; skipping", url)
             return None
@@ -65,7 +65,13 @@ class Fetcher:
             try:
                 r = self.session.get(url, timeout=30, **kwargs)
                 if r.status_code == 429 or r.status_code >= 500:
-                    time.sleep(self.cfg.request_delay_seconds * (2 ** attempt) * 2)
+                    # Honour Retry-After when the server sends one (api.wikimedia.org does), else back off.
+                    wait = self.cfg.request_delay_seconds * (2 ** attempt) * 2
+                    ra = r.headers.get("Retry-After")
+                    if ra and ra.isdigit():
+                        wait = max(wait, min(30.0, float(ra)))
+                    log.info("GET %s -> %s; waiting %.1fs", url, r.status_code, wait)
+                    time.sleep(wait)
                     continue
                 if not r.ok:
                     log.warning("GET %s -> %s", url, r.status_code)

@@ -97,6 +97,15 @@ starts with `[agent:<name>:<op>]` so the offline `FakeLLM` can answer from `agen
 Agents: readers, showrunner, archivist, schemer, editor, packager, theme, sensitivity, pacing,
 librarian, comedian.
 
+## Research (`research/`)
+
+`sources.py` holds one class per open source with pure parsing functions (testable offline);
+`scout.py` runs queries through them with a SQLite cache (`research_cache`), logs them
+(`research_log`), files Markdown dossiers under `projects/<slug>/research/scout/` plus a
+bibliography, and can import Project Gutenberg books as `gutenberg:` novels. The `ScoutAgent`
+in the writing room decides the per-chapter questions and fact-checks drafts; the Librarian
+indexes what the Scout files. `GAUGE_OFFLINE=1` disables all sources.
+
 ## Execution model
 
 - `llm/tokens.py`: token estimation and `PromptBudget`; `Drafter.build_draft_prompt` fits every

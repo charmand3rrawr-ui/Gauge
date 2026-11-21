@@ -233,7 +233,7 @@ def test_comedian_only_for_comic_genres(tmp_path):
 def test_council_merges_scores_and_respects_config(cfg, tmp_path):
     p = Project.create(tmp_path / "pp", "Comic Tale", "idea", ["Comedy"], 300)
     council = build_council(cfg, FakeLLM(), p, embedder=HashingEmbedder(32))
-    assert set(council.names()) == set(ALL_AGENTS)  # comedy genre attaches the comedian
+    assert set(council.names()) == set(ALL_AGENTS) - {"scout"}  # comedy attaches the comedian; scout needs a Scout instance
     p2 = Project.create(tmp_path / "pp2", "Grim Tale", "idea", ["Horror"], 300)
     assert "comedian" not in build_council(cfg, FakeLLM(), p2).names()
     cfg.agents.profile = "lean"

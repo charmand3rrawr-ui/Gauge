@@ -76,6 +76,21 @@ class WriteConfig(BaseModel):
     novelty_weight: float = 0.15  # share of the chapter score from novelty against earlier chapters
 
 
+class ResearchConfig(BaseModel):
+    """The Scout's open sources. No keys, polite delays, everything cached in the database."""
+
+    enabled: bool = True
+    sources: list[str] = Field(default_factory=lambda: ["wikipedia", "wikivoyage", "gutenberg"])  # + "arxiv", "climate", "searx"
+    respect_robots_txt: bool = True  # arxiv and climate APIs are robots-disallowed; set false knowingly to use them
+    searx_url: str = ""  # your own SearXNG instance, e.g. http://localhost:8080 (adds general web search)
+    max_queries_per_chapter: int = 3
+    results_per_query: int = 3
+    cache_days: int = 30
+    request_delay_seconds: float = 1.5  # api.wikimedia.org rate-limits anonymous clients; be gentle
+    fact_check: bool = True  # verify up to 3 real-world claims per draft
+    dossier_on_create: bool = True  # look up the bible's proper nouns and trades when a project is created
+
+
 class AgentsConfig(BaseModel):
     """Independent story agents (the writing room). Each may be switched off; `profile` is a shortcut."""
 
@@ -92,6 +107,7 @@ class AgentsConfig(BaseModel):
     pacing: bool = True
     librarian: bool = True
     comedian: bool = True  # attaches only when the genre or tone is comic
+    scout: bool = True  # searches open sources for real-world detail (see research settings)
     sensitivity_rules: str = ""  # your platform's content rules, pasted
     sensitivity_categories: list[str] = Field(default_factory=list)
     block_on_sensitivity: bool = False  # severe flags force a revision instead of a warning
@@ -111,6 +127,7 @@ class GaugeConfig(BaseModel):
     write: WriteConfig = Field(default_factory=WriteConfig)
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    research: ResearchConfig = Field(default_factory=ResearchConfig)
 
     # ---- paths -------------------------------------------------------------
     @property

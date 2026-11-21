@@ -110,6 +110,11 @@ class WritePipeline:
         if self.cfg.write.world_enabled:
             self.build_world(p)
         self.setup_agents(p)
+        if self.cfg.research.enabled and self.cfg.research.dossier_on_create:
+            try:
+                self.build_dossier(p)
+            except Exception as e:
+                log.warning("project dossier failed: %s", e)
         self.planner.extend_outline(p, count=5)
         return p
 
@@ -149,7 +154,38 @@ class WritePipeline:
 
     # ---- the writing room --------------------------------------------------
     def council(self, project: Project) -> AgentCouncil:
-        return build_council(self.cfg, self.fast_llm, project, embedder=self.trainer.embedder)
+        return build_council(self.cfg, self.fast_llm, project, embedder=self.trainer.embedder, scout=self.scout)
+
+    @property
+    def scout(self):
+        if not self.cfg.research.enabled:
+            return None
+        if getattr(self, "_scout", None) is None:
+            from ..research.scout import Scout
+
+            self._scout = Scout(self.cfg, self.db, sources=getattr(self, "_scout_sources", None))
+        return self._scout
+
+    def use_research_sources(self, sources: dict) -> None:
+        """Inject sources (tests, offline runs) before the first council is built."""
+        self._scout_sources = sources
+        self._scout = None
+
+    def build_dossier(self, project: Project, topics: Optional[list[str]] = None, per_topic_sources: tuple = ("wikipedia",)) -> Optional[Path]:
+        """A starting dossier for a new project: look up the bible's proper nouns and trades."""
+        if self.scout is None:
+            return None
+        from ..write.agents.scout import extract_topics
+
+        topics = topics or extract_topics(project.bible_markdown(), project.state.premise_doc)
+        queries = [{"query": t, "source": src, "why": "project background"} for t in topics for src in per_topic_sources]
+        saved_max = self.cfg.research.max_queries_per_chapter
+        self.cfg.research.max_queries_per_chapter = max(saved_max, len(queries))
+        try:
+            dossier = self.scout.research(queries, project=project.state.name, chapter=0)
+        finally:
+            self.cfg.research.max_queries_per_chapter = saved_max
+        return self.scout.file(project.dir, dossier, "project dossier")
 
     def setup_agents(self, project: Project) -> list[str]:
         c = self.council(project)

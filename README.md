@@ -53,7 +53,10 @@ No cloud. No API bills. Your drafts never leave your machine.
    independent agents reviews every chapter: a calibrated Reader Panel, a Showrunner with a
    promise ledger, an Archivist with a canon ledger, a Schemer running the opposition, a Line
    Editor, a Packager, a Theme Keeper, a Sensitivity Reader, a Pacing Director, a Research
-   Librarian and a Comedian ([docs/AGENTS.md](docs/AGENTS.md)). When a character is in a scene their
+   Librarian and a Comedian ([docs/AGENTS.md](docs/AGENTS.md)). A **Scout** searches open
+   sources (Wikipedia, Wikivoyage, Project Gutenberg, arXiv, real climate data, your own SearXNG)
+   for the real-world detail each scene needs, files it into the project, and fact-checks drafts
+   ([docs/RESEARCH.md](docs/RESEARCH.md)). When a character is in a scene their
    agent is activated: they brief the drafter on what they want, would do, would say and would
    refuse, review the draft for out-of-character moments, and remember the chapter afterwards.
    Each chapter is planned, drafted with retrieved exemplars and the cast's briefs in context,
@@ -147,6 +150,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge world show/build/set/chat/extras/promote` | the World agent; see [docs/WORLD.md](docs/WORLD.md) |
 | `gauge agents list/show/enable/disable/setup` | the writing room; see [docs/AGENTS.md](docs/AGENTS.md) |
 | `gauge canon`, `gauge ledger`, `gauge readers`, `gauge feedback`, `gauge package`, `gauge research` | ask the Archivist, read the Showrunner's ledger, see Reader Panel predictions, record real reader numbers, get blurb and tags, search your notes |
+| `gauge scout ask/dossier/gutenberg/log` | open-source research; import public-domain books; see [docs/RESEARCH.md](docs/RESEARCH.md) |
 | `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
@@ -197,11 +201,12 @@ gauge/
   lexicon.py       the small transparent word lists the features count
   ingest/          royalroad.py, scribblehub.py, local.py (folders, libraries, epub, docx), http.py, runner.py
   learn/           engagement.py (model), exemplars.py, techniques.py (absorber), style.py, dataset.py, trainer.py
+  research/        sources.py (Wikipedia, Wikivoyage, Gutenberg, arXiv, climate, SearXNG), scout.py (cache, filing, dossiers)
   write/           project, characters (matrix, agents), world (physics, crowds), muse (directions, novelty),
                    agents/ (the writing room: 11 agents + council), planner, drafter, critic, pipeline, prompts, schemas
   llm/             ollama / openai-compatible / fake clients, embeddings
   daemon.py  report.py  cli.py  db.py (sqlite)  config.py
-docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, WINDOWS, ETHICS, ROADMAP
+docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, RESEARCH, WINDOWS, ETHICS, ROADMAP
 installer/         double-click installer (bootstrap.ps1) and Gauge Studio GUI launcher
 tests/             pytest suite, runs offline with a fake LLM
 ```

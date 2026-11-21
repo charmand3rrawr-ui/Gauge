@@ -16,6 +16,7 @@ from .pacing import PacingDirector
 from .packager import Packager
 from .readers import ReaderPanel
 from .schemer import Schemer
+from .scout import ScoutAgent
 from .sensitivity import SensitivityReader
 from .showrunner import Showrunner
 from .theme import ThemeKeeper
@@ -25,12 +26,12 @@ log = logging.getLogger(__name__)
 ALL_AGENTS: dict[str, type[StoryAgent]] = {
     ReaderPanel.name: ReaderPanel, Showrunner.name: Showrunner, Archivist.name: Archivist, Schemer.name: Schemer,
     LineEditor.name: LineEditor, Packager.name: Packager, ThemeKeeper.name: ThemeKeeper, SensitivityReader.name: SensitivityReader,
-    PacingDirector.name: PacingDirector, Librarian.name: Librarian, Comedian.name: Comedian,
+    PacingDirector.name: PacingDirector, Librarian.name: Librarian, Comedian.name: Comedian, ScoutAgent.name: ScoutAgent,
 }
 LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager"}
 
 
-def build_council(cfg, llm: LLM, project, embedder=None) -> AgentCouncil:
+def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCouncil:
     """Instantiate the agents the config enables for this project."""
     a = cfg.agents
     if a.profile == "off":
@@ -48,8 +49,17 @@ def build_council(cfg, llm: LLM, project, embedder=None) -> AgentCouncil:
         opts: dict[str, Any] = {}
         if name == "sensitivity":
             opts = {"rules": a.sensitivity_rules, "block_on_flags": a.block_on_sensitivity, "categories": a.sensitivity_categories or None}
+        if name == "scout":
+            if scout is None or not cfg.research.enabled:
+                continue
+            opts = {"max_queries": cfg.research.max_queries_per_chapter, "fact_check": cfg.research.fact_check}
         try:
-            agent = cls(llm, project.dir, opts, embedder=embedder) if name == "librarian" else cls(llm, project.dir, opts)
+            if name == "librarian":
+                agent = cls(llm, project.dir, opts, embedder=embedder)
+            elif name == "scout":
+                agent = cls(llm, project.dir, opts, scout=scout)
+            else:
+                agent = cls(llm, project.dir, opts)
         except Exception as e:  # one broken agent must not stop the book
             log.warning("could not start agent %s: %s", name, e)
             continue

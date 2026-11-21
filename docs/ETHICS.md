@@ -14,6 +14,14 @@ Gauge touches two sensitive things: other people's stories and other people's se
 If a site's terms forbid automated access, do not point Gauge at it. Use `gauge import` with
 files you are allowed to have.
 
+## Research sources
+
+The Scout reads Wikipedia and Wikivoyage (CC BY-SA), Project Gutenberg (public domain), arXiv
+abstracts and Open-Meteo data through their public APIs, with a clear user agent, a delay and a
+cache so nothing is fetched twice. The drafter is told to use facts and texture and never to
+copy sentences; the bibliography in each project's `research/sources.md` records what was
+consulted. General web search is only available through a SearXNG instance you run yourself.
+
 ## Stories
 
 Gauge is built to learn **patterns**, not to copy text:

@@ -35,6 +35,11 @@ FAKE_AGENT_RESPONSES: dict[tuple[str, str], dict] = {
                                 "images": ["wet neon", "a hand with a scar"]},
     ("theme_keeper", "review"): {"motifs_present": ["counting"], "theme_touched": True, "notes": "counting lands; rain is wallpaper"},
     ("sensitivity", "review"): {"flags": [{"category": "violence", "severity": "mild", "quote": "the blade", "note": "implied threat only"}], "ok_for_general": True},
+    ("scout", "questions"): {"queries": [{"query": "medieval courier guild", "source": "wikipedia", "why": "how couriers were paid and policed"},
+                                          {"query": "Lisbon in November", "source": "climate", "why": "real weather for the alley scenes"},
+                                          {"query": "night market noodle stall", "source": "wikivoyage", "why": "sensory texture"}]},
+    ("scout", "claims"): {"claims": [{"claim": "Couriers in medieval guilds were fined for late deliveries", "query": "medieval courier guild"}]},
+    ("scout", "verify"): {"verdict": "supported", "note": "guild fines are documented"},
     ("comedian", "brief"): {"beats": ["Rin's 'okay, okay' tic escalates to three okays", "the vendor charges her for the rewound noodles"]},
     ("comedian", "review"): {"laughs": 2, "flat": ["the vendor line"], "notes": "the tic works"},
 }

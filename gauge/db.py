@@ -5,7 +5,7 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -78,6 +78,12 @@ CREATE TABLE IF NOT EXISTS absorbed (
     owner_key TEXT PRIMARY KEY,
     techniques INTEGER,
     at TEXT
+);
+CREATE TABLE IF NOT EXISTS research_cache (
+    key TEXT PRIMARY KEY, source TEXT, query TEXT, snippets_json TEXT, at TEXT
+);
+CREATE TABLE IF NOT EXISTS research_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, project TEXT, chapter INTEGER, query TEXT, source TEXT, hits INTEGER, cached INTEGER
 );
 CREATE TABLE IF NOT EXISTS generated (
     project TEXT NOT NULL,
@@ -313,6 +319,33 @@ class Database:
     def mark_absorbed(self, owner_key: str, techniques: int) -> None:
         with self.tx() as c:
             c.execute("INSERT OR REPLACE INTO absorbed VALUES (?,?,?)", (owner_key, techniques, utcnow().isoformat()))
+
+    # ---- research ----------------------------------------------------------
+    def research_cached(self, key: str, max_age_days: int = 30) -> Optional[list[dict[str, Any]]]:
+        r = self._conn.execute("SELECT snippets_json, at FROM research_cache WHERE key=?", (key,)).fetchone()
+        if not r:
+            return None
+        try:
+            age_ok = datetime.fromisoformat(r[1]) >= utcnow() - timedelta(days=max_age_days)
+        except (TypeError, ValueError):
+            age_ok = False
+        return json.loads(r[0]) if age_ok else None
+
+    def research_store(self, key: str, source: str, query: str, snippets: list[dict[str, Any]]) -> None:
+        with self.tx() as c:
+            c.execute("INSERT OR REPLACE INTO research_cache VALUES (?,?,?,?,?)",
+                      (key, source, query, json.dumps(snippets, ensure_ascii=False), utcnow().isoformat()))
+
+    def research_log(self, project: str, chapter: Optional[int], query: str, source: str, hits: int, cached: bool) -> None:
+        with self.tx() as c:
+            c.execute("INSERT INTO research_log (at, project, chapter, query, source, hits, cached) VALUES (?,?,?,?,?,?,?)",
+                      (utcnow().isoformat(), project, chapter, query, source, hits, 1 if cached else 0))
+
+    def research_history(self, project: Optional[str] = None, limit: int = 50) -> list[dict[str, Any]]:
+        q, args = "SELECT * FROM research_log", ()
+        if project:
+            q, args = q + " WHERE project=?", (project,)
+        return [dict(r) for r in self._conn.execute(q + " ORDER BY id DESC LIMIT ?", (*args, limit))]
 
     # ---- llm telemetry -----------------------------------------------------
     def log_call(self, purpose: str, model: str, prompt_tokens: int, output_tokens: int, duration_ms: int, ok: bool,
