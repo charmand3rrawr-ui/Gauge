@@ -251,8 +251,12 @@ class DaemonConfig(BaseModel):
     active_project: str = ""
 
 
+CONFIG_VERSION = 1  # bump when a migration is added to GaugeConfig._migrate
+
+
 class GaugeConfig(BaseModel):
     data_dir: str = str(DEFAULT_DATA_DIR)
+    config_version: int = CONFIG_VERSION  # stamped on save; _migrate upgrades older files on load
     seed: Optional[int] = None  # when set, makes a run reproducible (seeds RNGs and the prompt bandit)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     ingest: IngestConfig = Field(default_factory=IngestConfig)
@@ -319,6 +323,16 @@ class GaugeConfig(BaseModel):
         self.config_path.write_text(json.dumps(self.model_dump(), indent=2), encoding="utf-8")
         return self.config_path
 
+    @staticmethod
+    def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
+        """Upgrade an older config dict in place. New fields get defaults from pydantic automatically;
+        this is for renames and value changes. Each step bumps config_version. Unknown future versions
+        are left as-is (a newer Gauge wrote them)."""
+        v = int(raw.get("config_version", 0))
+        # Example of the pattern (no-op today): if v < 2: rename/convert; v = 2
+        raw["config_version"] = max(v, CONFIG_VERSION)
+        return raw
+
     @classmethod
     def load(cls, data_dir: Optional[str | Path] = None) -> GaugeConfig:
         root = Path(data_dir) if data_dir else DEFAULT_DATA_DIR
@@ -326,6 +340,7 @@ class GaugeConfig(BaseModel):
         if path.exists():
             raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
             raw["data_dir"] = str(root)
+            raw = cls._migrate(raw)
             cfg = cls(**raw)
         else:
             cfg = cls(data_dir=str(root))

@@ -118,13 +118,13 @@ tested batches — not a promise that all 100 exist yet.
 91. Content-provenance manifest: sign published pieces so edits are detectable. **M**
 92. Expand the adversarial drill with new obfuscation families each release. **S**
 93. Red-team the newsdesk against planted misinformation sources. **M**
-94. Backup/restore of the whole data dir with integrity verification. **S**
-95. Config migration framework for schema changes across versions. **S**
+94. [done] Backup/restore of the whole data dir with integrity verification. **S**
+95. [done] Config migration framework for schema changes across versions. **S**
 96. Structured logging and an error budget the daemon respects. **S**
 97. A "dry-run everything" mode for a safe first run of any automation. **S**
 98. Property-based tests across the pipeline (extends the mutation gate). **M**
 99. A one-command Windows installer update channel with signed releases. **M**
-100. A plain-language audit report: every automation, what it can do, what it cannot. **S**
+100. [done] A plain-language audit report: every automation, what it can do, what it cannot. **S**
 
 ---
 

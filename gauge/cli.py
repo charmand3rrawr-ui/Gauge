@@ -2415,6 +2415,52 @@ def worker(c: Ctx, token: str, name: Optional[str], port: Optional[int], host: s
 
 
 @main.command()
+@click.option("--out", default=None, help="Output path (default: gauge-backup-<date>.tar.gz).")
+@click.option("--include-models", is_flag=True, help="Include model weights (large; reproducible by retraining).")
+@click.pass_obj
+def backup(c: Ctx, out: Optional[str], include_models: bool) -> None:
+    """Back up the data directory to a verified tar.gz (projects, config, security seal, optionally models)."""
+    from datetime import date
+
+    from .ops import make_backup
+
+    dest = Path(out) if out else Path(f"gauge-backup-{date.today().isoformat()}.tar.gz")
+    res = make_backup(c.cfg.root, dest, include_models=include_models)
+    console.print(f"[green]backed up[/] {res.files} files ({res.bytes // 1024} KiB) -> {res.path}")
+
+
+@main.command()
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--into", default=None, help="Restore destination (default: a new ./restored-<name> dir).")
+@click.option("--verify-only", is_flag=True, help="Only check integrity; do not write anything.")
+@click.option("--overwrite", is_flag=True, help="Allow restoring into a non-empty directory.")
+@click.pass_obj
+def restore(c: Ctx, path: str, into: Optional[str], verify_only: bool, overwrite: bool) -> None:
+    """Verify a backup's integrity and restore it. Refuses a corrupt archive."""
+    from .ops import restore_backup, verify_backup
+
+    v = verify_backup(Path(path))
+    console.print(f"integrity: {'[green]OK[/]' if v.ok else '[red]FAILED[/]'}  ({v.files} files, created {v.created})")
+    if not v.ok:
+        console.print(f"  mismatched: {v.mismatched[:5]}  missing: {v.missing[:5]}")
+        sys.exit(1)
+    if verify_only:
+        return
+    dest = Path(into) if into else Path(f"restored-{Path(path).stem}")
+    r = restore_backup(Path(path), dest, overwrite=overwrite)
+    console.print(f"[green]restored[/] {r['restored']} files -> {r['into']}")
+
+
+@main.command()
+@click.pass_obj
+def audit(c: Ctx) -> None:
+    """Plain-language report of every automation: what is on, what it can do, what bounds it."""
+    from .ops import render_report
+
+    console.print(render_report(c.cfg))
+
+
+@main.command()
 @click.option("--host", default=None, help="Bind address. Default 127.0.0.1 (loopback). 0.0.0.0 exposes it to the network.")
 @click.option("--port", type=int, default=None, help="Port (default 8800 or server.port).")
 @click.option("--token", default=None, help="API token. Default: server.token, else a generated one printed at start.")
