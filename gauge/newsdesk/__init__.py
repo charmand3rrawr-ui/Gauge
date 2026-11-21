@@ -7,10 +7,10 @@ source: this desk writes commentary, it does not rewrite other people's articles
 published on a schedule you set, held for your approval unless a piece passes every check and you have
 opted into auto-publishing.
 """
-from .commentary import Commentary, originality, write_commentary
+from .commentary import Commentary, originality, source_diversity, write_commentary
 from .queue import PublishQueue, QueueItem
 from .translate import detect_script, translate
 from .trends import SourceItem, Topic, discover, rss_items, wikimedia_top
 
 __all__ = ["Topic", "SourceItem", "discover", "rss_items", "wikimedia_top", "translate", "detect_script",
-           "Commentary", "write_commentary", "originality", "PublishQueue", "QueueItem"]
+           "Commentary", "write_commentary", "originality", "source_diversity", "PublishQueue", "QueueItem"]

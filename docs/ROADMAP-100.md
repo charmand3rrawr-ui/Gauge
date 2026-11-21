@@ -97,7 +97,7 @@ tested batches — not a promise that all 100 exist yet.
 74. Reader-funnel report: chapters → follows → newsletter → retention. **M** *(needs feedback)*
 75. Cross-posting scheduler across owned accounts with per-platform formatting. **M**
 76. Review-request drafting to send readers who finished (your own list). **S**
-77. Serial-platform export formats (Royal Road, Scribble Hub markup). **S**
+77. [done] Serial-platform export formats (Royal Road, Scribble Hub markup). **S**
 78. [done] SEO metadata and sitemap for the static site. **S**
 79. [done] Accessibility pass on the published site (alt text, contrast, headings). **S**
 80. Reader comment ingestion from your own site into the learning loop. **M**
@@ -106,7 +106,7 @@ tested batches — not a promise that all 100 exist yet.
 81. Themeable static-site templates and a dark/light toggle. **S**
 82. [done] Full-text search on the published site (client-side index). **S**
 83. [done] Multi-author bylines with per-author pages and disclosure. **S**
-84. Newsdesk source-diversity check: flag over-reliance on one outlet. **S**
+84. [done] Newsdesk source-diversity check: flag over-reliance on one outlet. **S**
 85. Newsdesk fact-check pass that cites for each claim before publishing *(needs Scout)*. **M**
 86. Topic-desk specialisation (finance, tech) with per-desk stances. **M**
 87. Scheduled digest email of the week's commentary to the opt-in list. **S**

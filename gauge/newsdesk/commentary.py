@@ -27,6 +27,29 @@ _SYSTEM = ("You are an opinion columnist. You are given source coverage as RESEA
            "or statistics. Engage the strongest opposing view. This is labelled opinion, not news reporting.")
 
 
+def _domain(url: str) -> str:
+    m = re.search(r"https?://([^/]+)", url or "")
+    host = (m.group(1) if m else "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def source_diversity(sources: list) -> tuple[float, list[str]]:
+    """How concentrated the sourcing is. Returns (share from the single most-used outlet, flags).
+    A piece leaning entirely on one outlet is barely more than that outlet's take restated."""
+    domains = [_domain(getattr(s, "url", "")) for s in sources]
+    domains = [d for d in domains if d]
+    if len(domains) < 2:
+        return (1.0 if domains else 0.0), []
+    from collections import Counter
+    counts = Counter(domains)
+    top_domain, top_n = counts.most_common(1)[0]
+    share = top_n / len(domains)
+    flags = []
+    if share >= 0.75:
+        flags.append(f"{share:.0%} of sources are from {top_domain}; find a second independent source before leaning on this")
+    return round(share, 3), flags
+
+
 def _shingles(text: str, n: int = 5) -> set[tuple[str, ...]]:
     words = re.findall(r"[\w']+", (text or "").lower())
     return {tuple(words[i:i + n]) for i in range(max(0, len(words) - n + 1))}
@@ -59,11 +82,13 @@ class Commentary:
     balance_flags: list[str] = field(default_factory=list)
     headline_flags: list[str] = field(default_factory=list)
     originality_flags: list[str] = field(default_factory=list)
+    diversity_flags: list[str] = field(default_factory=list)
 
     @property
     def clean(self) -> bool:
         """True only when there is nothing for a human to check — the bar for unattended publishing."""
-        return not (self.claims_to_verify or self.balance_flags or self.headline_flags or self.originality_flags)
+        return not (self.claims_to_verify or self.balance_flags or self.headline_flags or self.originality_flags
+                    or self.diversity_flags)
 
 
 def write_commentary(llm: LLM, topic: str, sources: list[SourceItem], byline: str, stance: Any = None,
@@ -95,6 +120,7 @@ def write_commentary(llm: LLM, topic: str, sources: list[SourceItem], byline: st
     src_list = [{"title": s.title, "url": s.url, "lang": s.lang} for s in sources if s.url]
     sources_md = ("\n\nSources:\n" + "\n".join(f"- {s['title']} — {s['url']}" for s in src_list)) if src_list else ""
     labelled = f"*{OPINION_DISCLAIMER}*\n\nBy {byline}\n\n{body}{sources_md}"
+    _, div_flags = source_diversity(sources)
     return Commentary(topic=topic, title=title, body=labelled, byline=byline, sources=src_list, originality=orig,
                       claims_to_verify=flag_claims(body), balance_flags=balance_check(body),
-                      headline_flags=hc.flags, originality_flags=o_flags)
+                      headline_flags=hc.flags, originality_flags=o_flags, diversity_flags=div_flags)

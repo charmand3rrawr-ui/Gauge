@@ -63,7 +63,7 @@ class PublishQueue:
         return any(i.topic.strip().lower() == key and i.status != "rejected" for i in self._items)
 
     def add(self, c: Any) -> QueueItem:
-        flags = list(c.claims_to_verify) + list(c.balance_flags) + list(c.headline_flags) + list(c.originality_flags)
+        flags = list(c.claims_to_verify) + list(c.balance_flags) + list(c.headline_flags) + list(c.originality_flags) + list(getattr(c, "diversity_flags", []))
         item = QueueItem(id=uuid.uuid4().hex[:8], topic=c.topic, title=c.title, body=c.body, byline=c.byline,
                          created=utcnow().isoformat(timespec="seconds"), clean=bool(c.clean), flags=flags,
                          sources=list(c.sources), originality=float(c.originality))

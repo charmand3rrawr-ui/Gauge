@@ -2460,6 +2460,25 @@ def audit(c: Ctx) -> None:
     console.print(render_report(c.cfg))
 
 
+@main.command(name="export")
+@click.argument("project")
+@click.option("--format", "fmt", type=click.Choice(["markdown", "html", "bbcode", "text"]), default="markdown", show_default=True)
+@click.option("--out", default=None, help="Output directory (default: ./export-<project>-<format>).")
+@click.pass_obj
+def export_chapters(c: Ctx, project: str, fmt: str, out: Optional[str]) -> None:
+    """Export a serial's chapters to Markdown, HTML, BBCode or plain text for Royal Road, Scribble Hub, etc."""
+    from .site.export import export_project
+    from .write.project import Project
+
+    if not Project.exists(c.cfg.projects_dir, project):
+        console.print(f"[red]no project named {project!r}[/]")
+        sys.exit(1)
+    dest = Path(out) if out else Path(f"export-{project.lower().replace(' ', '-')}-{fmt}")
+    files = export_project(Project(c.cfg.projects_dir, project), fmt, dest)
+    console.print(f"[green]exported[/] {len(files)} file(s) in {fmt} -> {dest}" if files
+                  else "no chapters to export yet")
+
+
 @main.command()
 @click.option("--out", default="gauge-dashboard.html", show_default=True, help="Output HTML path.")
 @click.pass_obj
