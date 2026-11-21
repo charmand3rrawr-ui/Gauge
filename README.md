@@ -160,6 +160,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge feedback`, `gauge bandit`, `gauge lessons`, `gauge sync-edits`, `gauge finetune` | learn from your own serial: real numbers, prompt tuning, lessons, edit pairs, LoRA plan |
 | `gauge persona build/show/blend` | the author persona learned from your chapters |
 | `gauge character arc` | planned personality drift |
+| `gauge native train/continue/status/sample/tokenizer` | GaugeLM, the built-in model; see [docs/NATIVE.md](docs/NATIVE.md) |
 | `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
@@ -187,6 +188,19 @@ type data\projects\ten-seconds\chapters\chapter_001.md
   per-step timings, `gauge report` shows LLM time by purpose, and `gauge bench` measures your
   models and estimates minutes per chapter before you commit to a model size.
 
+## Your own model, no outside code
+
+Gauge ships **GaugeLM**, a complete language model in pure Python and numpy: tokenizer,
+transformer, hand-written backprop, trainer and sampler. It trains on everything Gauge has read
+plus your own chapters, keeps learning every daemon cycle, and plugs into the whole pipeline as
+`--provider native`. It is small and honest about it; see [docs/NATIVE.md](docs/NATIVE.md).
+
+```powershell
+.\gauge.bat native train --minutes 120
+.\gauge.bat native sample "Write the opening of a chapter."
+.\gauge.bat init --provider native
+```
+
 ## Using a different local model
 
 Any Ollama model works: `gauge init --model qwen2.5:14b`. Any OpenAI-compatible server (LM
@@ -211,11 +225,12 @@ gauge/
   ingest/          royalroad.py, scribblehub.py, local.py (folders, libraries, epub, docx), http.py, runner.py
   learn/           engagement.py (model), exemplars.py, techniques.py (absorber), style.py, dataset.py, trainer.py
   research/        sources.py (Wikipedia, Wikivoyage, Gutenberg, arXiv, climate, SearXNG), scout.py (cache, filing, dossiers)
+  native/          GaugeLM: tokenizer.py, model.py (numpy transformer + backprop), train.py, client.py
   write/           project, characters (matrix, agents), world (physics, crowds), muse (directions, novelty),
                    agents/ (the writing room: 11 agents + council), planner, drafter, critic, pipeline, prompts, schemas
   llm/             ollama / openai-compatible / fake clients, embeddings
   daemon.py  report.py  cli.py  db.py (sqlite)  config.py
-docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, RESEARCH, WINDOWS, ETHICS, ROADMAP
+docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, RESEARCH, NATIVE, WINDOWS, ETHICS, ROADMAP
 installer/         double-click installer (bootstrap.ps1) and Gauge Studio GUI launcher
 tests/             pytest suite, runs offline with a fake LLM
 ```

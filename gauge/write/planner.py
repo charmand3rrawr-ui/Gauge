@@ -70,7 +70,9 @@ class Planner:
         data = generate_json(self.llm, prompt, system=self.system, schema=schema_of(OutlineOut), temperature=0.8,
                              max_tokens=1800, purpose="outline")
         plans: list[ChapterPlan] = []
-        for i, c in enumerate(data.get("chapters", [])):
+        for i, c in enumerate(data.get("chapters", []) if isinstance(data.get("chapters"), list) else []):
+            if not isinstance(c, dict):
+                continue
             try:
                 number = int(c.get("number", start + i))
             except (TypeError, ValueError):

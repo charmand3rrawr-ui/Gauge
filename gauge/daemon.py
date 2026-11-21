@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import signal
 import time
+from datetime import timedelta
 from typing import Optional
 
 from .config import GaugeConfig
@@ -51,6 +52,20 @@ class Daemon:
                     out["absorb"] = f"failed: {e}"
             else:
                 out["absorb"] = "skipped: LLM not reachable"
+        # Keep the built-in model learning from whatever arrived this cycle.
+        if self.cfg.native.daemon_steps > 0:
+            from .native import NativeTrainer, gather_texts
+
+            tr = NativeTrainer(self.cfg.native_dir)
+            if tr.exists():
+                try:
+                    since = (started - timedelta(days=1)).isoformat()
+                    docs = gather_texts(self.db, self.cfg.projects_dir, self.cfg.models_dir / "datasets", since=since) or \
+                        gather_texts(self.db, self.cfg.projects_dir, self.cfg.models_dir / "datasets")
+                    out["native"] = tr.continue_training(docs, self.cfg.native.daemon_steps, time_budget_s=self.cfg.native.daemon_minutes * 60)
+                except Exception as e:
+                    log.exception("native training failed: %s", e)
+                    out["native"] = f"failed: {e}"
         do_write = self.cfg.daemon.write_after_learning if write is None else write
         if do_write and self.cfg.daemon.active_project:
             from .write.pipeline import WritePipeline

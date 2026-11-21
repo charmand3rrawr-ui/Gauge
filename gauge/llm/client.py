@@ -5,6 +5,7 @@ Gauge never talks to a paid API by default. It expects a local server:
 * **Ollama** (default) at http://localhost:11434 - one installer on Windows, GPU-accelerated.
 * Any **OpenAI-compatible** server (LM Studio, llama.cpp ``llama-server``, vLLM, text-gen-webui).
 * ``FakeLLM`` for tests and for running the analysis pipeline on machines with no GPU.
+* **GaugeLM** (``provider = "native"``): Gauge's own numpy model, see ``gauge/native``.
 
 Every client: sets the context window explicitly (``num_ctx``), retries transient failures,
 supports JSON-schema constrained output with automatic fallback, keeps the model warm, and
@@ -496,6 +497,12 @@ def make_llm(cfg: LLMConfig, role: str = "main", calls: Optional[CallLog] = None
         if calls is not None:
             f.calls = calls
         return f
+    if p == "native":
+        from pathlib import Path
+
+        from ..native.client import NativeLLM
+
+        return NativeLLM(cfg, Path(cfg.native_dir) if getattr(cfg, "native_dir", None) else Path("data/models/native"), calls)
     raise ValueError(f"unknown llm provider: {cfg.provider}")
 
 

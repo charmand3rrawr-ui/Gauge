@@ -35,6 +35,22 @@ class LLMConfig(BaseModel):
     retries: int = 3
     retry_backoff_seconds: float = 2.0
     structured_output: bool = True  # JSON-schema constrained output when the server supports it
+    native_dir: str = ""  # filled in by GaugeConfig.load: where the built-in GaugeLM lives
+
+
+class NativeConfig(BaseModel):
+    """GaugeLM, the built-in model (llm.provider = "native"). Sizes are for a desktop CPU."""
+
+    n_layer: int = 4
+    n_head: int = 4
+    n_embd: int = 256
+    block_size: int = 256
+    vocab_size: int = 4096
+    steps: int = 2000
+    batch_size: int = 8
+    lr: float = 6e-4
+    daemon_steps: int = 200  # continue-training steps per daemon cycle on new material
+    daemon_minutes: int = 20  # time budget per cycle
 
 
 class IngestConfig(BaseModel):
@@ -140,6 +156,11 @@ class GaugeConfig(BaseModel):
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
+    native: NativeConfig = Field(default_factory=NativeConfig)
+
+    @property
+    def native_dir(self) -> Path:
+        return self.models_dir / "native"
 
     # ---- paths -------------------------------------------------------------
     @property
@@ -179,5 +200,8 @@ class GaugeConfig(BaseModel):
         if path.exists():
             raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
             raw["data_dir"] = str(root)
-            return cls(**raw)
-        return cls(data_dir=str(root))
+            cfg = cls(**raw)
+        else:
+            cfg = cls(data_dir=str(root))
+        cfg.llm.native_dir = str(cfg.native_dir)
+        return cfg

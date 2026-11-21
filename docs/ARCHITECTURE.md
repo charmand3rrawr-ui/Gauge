@@ -121,6 +121,14 @@ indexes what the Scout files. `GAUGE_OFFLINE=1` disables all sources.
   improv -> technique cards + avoid list -> council briefs -> draft -> critic (+ project model) +
   reviews -> revise -> memories -> notes, preference pair, accepted copy, bandit reward.
 
+## GaugeLM (`native/`)
+
+A self-contained model provider: `BPETokenizer` (pure Python), `GaugeLM` (numpy forward and
+backward, KV-cache generation, save/load as npz+json), `AdamW`, `NativeTrainer` (corpus from the
+database, projects and datasets; schedule; checkpoints; continue-training), and `NativeLLM`
+(the `LLM` protocol with schema-guided structured output). `make_llm` returns it for
+`llm.provider = "native"`; the daemon calls `continue_training` each cycle when a model exists.
+
 ## Execution model
 
 - `llm/tokens.py`: token estimation and `PromptBudget`; `Drafter.build_draft_prompt` fits every

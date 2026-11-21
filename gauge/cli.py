@@ -45,7 +45,7 @@ def main(ctx: click.Context, data_dir: Optional[str], verbose: bool) -> None:
 
 # ---------------------------------------------------------------------------- setup
 @main.command()
-@click.option("--provider", type=click.Choice(["ollama", "openai", "fake"]), default="ollama")
+@click.option("--provider", type=click.Choice(["ollama", "openai", "native", "fake"]), default="ollama")
 @click.option("--model", default="llama3.1:8b", show_default=True)
 @click.option("--base-url", default=None, help="LLM server URL (default depends on provider).")
 @click.pass_obj
@@ -57,6 +57,11 @@ def init(c: Ctx, provider: str, model: str, base_url: Optional[str]) -> None:
         c.cfg.llm.base_url = base_url
     elif provider == "openai":
         c.cfg.llm.base_url = "http://localhost:1234/v1"  # LM Studio default
+    elif provider == "native":
+        c.cfg.llm.model = "gaugelm"
+        c.cfg.llm.fast_model = ""
+        c.cfg.llm.num_ctx = c.cfg.native.block_size
+        c.cfg.llm.native_dir = str(c.cfg.native_dir)
     path = c.cfg.save()
     console.print(f"[green]Initialised[/] {c.cfg.root.resolve()}  (config: {path})")
     console.print("Next: [bold]gauge doctor[/], then [bold]gauge discover royalroad best-rated --pages 2[/] and [bold]gauge ingest[/].")
@@ -1304,6 +1309,114 @@ def scout_log(c: Ctx, project: Optional[str]) -> None:
     for r in rows:
         table.add_row(r["at"][:16], r["project"] or "", str(r["chapter"] or ""), r["source"], r["query"], str(r["hits"]), "yes" if r["cached"] else "")
     console.print(table)
+
+
+# ---------------------------------------------------------------------------- native model (GaugeLM)
+@main.group()
+def native() -> None:
+    """GaugeLM: Gauge's own language model. Pure Python + numpy, trained on your corpus, no outside model code."""
+
+
+def _native_docs(c: Ctx, since: Optional[str] = None):
+    from .native import gather_texts
+
+    return gather_texts(c.db, c.cfg.projects_dir, c.cfg.models_dir / "datasets", since=since)
+
+
+@native.command("train")
+@click.option("--steps", type=int, default=None)
+@click.option("--layers", type=int, default=None)
+@click.option("--embd", type=int, default=None)
+@click.option("--heads", type=int, default=None)
+@click.option("--block", type=int, default=None)
+@click.option("--vocab", type=int, default=None)
+@click.option("--batch", type=int, default=None)
+@click.option("--resume", is_flag=True, help="Continue from the saved weights instead of starting over.")
+@click.option("--minutes", type=float, default=None, help="Stop after this many minutes (checkpoint is saved).")
+@click.pass_obj
+def native_train(c: Ctx, steps, layers, embd, heads, block, vocab, batch, resume, minutes) -> None:
+    """Train (or keep training) GaugeLM on everything Gauge has read plus your own chapters."""
+    from .native import ModelConfig, NativeTrainer, TrainConfig
+
+    n = c.cfg.native
+    mcfg = ModelConfig(vocab_size=vocab or n.vocab_size, block_size=block or n.block_size, n_layer=layers or n.n_layer,
+                       n_head=heads or n.n_head, n_embd=embd or n.n_embd)
+    tcfg = TrainConfig(steps=steps or n.steps, batch_size=batch or n.batch_size, lr=n.lr)
+    docs = _native_docs(c)
+    if not docs:
+        console.print("[red]nothing to train on[/]: ingest or import some novels first")
+        sys.exit(1)
+    chars = sum(len(t) for _, t in docs)
+    console.print(f"corpus: {len(docs)} documents, {chars:,} characters. model: {mcfg.n_layer} layers x {mcfg.n_embd} dims, block {mcfg.block_size}")
+    console.print("Training on CPU with numpy. This is slow by design: a few thousand tokens per second. Ctrl+C keeps the last checkpoint.")
+    tr = NativeTrainer(c.cfg.native_dir)
+
+    def progress(rec):
+        console.print(f"  step {rec['step']:>6}  loss {rec['loss']:.3f}  val {rec['val_loss']:.3f}  {rec['tok_per_s']} tok/s")
+
+    try:
+        res = tr.train(docs, mcfg, tcfg, resume=resume, progress=progress, time_budget_s=minutes * 60 if minutes else None)
+    except KeyboardInterrupt:
+        console.print("[yellow]stopped; last checkpoint kept[/]")
+        return
+    console.print_json(json.dumps(res))
+    console.print(f"[green]saved[/] {c.cfg.native_dir}. Use it with: gauge init --provider native")
+
+
+@native.command("continue")
+@click.option("--steps", type=int, default=None)
+@click.option("--minutes", type=float, default=None)
+@click.pass_obj
+def native_continue(c: Ctx, steps, minutes) -> None:
+    """Keep learning from new material (what the daemon does each cycle)."""
+    from .native import NativeTrainer
+
+    tr = NativeTrainer(c.cfg.native_dir)
+    docs = _native_docs(c)
+    res = tr.continue_training(docs, steps or c.cfg.native.daemon_steps, time_budget_s=(minutes or c.cfg.native.daemon_minutes) * 60,
+                               progress=lambda r: console.print(f"  step {r['step']} loss {r['loss']:.3f} val {r['val_loss']:.3f}"))
+    console.print_json(json.dumps(res))
+
+
+@native.command("status")
+@click.pass_obj
+def native_status(c: Ctx) -> None:
+    """Size, steps, losses of the native model."""
+    from .native import NativeTrainer
+
+    console.print_json(json.dumps(NativeTrainer(c.cfg.native_dir).status(), default=str))
+
+
+@native.command("sample")
+@click.argument("prompt", default="Write the opening of a chapter about a courier in the rain.")
+@click.option("--tokens", type=int, default=150, show_default=True)
+@click.option("--temperature", type=float, default=0.9, show_default=True)
+@click.pass_obj
+def native_sample(c: Ctx, prompt: str, tokens: int, temperature: float) -> None:
+    """Generate text with GaugeLM."""
+    from .native import NativeLLM
+
+    llm = NativeLLM(c.cfg.llm, c.cfg.native_dir)
+    if not llm.available():
+        console.print("[red]no native model yet[/]; run `gauge native train`")
+        sys.exit(1)
+    console.print(llm.generate(prompt, max_tokens=tokens, temperature=temperature, purpose="sample"))
+
+
+@native.command("tokenizer")
+@click.argument("text")
+@click.pass_obj
+def native_tokenizer(c: Ctx, text: str) -> None:
+    """Show how the trained tokenizer splits a text."""
+    from .native import BPETokenizer
+
+    path = c.cfg.native_dir / "tokenizer.json"
+    if not path.exists():
+        console.print("[red]no tokenizer yet[/]")
+        sys.exit(1)
+    tok = BPETokenizer.load(path)
+    ids = tok.encode(text)
+    console.print(f"{len(ids)} tokens (vocab {tok.vocab_size}): " + " | ".join(tok.decode([i]) for i in ids))
 
 
 # ---------------------------------------------------------------------------- gui
