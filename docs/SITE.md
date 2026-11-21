@@ -31,6 +31,18 @@ These are enforced in `gauge/site/integrity.py`, not left to good intentions:
   surfaced so you verify them before publishing. The op-ed assistant is told not to invent facts; this
   catches what slips through.
 
+## Eye-catching, not deceptive
+
+Eye-catching and clickbait are not the same thing. `gauge site headline FILE` suggests strong, vivid
+headlines for an article and ranks them, after two filters: the clickbait detector throws out the
+deceptive patterns, and an **in-context** check confirms the headline's key terms are actually supported
+by the body — so a headline can pull a reader in but cannot promise something the piece does not deliver
+or take it out of context. Opinion drafting uses the same optimiser to pick a strong, honest title.
+
+Opinion columns take a `--voice`: `plain`, `punchy`, or `contrarian`. The contrarian register is sharp
+and skeptical of the consensus — a ZeroHedge-like *flavour* — but it stays honest (no invented facts),
+labelled as opinion, and published under your own name or an owned pen name, never a borrowed byline.
+
 ## What this is not
 
 It will not generate news articles with invented facts, quotes or events (`fabricate_news`), write

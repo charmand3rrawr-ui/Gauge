@@ -1206,8 +1206,9 @@ def _article_dir(c: Ctx, project: str):
 @click.option("--thesis", required=True, help="The argument you want the column to make.")
 @click.option("--byline", required=True, help="Your name or an owned pen name (not an outlet or shared pseudonym).")
 @click.option("--angle", default="", help="Optional angle or framing.")
+@click.option("--voice", type=click.Choice(["plain", "punchy", "contrarian"]), default="plain", help="Register: plain, punchy, or contrarian (honest, your byline).")
 @click.pass_obj
-def site_opinion(c: Ctx, project: str, thesis: str, byline: str, angle: str) -> None:
+def site_opinion(c: Ctx, project: str, thesis: str, byline: str, angle: str, voice: str) -> None:
     """Draft a labelled opinion column from your thesis. Saved for the next `site build`; claims are
     flagged for you to verify, and the piece is marked Opinion under your byline."""
     import json as _json
@@ -1219,7 +1220,7 @@ def site_opinion(c: Ctx, project: str, thesis: str, byline: str, angle: str) -> 
     p, d = _article_dir(c, project)
     pipe = _pipeline_or_exit(c)
     try:
-        draft = draft_opinion(pipe.llm, thesis, byline, angle)
+        draft = draft_opinion(pipe.llm, thesis, byline, angle, voice=voice)
     except PermissionError as e:
         console.print(f"[red]refused:[/] {e}")
         sys.exit(1)
@@ -1282,6 +1283,27 @@ def site_build(c: Ctx, project: str, byline: str, url: str, chapters: bool) -> N
     console.print(f"[green]built[/] {len(written)} files -> {out}")
     console.print(f"  landing + {sum(1 for a in articles if a.kind == 'chapter')} chapter(s) + "
                   f"{sum(1 for a in articles if a.kind == 'opinion')} opinion column(s). Upload the folder to your host.")
+
+
+@site.command("headline")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--angle", default="", help="Optional angle or framing.")
+@click.option("--n", type=int, default=6, show_default=True)
+@click.pass_obj
+def site_headline(c: Ctx, path: str, angle: str, n: int) -> None:
+    """Suggest eye-catching but honest headlines for an article file. Clickbait is excluded and each
+    headline is checked against the body so it cannot take the piece out of context."""
+    from .site.headline import suggest_headlines
+
+    body = Path(path).read_text(encoding="utf-8", errors="replace")
+    pipe = _pipeline_or_exit(c)
+    ranked = suggest_headlines(pipe.llm, body, n=n, angle=angle)
+    if not ranked:
+        console.print("no honest headline candidates (the model's suggestions were clickbait or off-topic); try again")
+        return
+    for h in ranked:
+        ctx = "" if h.in_context else f"  [yellow](check: {', '.join(h.unsupported[:3])} not in the article)[/]"
+        console.print(f"  {h.score:.2f}  {h.text}{ctx}")
 
 
 @main.group()

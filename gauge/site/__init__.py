@@ -5,6 +5,7 @@ outlet, opinion that is labelled as opinion, headlines checked for clickbait dec
 factual-looking claims flagged for the author to verify. It builds a static site the author hosts; it
 does not manufacture news.
 """
+from .headline import Headline, in_context, rank_headlines, score_headline, suggest_headlines
 from .integrity import (
     IMPERSONATION_DENYLIST,
     OPINION_DISCLAIMER,
@@ -16,4 +17,5 @@ from .opinion import draft_opinion
 from .publisher import Article, build_site
 
 __all__ = ["check_byline", "check_headline", "flag_claims", "OPINION_DISCLAIMER", "IMPERSONATION_DENYLIST",
-           "draft_opinion", "Article", "build_site"]
+           "draft_opinion", "Article", "build_site",
+           "Headline", "suggest_headlines", "rank_headlines", "in_context", "score_headline"]
