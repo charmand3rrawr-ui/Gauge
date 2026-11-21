@@ -129,6 +129,28 @@ class Project:
             text = parts[2] if len(parts) == 3 else text
         return text.strip()
 
+    def read_meta(self, n: int) -> dict[str, Any]:
+        """Parse the front-matter a chapter was written with (score, rubric, cast, ...)."""
+        p = self.chapter_path(n)
+        if not p.exists():
+            return {}
+        text = p.read_text(encoding="utf-8")
+        if not text.startswith("---"):
+            return {}
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            return {}
+        meta: dict[str, Any] = {}
+        for line in parts[1].strip().splitlines():
+            key, sep, val = line.partition(":")
+            if not sep:
+                continue
+            try:
+                meta[key.strip()] = json.loads(val.strip())
+            except (json.JSONDecodeError, ValueError):
+                meta[key.strip()] = val.strip()
+        return meta
+
     # ---- draft checkpoints -------------------------------------------------
     @property
     def drafts_dir(self) -> Path:

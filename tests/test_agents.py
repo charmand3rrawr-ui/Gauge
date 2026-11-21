@@ -238,7 +238,7 @@ def test_council_merges_scores_and_respects_config(cfg, tmp_path):
     assert "comedian" not in build_council(cfg, FakeLLM(), p2).names()
     cfg.agents.profile = "lean"
     lean = build_council(cfg, FakeLLM(), p)
-    assert set(lean.names()) == {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability"}
+    assert set(lean.names()) == {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability", "arc_keeper"}
     cfg.agents.profile = "full"
     cfg.agents.schemer = False
     assert "schemer" not in build_council(cfg, FakeLLM(), p).names()

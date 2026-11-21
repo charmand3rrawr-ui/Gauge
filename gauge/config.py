@@ -198,6 +198,7 @@ class AgentsConfig(BaseModel):
     voice_coach: bool = True  # measures whether characters sound alike
     readability: bool = True  # measures burstiness, syllable load and paragraph rhythm; smooth-to-read as a number
     suitability: bool = True  # checks each chapter against the audience contract below
+    arc_keeper: bool = True  # tracks the bible's long arc and flags when a serial drifts from it
     sensitivity_rules: str = ""  # your platform's content rules, pasted
     sensitivity_categories: list[str] = Field(default_factory=list)
     block_on_sensitivity: bool = False  # severe flags force a revision instead of a warning

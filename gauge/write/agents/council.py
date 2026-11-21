@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from ...llm.client import LLM
 from ...llm.parallel import run_parallel
+from .arc_keeper import ArcKeeper
 from .archivist import Archivist
 from .base import AgentReview, SceneContext, StoryAgent
 from .comedian import Comedian, wants_comedy
@@ -31,8 +32,9 @@ ALL_AGENTS: dict[str, type[StoryAgent]] = {
     LineEditor.name: LineEditor, Packager.name: Packager, ThemeKeeper.name: ThemeKeeper, SensitivityReader.name: SensitivityReader,
     PacingDirector.name: PacingDirector, Librarian.name: Librarian, Comedian.name: Comedian, ScoutAgent.name: ScoutAgent,
     VoiceCoach.name: VoiceCoach, ReadabilityCoach.name: ReadabilityCoach, SuitabilityChecker.name: SuitabilityChecker,
+    ArcKeeper.name: ArcKeeper,
 }
-LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability"}
+LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability", "arc_keeper"}
 
 
 def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCouncil:

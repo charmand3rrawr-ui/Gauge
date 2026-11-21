@@ -1120,6 +1120,67 @@ def feedback(c: Ctx, project: str, chapter: int, views: Optional[float], comment
     console.print_json(json.dumps(out, default=str))
 
 
+@main.command(name="feedback-import")
+@click.argument("project")
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_obj
+def feedback_import(c: Ctx, project: str, path: str) -> None:
+    """Bulk-import real reader numbers you exported yourself (CSV or JSON) as rows of
+    chapter, views, comments, likes. One row per chapter; feeds the same calibration as `feedback`."""
+    import csv as _csv
+    import json as _json
+
+    p = Path(path)
+    rows: list[dict] = []
+    if p.suffix.lower() == ".json":
+        data = _json.loads(p.read_text(encoding="utf-8"))
+        rows = data if isinstance(data, list) else data.get("chapters", [])
+    else:
+        with p.open(encoding="utf-8", newline="") as fh:
+            rows = list(_csv.DictReader(fh))
+    pipe = _pipeline_or_exit(c)
+    proj = pipe.open_project(project)
+    n = 0
+    for row in rows:
+        try:
+            ch = int(row.get("chapter") or row.get("chapter_number"))
+        except (TypeError, ValueError):
+            continue
+        def _num(r: dict, k: str) -> Optional[float]:
+            return float(r[k]) if r.get(k) not in (None, "") else None
+        pipe.record_feedback(proj, ch, _num(row, "views"), _num(row, "comments"), _num(row, "likes"))
+        n += 1
+    console.print(f"[green]imported[/] {n} chapter(s) of feedback for {project}")
+
+
+@main.command()
+@click.argument("project")
+@click.pass_obj
+def evaluate(c: Ctx, project: str) -> None:
+    """Does Gauge's chapter score predict real retention? Correlates stored scores with the retention
+    your recorded feedback implies, and reports the per-project model's cross-validated fit."""
+    from .learn.evaluation import evaluate_project
+
+    pipe = _pipeline_or_exit(c)
+    proj = pipe.open_project(project)
+    fb = c.db.feedback(project)
+    panel = pipe.council(proj).get("reader_panel")
+    panel_corr = panel.calibration().get("correlation") if panel is not None else None
+    pm = pipe.project_model(proj)
+    fitted = pm.fit(proj, fb, min_chapters=c.cfg.learn.project_model_min_chapters)
+    r2cv = round(fitted.r2_cv, 3) if fitted and fitted.r2_cv == fitted.r2_cv else None
+    ev = evaluate_project(proj, fb, panel_corr=panel_corr, project_model_r2cv=r2cv)
+    console.print(f"[bold]{project}[/]: {ev.chapters_with_feedback} chapter(s) with retention data")
+    if ev.retention_mean is not None:
+        console.print(f"  mean retention {ev.retention_mean}, trend {ev.retention_trend}")
+    console.print(f"  score vs real retention: {ev.score_vs_retention}  |  panel correlation: {ev.panel_correlation}  |  project model R2(cv): {ev.project_model_r2cv}")
+    console.print(f"  [bold]{ev.verdict()}[/]")
+    if ev.worst_chapters:
+        console.print("  lowest-retention chapters: " + ", ".join(f"ch{n} ({r})" for n, r in ev.worst_chapters))
+    for note in ev.notes:
+        console.print(f"  - {note}")
+
+
 @main.command()
 @click.argument("project")
 @click.pass_obj

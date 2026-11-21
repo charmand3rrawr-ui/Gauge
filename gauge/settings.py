@@ -50,6 +50,7 @@ SWITCHES: list[Switch] = [
     Switch("agents.block_on_sensitivity", "Content flags block", "bool", "Severe content flags force a revision instead of only warning.", "The room"),
     Switch("agents.readability", "Readability coach", "bool", "Scores burstiness, syllable load and paragraph rhythm; smooth-to-read as a number.", "The room"),
     Switch("agents.suitability", "Suitability checker", "bool", "Checks each chapter against the audience contract below.", "The room"),
+    Switch("agents.arc_keeper", "Arc keeper", "bool", "Tracks the bible's long arc and flags when a long serial drifts from the story it promised.", "The room"),
     Switch("agents.suitability_age_band", "Audience age band", "choice", "Sets a reading-ease floor: all = easiest, adult = densest allowed.", "The room", choices=["all", "teen", "adult"]),
     Switch("agents.suitability_heat_max", "Maximum heat level", "int", "0 none, 1 mild, 2 moderate, 3 explicit. Chapters above this are flagged.", "The room", 0, 3),
     Switch("agents.suitability_platform", "Target platform", "text", "Free text shown to the writer, e.g. Royal Road, Wattpad.", "The room"),

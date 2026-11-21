@@ -1,4 +1,5 @@
 """Independent story agents and the council that runs them."""
+from .arc_keeper import ArcKeeper
 from .archivist import Archivist
 from .base import AgentReview, SceneContext, StoryAgent
 from .comedian import Comedian
@@ -18,4 +19,4 @@ from .theme import ThemeKeeper
 from .voice_coach import VoiceCoach
 
 __all__ = ["Archivist", "AgentReview", "SceneContext", "StoryAgent", "Comedian", "ALL_AGENTS", "AgentCouncil", "build_council",
-           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper", "VoiceCoach", "ReadabilityCoach", "SuitabilityChecker"]
+           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper", "VoiceCoach", "ReadabilityCoach", "SuitabilityChecker", "ArcKeeper"]
