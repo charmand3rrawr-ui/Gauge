@@ -1227,6 +1227,22 @@ def sync_edits(c: Ctx, project: str) -> None:
     console.print(f"[green]{len(changes)} pair(s) recorded[/]")
 
 
+@main.command("build-sft")
+@click.argument("project")
+@click.pass_obj
+def build_sft(c: Ctx, project: str) -> None:
+    """Curate instruction-tuning data from a serial's own accepted chapters into datasets/sft.jsonl,
+    so GaugeLM can learn from what Gauge itself judged good."""
+    from .learn.finetune import build_sft_from_project
+    from .write.project import Project
+
+    if not Project.exists(c.cfg.projects_dir, project):
+        console.print(f"[red]no project named {project!r}[/]")
+        sys.exit(1)
+    n = build_sft_from_project(Project(c.cfg.projects_dir, project), c.cfg.models_dir / "datasets")
+    console.print(f"[green]wrote {n}[/] SFT row(s) from accepted chapters -> datasets/sft.jsonl")
+
+
 @main.command()
 @click.option("--run", "do_run", is_flag=True, help="Actually train (needs CUDA + unsloth); default is to show the plan.")
 @click.option("--base", default="unsloth/llama-3.1-8b-instruct", show_default=True)
@@ -1859,7 +1875,7 @@ def bot_new(c: Ctx, name: str, task: str, language: Optional[str], needs_ai: Opt
     if not llm.available():
         console.print(f"[red]LLM not reachable[/] ({llm.describe()}); the Engineer needs a model to write code (the bot itself may not).")
         sys.exit(1)
-    eng = Engineer(llm, _kb(c), c.cfg.bots_dir, max_fix_rounds=c.cfg.code.max_fix_rounds)
+    eng = Engineer(llm, _kb(c), c.cfg.bots_dir, max_fix_rounds=c.cfg.code.max_fix_rounds, scan_dependencies=c.cfg.security.scan_dependencies)
     res = eng.build(name, task, needs_ai=needs_ai, language=language, schedule=schedule,
                     progress=lambda r: console.print(f"  attempt {r['attempt']}: tests {'passed' if r['passed'] else 'failed'}"))
     console.print_json(json.dumps(res))
@@ -2353,17 +2369,39 @@ def security_scan(c: Ctx, path: str) -> None:
 
 @security.command("check-text")
 @click.argument("path", type=click.Path(exists=True))
+@click.option("--semantic", is_flag=True, help="Also ask the model whether the text is an injection (slower).")
 @click.pass_obj
-def security_check_text(c: Ctx, path: str) -> None:
+def security_check_text(c: Ctx, path: str, semantic: bool) -> None:
     """Show instruction-shaped text the sanitiser would flag in a file."""
     from .security import find_injections
 
-    hits = find_injections(Path(path).read_text(encoding="utf-8", errors="replace"))
-    if not hits:
-        console.print("clean")
-        return
-    for h in hits:
-        console.print(f"sev{h['severity']} {h['label']}: {h['match']}")
+    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    hits = find_injections(text)
+    if hits:
+        for h in hits:
+            console.print(f"sev{h['severity']} {h['label']}: {h['match']}")
+    else:
+        console.print("regex layer: clean")
+    if semantic or c.cfg.security.semantic_injection:
+        from .llm import make_llm
+        from .security.semantic import SemanticInjectionDetector
+        try:
+            v = SemanticInjectionDetector(make_llm(c.cfg.llm, "fast")).assess(text)
+            console.print(f"semantic layer: injection={v.injection} confidence={v.confidence} {v.category} — {v.why}")
+        except Exception as e:
+            console.print(f"[yellow]semantic layer unavailable: {e}[/]")
+
+
+@security.command("deps")
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_obj
+def security_deps(c: Ctx, path: str) -> None:
+    """Supply-chain scan: what a Python file imports, flagging unvetted or typosquat packages."""
+    from .security.deps import report, scan_imports, worst
+
+    findings = scan_imports(Path(path).read_text(encoding="utf-8", errors="replace"))
+    console.print(report(findings))
+    sys.exit(1 if worst(findings) >= 3 else 0)
 
 
 @security.command("range")

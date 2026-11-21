@@ -79,6 +79,8 @@ SWITCHES: list[Switch] = [
     Switch("security.auto_lockdown", "Automatic lockdown", "bool", "When the threat level reaches lockdown, risky automation is switched off until you unlock.", "Security"),
     Switch("security.scan_generated_code", "Scan generated code", "bool", "Block bots and proposals that contain dangerous constructs.", "Security",
            warning="Turning this off lets model-written code with eval/shell/credential access run on your machine."),
+    Switch("security.scan_dependencies", "Scan dependencies", "bool", "Flag or block generated code that imports unvetted or typosquat-looking packages.", "Security"),
+    Switch("security.semantic_injection", "Semantic injection detector", "bool", "A model-based second opinion on prompt injection, past what regex catches (slower, non-deterministic).", "Security"),
     Switch("security.allow_public_workers", "Accept workers from public networks", "bool", "Workers accept only private-network peers unless on.", "Security",
            warning="Exposes the worker API beyond your LAN; use only behind a VPN you control."),
     Switch("security.active_defense_level", "Active defence level", "int", "How hard Gauge pushes back on its OWN machine: 0 passive, 1 tarpit+evidence, 2 +honeytokens+decoys, 3 maximum. Never touches other systems.", "Security", 0, 3),

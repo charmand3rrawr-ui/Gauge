@@ -56,6 +56,37 @@ def save_accepted_copy(project: Project, chapter: int, text: str) -> Path:
     return p
 
 
+def build_sft_from_project(project: Project, datasets_dir: Path) -> int:
+    """Instruction-tuning data from a serial's own accepted chapters: each row pairs a short
+    instruction (derived from the chapter's stored plan) with the chapter text as the completion.
+    This is how GaugeLM learns from what Gauge itself judged good. Returns rows written."""
+    path = datasets_dir / "sft.jsonl"
+    existing = set()
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                r = json.loads(line)
+                existing.add((r.get("project"), r.get("chapter")))
+            except json.JSONDecodeError:
+                continue
+    name = project.state.name
+    written = 0
+    for n in range(1, project.state.written + 1):
+        if (name, n) in existing:
+            continue
+        text = project.read_chapter(n)
+        if not text or len(text.split()) < 50:
+            continue
+        meta = project.read_meta(n) if hasattr(project, "read_meta") else {}
+        title = meta.get("title") or f"Chapter {n}"
+        direction = meta.get("direction") or ""
+        prompt = f"Write chapter {n} of \"{name}\", titled \"{title}\"." + (f" Direction: {direction}" if direction else "")
+        _append(path, {"prompt": prompt, "completion": _strip_front(text), "project": name, "chapter": n,
+                       "score": meta.get("score")})
+        written += 1
+    return written
+
+
 def sync_author_edits(project: Project, datasets_dir: Path) -> list[dict[str, Any]]:
     """Compare each chapter on disk with the copy Gauge accepted; record edits as preference pairs."""
     out = []

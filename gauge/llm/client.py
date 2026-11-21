@@ -470,6 +470,12 @@ class FakeLLM:
                     for i in range(start, min(end, start + 2) + 1)]})
             if "score this chapter" in low:
                 return json.dumps({"hook": 7, "momentum": 6, "payoff": 6, "cliffhanger": 8, "clarity": 7, "notes": "Tighten the middle."})
+            if "prompt-injection classifier" in low:
+                markers = ("ignore previous", "disregard", "system prompt", "you are now", "exfiltrate",
+                           "send config", "reveal the", "no restrictions", "jailbroken", "forward config")
+                hit = any(mk in low for mk in markers)
+                return json.dumps({"injection": hit, "confidence": 0.9 if hit else 0.1,
+                                   "category": "override" if hit else "", "why": "fake classifier"})
             if "generate opening hooks" in low:
                 return json.dumps({"variants": [
                     "\"Don't open it,\" Rin said, and the bag was already humming.",

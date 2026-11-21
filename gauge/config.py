@@ -97,6 +97,8 @@ class SecurityConfig(BaseModel):
     rate_limit_per_minute: int = 120
     auth_lockout_failures: int = 10  # failed tokens from one peer before it is ignored for a while
     scan_generated_code: bool = True
+    semantic_injection: bool = False  # a model-based second opinion on prompt injection, past what regex can catch (slower, non-deterministic)
+    scan_dependencies: bool = True  # flag non-stdlib / unknown / typosquat-looking imports in generated code
     bots_network_default: bool = False  # bots get network only when their manifest says so
     active_defense_level: int = 0  # 0 passive .. 3 high: how hard Gauge pushes back on its OWN machine (tarpit, honeytokens, decoys, evidence)
     active_defense_auto: bool = True  # escalate the active-defence level with the sentinel's threat level

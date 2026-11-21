@@ -177,11 +177,12 @@ def run_tests(bot_dir: Path, timeout: int = 300) -> tuple[bool, str]:
 
 
 class Engineer:
-    def __init__(self, llm: LLM, kb: KnowledgeBase, bots_dir: Path, max_fix_rounds: int = 2):
+    def __init__(self, llm: LLM, kb: KnowledgeBase, bots_dir: Path, max_fix_rounds: int = 2, scan_dependencies: bool = True):
         self.llm = llm
         self.kb = kb
         self.registry = BotRegistry(bots_dir)
         self.max_fix_rounds = max_fix_rounds
+        self.scan_dependencies = scan_dependencies
 
     # ---- 1. classify -------------------------------------------------------------------
     def classify(self, task: str) -> dict[str, Any]:
@@ -262,6 +263,30 @@ Respond with ONLY JSON: {{"files": {files_hint}, "notes": "one line about design
             from ..security.codescan import scan_files, worst
 
             findings = scan_files(spec.files)
+            dep_report = ""
+            if self.scan_dependencies:
+                from ..security.deps import report as dep_rep
+                from ..security.deps import scan_imports
+                from ..security.deps import worst as dep_worst
+                dep_findings = [f for fn, code in spec.files.items() if fn.endswith(".py") for f in scan_imports(code)]
+                if dep_findings and dep_worst(dep_findings) >= 2:
+                    dep_report = dep_rep(dep_findings)
+                # A typosquat dependency is treated as blocking, like a severity-3 code finding.
+                if dep_findings and dep_worst(dep_findings) >= 3:
+                    spec_dir = self.registry.save(spec, {"classification": cls, "attempts": attempt + 1, "blocked": True,
+                                                         "scan": scan_report(findings), "deps": dep_report})
+                    report = "SECURITY SCAN BLOCKED THIS CODE (dependency):\n" + dep_report
+                    feedback = report + "\nUse only standard-library or vetted packages."
+                    if progress:
+                        progress({"attempt": attempt + 1, "passed": False, "blocked": True})
+                    if attempt >= self.max_fix_rounds:
+                        man = self.registry.manifest(name)
+                        man.update({"tests_passed": False, "blocked": True, "test_report": report[-2000:]})
+                        (spec_dir / "manifest.json").write_text(json.dumps(man, indent=2), encoding="utf-8")
+                        return {"name": name, "needs_ai": spec.needs_ai, "language": spec.language, "schedule": spec.schedule,
+                                "tests_passed": False, "blocked": True, "files": sorted(spec.files), "dir": str(spec_dir),
+                                "report": report[-1500:], "why": cls["why"], "notes": spec.notes}
+                    continue
             if worst(findings) >= 3:
                 # Blocking findings: keep the files for inspection, never runnable, and tell the model why.
                 spec_dir = self.registry.save(spec, {"classification": cls, "attempts": attempt + 1, "blocked": True, "scan": scan_report(findings)})
