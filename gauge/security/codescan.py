@@ -17,6 +17,7 @@ PY_RULES: list[tuple[str, str, int]] = [
     (r"\b(base64\.b64decode|codecs\.decode\([^)]*rot)", "decodes hidden payload", 3),
     (r"\bimport\s+(socket|ctypes|winreg|_winreg|msvcrt|pty)\b|\bfrom\s+(socket|ctypes|winreg)\s+import", "low-level system access", 2),
     (r"\b(urllib\.request|requests|http\.client|httpx|aiohttp)\b", "network access", 1),
+    (r"(urlopen|requests\.(get|post|put|patch)|DownloadString|\.send)\s*\([^)]{0,160}os\.environ", "sends environment/secret over the network", 3),
     (r"(ssh|\.aws|\.ssh|credentials|id_rsa|\.netrc|wallet|keychain|Local State|Login Data)", "touches credentials", 3),
     (r"\b(HKEY_|reg add|reg delete|schtasks|sc create|netsh|bcdedit|vssadmin)\b", "system configuration change", 3),
     (r"\bopen\s*\([^)]*['\"][a-zA-Z]:\\\\Windows", "writes under Windows dir", 3),

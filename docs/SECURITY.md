@@ -51,6 +51,34 @@ Code the model writes is not trusted because the model wrote it.
   the worker pool, research and daemon writing, and records why. `gauge security unlock` brings
   the switches back except auto-apply, which you must turn on again yourself.
 
+## Active defence — all of it on Gauge's own machine
+
+A single dial, `security.active_defense_level` (0 passive, 1 watch, 2 elevated, 3 high), decides how
+hard Gauge pushes back as an attack intensifies. With `security.active_defense_auto` on, it rises
+automatically with the sentinel's threat level. Every action is inward and reaches no other system:
+
+- **tarpit** — slow Gauge's own responses to a suspicious peer, so a prober wastes its time;
+- **honeytokens** — plant fake secrets; if one ever turns up in traffic or a file, that is proof of
+  exfiltration and raises a severity-3 alert;
+- **decoys** — hand a rejected prober a plausible-but-fake response instead of anything real;
+- **evidence** — capture who hit Gauge and how into durable bundles, and draft (never send) an abuse
+  report to the responsible network operator, which is the legal response to an attack.
+
+There is deliberately no outward offence here, and none can be switched on: no scanning, probing, or
+counter-attacking another system, staged or otherwise. Hack-back is illegal in most places even after
+you are attacked, it hits innocent third parties when the source is spoofed, and a program that
+decides on its own when to cross that line is exactly what must not ship. The self-programmer cannot
+add it either: its safety limits are protected paths it may not edit.
+
+## Defensive cyber-range
+
+`gauge security range` fires a fixed library of synthetic attacks — prompt injections, dangerous code
+snippets, oversized and malformed worker requests, auth brute-force, a pickle payload — at Gauge's own
+defences (the sanitiser, the code scanner, the worker guard, the array unpacker) and scores what is
+caught. The "attacks" are test inputs, like testing a smoke detector with a little smoke; none is a
+usable weapon and none leaves the machine. Gaps it finds are how the defences get hardened: the range
+is the blue-team training loop — fire, find the hole, close it, re-verify.
+
 ## What Gauge is entitled to refuse
 
 Treat this as Gauge's standing policy, enforced in code rather than promised in prose:
@@ -74,6 +102,8 @@ unlock`. The same steps are a knowledge card the Engineer reads, so bots it writ
 ```
 gauge security seal | verify | status | log [--min 2] | lockdown "reason" | unlock [--no-restore]
 gauge security scan PATH | check-text FILE
+gauge security range                         # fire synthetic attacks at the defences, score what is caught
+gauge security defense [--plant api-key] [--evidence]   # show the posture; plant honeytokens; list evidence
 gauge compute token [--rotate] [--reveal]
 gauge settings list --group Security
 ```

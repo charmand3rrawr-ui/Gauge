@@ -19,6 +19,9 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f​-‏ -‮⁠-�
 INJECTION_PATTERNS: list[tuple[str, str, int]] = [
     (r"ignore (all |any |the )?(previous|prior|above|earlier) (instructions|prompts|rules|messages)", "override attempt", 3),
     (r"disregard (all |any |the )?(previous|prior|above) (instructions|prompts|rules)", "override attempt", 3),
+    (r"disregard (all |any |your )?(previous |prior |above )?(instructions|prompts|rules|guidelines|restrictions|guardrails)", "override attempt", 3),
+    (r"\b(you are now|you'?re now|from now on,? you are)\b.{0,40}\b(dan|do anything now|jailbroken|unrestricted|unfiltered|no restrictions|no limits|no rules|without (restrictions|rules|filters|limits))", "jailbreak attempt", 3),
+    (r"\b(no longer bound by|have no (restrictions|rules|limits|filters|guidelines)|without any (restrictions|rules|limits))\b", "restriction removal", 2),
     (r"\b(you are now|from now on you are|act as|pretend (to be|you are))\b.{0,60}\b(assistant|ai|model|system|developer)", "role hijack", 3),
     (r"^\s*(system|assistant|developer)\s*:", "fake role marker", 3),
     (r"\[/?(inst|system|sys)\]|<\|(im_start|im_end|system|user|assistant)\|>|<</?SYS>>", "chat template token", 3),

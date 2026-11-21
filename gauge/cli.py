@@ -2305,6 +2305,49 @@ def security_check_text(c: Ctx, path: str) -> None:
         console.print(f"sev{h['severity']} {h['label']}: {h['match']}")
 
 
+@security.command("range")
+@click.pass_obj
+def security_range(c: Ctx) -> None:
+    """Defensive cyber-range: fire synthetic attacks at Gauge's own defences and score what is caught."""
+    from .security.range import run_range
+
+    rep = run_range(max_body=c.cfg.security.max_request_bytes, audit=_audit(c))
+    console.print(f"[bold]Cyber-range[/]: {rep.detected}/{rep.total} probes caught (score {rep.score:.0%})")
+    for defence, (hit, tot) in sorted(rep.by_defence().items()):
+        mark = "[green]ok[/]" if hit == tot else "[yellow]gap[/]"
+        console.print(f"  {mark} {defence}: {hit}/{tot}")
+    for lesson in rep.to_lessons():
+        console.print(f"  [yellow]- {lesson}[/]")
+
+
+@security.command("defense")
+@click.option("--plant", default=None, help="Plant a honeytoken with this label (e.g. api-key).")
+@click.option("--evidence", "show_evidence", is_flag=True, help="List captured evidence.")
+@click.pass_obj
+def security_defense(c: Ctx, plant: Optional[str], show_evidence: bool) -> None:
+    """Show (or arm) the graduated active defence. Everything here stays on your own machine."""
+    from .security.defense import ActiveDefense, level_for_threat, posture
+    from .security.sentinel import assess
+
+    sec = c.cfg.security
+    level = sec.active_defense_level
+    if sec.active_defense_auto:
+        threat = assess(_audit(c))
+        level = max(level, level_for_threat(threat.level))
+    ad = ActiveDefense(c.cfg.security_dir, level=level, audit=_audit(c))
+    p = posture(level)
+    console.print(f"[bold]Active defence[/]: level {level} — {p.note}")
+    console.print(f"  tarpit {p.tarpit_seconds}s, honeytokens {'on' if p.honeytokens else 'off'}, "
+                  f"decoys {'on' if p.decoys else 'off'}, evidence {'on' if p.evidence else 'off'}")
+    console.print(f"  {len(ad.honeytokens())} honeytoken(s) planted; {len(ad.evidence())} evidence bundle(s)")
+    if plant:
+        tok = ad.plant_honeytoken(plant)
+        console.print(f"[green]planted[/] honeytoken for {plant}: {tok[:20]}... (if this ever appears in traffic, it was exfiltrated)")
+    if show_evidence:
+        for e in ad.evidence(20):
+            console.print(f"  {e['at']} {e['kind']} from {e.get('peer', '?')}: {e['payload'][:80]}")
+
+
 # ---------------------------------------------------------------------------- gui
 @main.command()
 @click.pass_obj

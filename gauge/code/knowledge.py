@@ -174,6 +174,14 @@ and restart workers with the new one; re-seal (`gauge security seal`) only after
 to the sanitiser or scanner if an injection or bad code got through; write a test that reproduces it; `gauge self unlock`
 when done. Keep backups of data/ off the machine; BitLocker or an encrypted container protects it at rest.""",
 
+    "active-defense": """ACTIVE DEFENCE, ALL INWARD (gauge.security.defense + gauge.security.range). A single dial (security.active_defense_level
+0..3, auto-escalating from the sentinel when security.active_defense_auto) decides how hard Gauge pushes back on ITS OWN machine:
+tarpit (slow responses to a suspicious peer), honeytokens (fake secrets that alert if they ever appear in traffic -> exfiltration proof),
+decoys (a plausible-but-fake response to a rejected prober), and evidence capture (durable bundles for the owner; abuse_report_draft
+drafts a report to send, never sends it). None of it reaches another system; there is no hack-back. The defensive cyber-range
+(`gauge security range`) fires synthetic attacks at the sanitiser, code scanner, worker Guard and array unpacker and scores what is
+caught, surfacing gaps to harden. `gauge security defense` shows the posture and plants honeytokens.""",
+
     "programming-languages": """READING MANY LANGUAGES (gauge.code.languages). Gauge writes bots in Python but reads many languages to understand
 dependencies and port idioms. detect(filename, code) ids the language (extension first, then Pygments); analyze(filename, code) ->
 CodeShape (language, lines, tokens, comment_ratio, functions, classes, max_indent, smells); tips(lang)/idioms(lang)/gotchas(lang)

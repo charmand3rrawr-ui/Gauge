@@ -80,6 +80,8 @@ SWITCHES: list[Switch] = [
            warning="Turning this off lets model-written code with eval/shell/credential access run on your machine."),
     Switch("security.allow_public_workers", "Accept workers from public networks", "bool", "Workers accept only private-network peers unless on.", "Security",
            warning="Exposes the worker API beyond your LAN; use only behind a VPN you control."),
+    Switch("security.active_defense_level", "Active defence level", "int", "How hard Gauge pushes back on its OWN machine: 0 passive, 1 tarpit+evidence, 2 +honeytokens+decoys, 3 maximum. Never touches other systems.", "Security", 0, 3),
+    Switch("security.active_defense_auto", "Escalate defence with threat", "bool", "Raise the active-defence level automatically as the sentinel's threat level rises.", "Security"),
     # ---- automation -----------------------------------------------------------------------
     Switch("daemon.write_after_learning", "Daemon writes chapters", "bool", "Each learning cycle also writes the next chapter of the active project.", "Automation"),
     Switch("code.bots_enabled", "Run scheduled bots", "bool", "The daemon runs the bots whose schedule is due.", "Automation"),
