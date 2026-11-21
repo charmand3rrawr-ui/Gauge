@@ -160,7 +160,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge feedback`, `gauge bandit`, `gauge lessons`, `gauge sync-edits`, `gauge finetune` | learn from your own serial: real numbers, prompt tuning, lessons, edit pairs, LoRA plan |
 | `gauge persona build/show/blend` | the author persona learned from your chapters |
 | `gauge character arc` | planned personality drift |
-| `gauge native train/continue/status/sample/tokenizer` | GaugeLM, the built-in model; see [docs/NATIVE.md](docs/NATIVE.md) |
+| `gauge native presets/bench/train/distill/eval/continue/status/sample/tokenizer` | GaugeLM, the built-in model; see [docs/NATIVE.md](docs/NATIVE.md) |
 | `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
@@ -190,14 +190,19 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 
 ## Your own model, no outside code
 
-Gauge ships **GaugeLM**, a complete language model in pure Python and numpy: tokenizer,
-transformer, hand-written backprop, trainer and sampler. It trains on everything Gauge has read
-plus your own chapters, keeps learning every daemon cycle, and plugs into the whole pipeline as
-`--provider native`. It is small and honest about it; see [docs/NATIVE.md](docs/NATIVE.md).
+Gauge ships **GaugeLM**, a complete language model in pure Python and numpy: BPE tokenizer,
+Llama-style transformer (RMSNorm, rotary positions, SwiGLU, grouped-query attention),
+hand-written backprop, AdamW trainer with curriculum, distillation from the big local model,
+and a sampler. Runs on CPU or, with CuPy, on an NVIDIA GPU; sizes from 4M to 310M parameters.
+It trains on everything Gauge has read plus your own chapters, keeps learning every daemon
+cycle, and plugs into the whole pipeline as `--provider native`. Small, and honest about it;
+see [docs/NATIVE.md](docs/NATIVE.md).
 
 ```powershell
-.\gauge.bat native train --minutes 120
-.\gauge.bat native sample "Write the opening of a chapter."
+.\gauge.bat native bench --size small
+.\gauge.bat native train --size small --minutes 240
+.\gauge.bat native distill --rows 400        # learn behaviour from the big model
+.\gauge.bat native train --resume --steps 800
 .\gauge.bat init --provider native
 ```
 

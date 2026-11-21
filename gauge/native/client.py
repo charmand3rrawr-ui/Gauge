@@ -29,9 +29,10 @@ _NUM = re.compile(r"-?\d+(?:\.\d+)?")
 
 class NativeLLM:
     def __init__(self, cfg: LLMConfig, model_dir: Path, calls: Optional[CallLog] = None, model: Optional[GaugeLM] = None,
-                 tokenizer: Optional[BPETokenizer] = None):
+                 tokenizer: Optional[BPETokenizer] = None, device: str = "cpu"):
         self.cfg = cfg
         self.model_dir = model_dir
+        self.device = device
         self.model_name = "gaugelm"
         self.calls = calls or CallLog()
         self._lock = threading.Lock()
@@ -49,7 +50,7 @@ class NativeLLM:
             tr = NativeTrainer(self.model_dir)
             if not tr.exists():
                 raise LLMError("no native model trained yet: run `gauge native train`")
-            self._model, self._tok = tr.load()
+            self._model, self._tok = tr.load(device=self.device)
         return self._model, self._tok
 
     def available(self) -> bool:

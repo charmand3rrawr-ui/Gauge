@@ -502,7 +502,8 @@ def make_llm(cfg: LLMConfig, role: str = "main", calls: Optional[CallLog] = None
 
         from ..native.client import NativeLLM
 
-        return NativeLLM(cfg, Path(cfg.native_dir) if getattr(cfg, "native_dir", None) else Path("data/models/native"), calls)
+        return NativeLLM(cfg, Path(cfg.native_dir) if getattr(cfg, "native_dir", None) else Path("data/models/native"), calls,
+                         device=getattr(cfg, "native_device", "cpu") or "cpu")
     raise ValueError(f"unknown llm provider: {cfg.provider}")
 
 

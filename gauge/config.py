@@ -36,21 +36,29 @@ class LLMConfig(BaseModel):
     retry_backoff_seconds: float = 2.0
     structured_output: bool = True  # JSON-schema constrained output when the server supports it
     native_dir: str = ""  # filled in by GaugeConfig.load: where the built-in GaugeLM lives
+    native_device: str = "cpu"  # filled in by GaugeConfig.load from native.device
 
 
 class NativeConfig(BaseModel):
     """GaugeLM, the built-in model (llm.provider = "native"). Sizes are for a desktop CPU."""
 
+    size: str = "tiny"  # tiny | small | medium | large (see gauge native presets); overrides below when set
     n_layer: int = 4
     n_head: int = 4
     n_embd: int = 256
+    n_kv_head: int = 2
     block_size: int = 256
     vocab_size: int = 4096
+    arch: str = "llama"  # llama (RMSNorm, RoPE, SwiGLU, GQA) | gpt (legacy)
+    device: str = "auto"  # auto | cuda | cpu  (cuda needs: pip install cupy-cuda12x)
     steps: int = 2000
     batch_size: int = 8
+    accum_steps: int = 2
     lr: float = 6e-4
+    chat_weight: int = 3
     daemon_steps: int = 200  # continue-training steps per daemon cycle on new material
     daemon_minutes: int = 20  # time budget per cycle
+    distill_rows: int = 200  # teacher answers to collect per `gauge native distill` run
 
 
 class IngestConfig(BaseModel):
@@ -204,4 +212,5 @@ class GaugeConfig(BaseModel):
         else:
             cfg = cls(data_dir=str(root))
         cfg.llm.native_dir = str(cfg.native_dir)
+        cfg.llm.native_device = cfg.native.device
         return cfg

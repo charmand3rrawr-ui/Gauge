@@ -21,7 +21,8 @@ from typing import Any, Optional
 import numpy as np
 
 from ..db import Database
-from .model import AdamW, GaugeLM, ModelConfig
+from .backend import device_name
+from .model import PRESETS, AdamW, GaugeLM, ModelConfig
 from .tokenizer import BPETokenizer
 
 log = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ log = logging.getLogger(__name__)
 class TrainConfig:
     steps: int = 2000
     batch_size: int = 8
+    accum_steps: int = 1  # gradient accumulation: effective batch = batch_size * accum_steps
     lr: float = 6e-4
     min_lr: float = 6e-5
     warmup: int = 100
@@ -39,7 +41,19 @@ class TrainConfig:
     eval_every: int = 100
     checkpoint_every: int = 200
     max_corpus_chars: int = 20_000_000
+    chat_weight: int = 3  # instruction rows are repeated this many times (they are few and matter most)
+    curriculum: bool = True  # prose first, instruction rows concentrated in the last third of training
+    device: str = "cpu"  # cpu | cuda | auto
     seed: int = 0
+
+
+def preset_config(size: str, vocab_size: Optional[int] = None) -> ModelConfig:
+    if size not in PRESETS:
+        raise ValueError(f"unknown size {size!r}; choose from {', '.join(PRESETS)}")
+    cfg = ModelConfig(**PRESETS[size])
+    if vocab_size:
+        cfg.vocab_size = vocab_size
+    return cfg
 
 
 # --------------------------------------------------------------------------------------
@@ -66,7 +80,7 @@ def gather_texts(db: Database, projects_dir: Optional[Path] = None, datasets_dir
 
                     docs.append(("prose", re.sub(r"^#[^\n]*\n+", "", t)))
     if datasets_dir and datasets_dir.exists():
-        for name in ("sft.jsonl", "self_preference.jsonl", "author_edits.jsonl"):
+        for name in ("sft.jsonl", "self_preference.jsonl", "author_edits.jsonl", "distill.jsonl"):
             f = datasets_dir / name
             if not f.exists():
                 continue
@@ -79,11 +93,31 @@ def gather_texts(db: Database, projects_dir: Optional[Path] = None, datasets_dir
                     docs.append((f"chat:{r.get('instruction', '')}\n{r.get('input', '')}", r["output"]))
                 elif "chosen" in r:
                     docs.append((f"chat:{r.get('prompt', '')}", r["chosen"]))
-    return docs
+                elif "response" in r:
+                    docs.append((f"chat:{r.get('prompt', '')}", r["response"]))
+    return dedup(docs)
 
 
-def encode_corpus(tok: BPETokenizer, docs: list[tuple[str, str]], max_chars: int) -> np.ndarray:
-    ids: list[int] = []
+def dedup(docs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Drop exact and near-exact duplicates (same first 400 chars), keeping first occurrence."""
+    import hashlib
+
+    seen: set[str] = set()
+    out = []
+    for kind, text in docs:
+        key = hashlib.sha1((kind[:40] + text[:400]).encode("utf-8", errors="replace")).hexdigest()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((kind, text))
+    return out
+
+
+def encode_corpus(tok: BPETokenizer, docs: list[tuple[str, str]], max_chars: int, chat_weight: int = 1,
+                  split: bool = False):
+    """Token stream(s). With split=True returns (prose, chat) so training can schedule them."""
+    prose: list[int] = []
+    chat: list[int] = []
     used = 0
     for kind, text in docs:
         if used >= max_chars:
@@ -91,10 +125,14 @@ def encode_corpus(tok: BPETokenizer, docs: list[tuple[str, str]], max_chars: int
         text = text[: max_chars - used]
         used += len(text)
         if kind.startswith("chat:"):
-            ids.extend(tok.encode_chat(kind[5:], text))
+            row = tok.encode_chat(kind[5:], text)
+            for _ in range(max(1, chat_weight)):
+                chat.extend(row)
         else:
-            ids.extend(tok.encode(text, bos=True, eos=True))
-    return np.asarray(ids, dtype=np.int32)
+            prose.extend(tok.encode(text, bos=True, eos=True))
+    if split:
+        return np.asarray(prose, dtype=np.int32), np.asarray(chat, dtype=np.int32)
+    return np.asarray(prose + chat, dtype=np.int32)
 
 
 def batches(data: np.ndarray, block: int, batch: int, rng: np.random.Generator):
@@ -135,8 +173,8 @@ class NativeTrainer:
     def exists(self) -> bool:
         return (self.dir / "model.json").exists() and self.tok_path.exists()
 
-    def load(self) -> tuple[GaugeLM, BPETokenizer]:
-        return GaugeLM.load(self.dir), BPETokenizer.load(self.tok_path)
+    def load(self, device: str = "cpu") -> tuple[GaugeLM, BPETokenizer]:
+        return GaugeLM.load(self.dir, device=device), BPETokenizer.load(self.tok_path)
 
     # ---- tokenizer -----------------------------------------------------------------
     def build_tokenizer(self, docs: list[tuple[str, str]], vocab_size: int, max_chars: int = 3_000_000) -> BPETokenizer:
@@ -150,34 +188,57 @@ class NativeTrainer:
               progress: Optional[Callable[[dict[str, Any]], None]] = None, time_budget_s: Optional[float] = None) -> dict[str, Any]:
         rng = np.random.default_rng(tcfg.seed)
         if resume and self.exists():
-            model, tok = self.load()
+            model, tok = self.load(device=tcfg.device)
             st = self.status()
             step0 = int(st.get("step", 0))
         else:
             tok = self.build_tokenizer(docs, mcfg.vocab_size)
             mcfg.vocab_size = tok.vocab_size
-            model = GaugeLM(mcfg, seed=tcfg.seed)
+            model = GaugeLM(mcfg, seed=tcfg.seed, device=tcfg.device)
             step0 = 0
-        data = encode_corpus(tok, docs, tcfg.max_corpus_chars)
+        xp = model.xp
+        prose, chat = encode_corpus(tok, docs, tcfg.max_corpus_chars, chat_weight=tcfg.chat_weight, split=True)
+        data = np.concatenate([prose, chat]) if len(chat) else prose
         if len(data) < model.cfg.block_size * 4:
             raise ValueError(f"corpus too small: {len(data)} tokens. Ingest or import more text first.")
         n_val = max(model.cfg.block_size * 2, len(data) // 20)
         train_data, val_data = data[:-n_val], data[-n_val:]
-        opt = AdamW(model.p, lr=tcfg.lr, weight_decay=tcfg.weight_decay)
-        gen = batches(train_data, model.cfg.block_size, tcfg.batch_size, rng)
+        block = model.cfg.block_size
+        gen_all = batches(train_data, block, tcfg.batch_size, rng)
+        gen_prose = batches(prose, block, tcfg.batch_size, rng) if len(prose) > block + 1 else gen_all
+        gen_chat = batches(chat, block, tcfg.batch_size, rng) if len(chat) > block + 1 else gen_all
+        opt = AdamW(model.p, lr=tcfg.lr, weight_decay=tcfg.weight_decay, xp=xp)
         t0 = time.monotonic()
         losses: list[float] = []
         tokens_seen = int(self.status().get("tokens_seen", 0)) if resume else 0
         last_val = None
         step = step0
         total = step0 + tcfg.steps
+        log.info("training on %s: %s params, %d train tokens (%d chat)", device_name(xp), f"{model.n_params():,}", len(train_data), len(chat))
         while step < total:
-            x, y = next(gen)
-            _, loss, caches = model.forward(x, y)
-            grads = model.backward(caches)
+            # Curriculum: mostly prose early, instruction rows concentrated late (they teach behaviour).
+            frac = (step - step0) / max(1, tcfg.steps)
+            grads = None
+            for _ in range(max(1, tcfg.accum_steps)):
+                if tcfg.curriculum and len(chat) > block + 1 and rng.random() < (0.15 if frac < 0.66 else 0.6):
+                    x, y = next(gen_chat)
+                elif tcfg.curriculum and len(prose) > block + 1:
+                    x, y = next(gen_prose)
+                else:
+                    x, y = next(gen_all)
+                _, loss, caches = model.forward(x, y)
+                g = model.backward(caches)
+                if grads is None:
+                    grads = g
+                else:
+                    for k in grads:
+                        grads[k] += g[k]
+                losses.append(loss)
+                tokens_seen += x.size
+            if tcfg.accum_steps > 1:
+                for k in grads:
+                    grads[k] /= tcfg.accum_steps
             norm = opt.step(model.p, grads, lr=lr_at(step - step0, tcfg), clip=tcfg.grad_clip)
-            losses.append(loss)
-            tokens_seen += x.size
             step += 1
             if step % tcfg.eval_every == 0 or step == total:
                 last_val = self.evaluate(model, val_data, rng, batches_n=4)
@@ -193,9 +254,12 @@ class NativeTrainer:
                 break
         return {"step": step, "loss": round(float(np.mean(losses[-50:])), 4) if losses else None,
                 "val_loss": round(last_val, 4) if last_val is not None else None, "tokens_seen": tokens_seen,
-                "seconds": round(time.monotonic() - t0, 1), "n_params": model.n_params(), "corpus_tokens": int(len(data))}
+                "seconds": round(time.monotonic() - t0, 1), "n_params": model.n_params(), "corpus_tokens": int(len(data)),
+                "device": device_name(xp), "arch": model.cfg.arch}
 
     def evaluate(self, model: GaugeLM, data: np.ndarray, rng: np.random.Generator, batches_n: int = 4) -> float:
+        if len(data) <= model.cfg.block_size + 1:
+            return float("nan")
         gen = batches(data, model.cfg.block_size, 4, rng)
         vals = []
         for _ in range(batches_n):
@@ -209,13 +273,13 @@ class NativeTrainer:
                                                "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S")}, indent=1), encoding="utf-8")
 
     def continue_training(self, docs: list[tuple[str, str]], steps: int, time_budget_s: Optional[float] = None,
-                          progress: Optional[Callable[[dict[str, Any]], None]] = None) -> dict[str, Any]:
+                          progress: Optional[Callable[[dict[str, Any]], None]] = None, device: str = "cpu") -> dict[str, Any]:
         """Keep learning from new material without resetting weights (the daemon's path)."""
         if not self.exists():
             raise FileNotFoundError("no native model yet; run `gauge native train` first")
-        model, _ = self.load()
+        model, _ = self.load(device=device)
         tcfg = TrainConfig(steps=steps, warmup=min(20, steps), lr=2e-4, min_lr=5e-5, eval_every=max(10, steps // 4),
-                           checkpoint_every=max(10, steps // 2))
+                           checkpoint_every=max(10, steps // 2), device=device)
         return self.train(docs, model.cfg, tcfg, resume=True, progress=progress, time_budget_s=time_budget_s)
 
 

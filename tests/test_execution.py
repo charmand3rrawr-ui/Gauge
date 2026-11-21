@@ -156,7 +156,7 @@ def _trained(cfg, db, chapter_text):
 def test_pipeline_uses_fast_model_parallel_and_skips_light_mentions(cfg, db, chapter_text):
     cfg.llm.parallel = 3
     t = _trained(cfg, db, chapter_text)
-    main, fast = FakeLLM(delay=0.02), FakeLLM(delay=0.02)
+    main, fast = FakeLLM(delay=0.05), FakeLLM(delay=0.05)
     pipe = WritePipeline(cfg, db, llm=main, trainer=t, fast_llm=fast)
     assert main.calls is fast.calls is pipe.calls
     p = pipe.new_project("Ten Seconds", "a courier", ["Sci-fi"], words=300)
@@ -175,8 +175,8 @@ def test_pipeline_uses_fast_model_parallel_and_skips_light_mentions(cfg, db, cha
     assert "critic" in purposes and "summary" in purposes
     main_purposes = {c["purpose"] for c in main.calls_list}
     assert "draft" in main_purposes and not {"critic", "summary", "character:brief"} & main_purposes
-    # briefs ran in parallel: 3 x 20ms delay finished well under 60ms
-    assert res.timings["briefs"] < 0.055
+    # briefs ran in parallel: 3 x 50ms delay would take 150ms sequentially
+    assert res.timings["briefs"] < 0.12
     assert res.llm_calls == len(pipe.calls.records) - before and res.llm_seconds >= 0
     assert set(res.timings) >= {"briefs", "draft", "critique", "memory", "total"}
     # telemetry landed in the database, tagged with the project and chapter

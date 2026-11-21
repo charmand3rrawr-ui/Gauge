@@ -62,7 +62,8 @@ class Daemon:
                     since = (started - timedelta(days=1)).isoformat()
                     docs = gather_texts(self.db, self.cfg.projects_dir, self.cfg.models_dir / "datasets", since=since) or \
                         gather_texts(self.db, self.cfg.projects_dir, self.cfg.models_dir / "datasets")
-                    out["native"] = tr.continue_training(docs, self.cfg.native.daemon_steps, time_budget_s=self.cfg.native.daemon_minutes * 60)
+                    out["native"] = tr.continue_training(docs, self.cfg.native.daemon_steps, time_budget_s=self.cfg.native.daemon_minutes * 60,
+                                                         device=self.cfg.native.device)
                 except Exception as e:
                     log.exception("native training failed: %s", e)
                     out["native"] = f"failed: {e}"

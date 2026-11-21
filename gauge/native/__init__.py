@@ -1,7 +1,7 @@
 """GaugeLM: Gauge's own language model. Pure Python + numpy; no outside model code or weights."""
 from .client import NativeLLM
-from .model import AdamW, GaugeLM, ModelConfig
+from .model import PRESETS, AdamW, GaugeLM, ModelConfig
 from .tokenizer import BPETokenizer
-from .train import NativeTrainer, TrainConfig, gather_texts
+from .train import NativeTrainer, TrainConfig, gather_texts, preset_config
 
-__all__ = ["NativeLLM", "AdamW", "GaugeLM", "ModelConfig", "BPETokenizer", "NativeTrainer", "TrainConfig", "gather_texts"]
+__all__ = ["NativeLLM", "PRESETS", "AdamW", "GaugeLM", "ModelConfig", "BPETokenizer", "NativeTrainer", "TrainConfig", "gather_texts", "preset_config"]

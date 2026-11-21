@@ -1324,31 +1324,54 @@ def _native_docs(c: Ctx, since: Optional[str] = None):
 
 
 @native.command("train")
+@click.option("--size", type=click.Choice(["tiny", "small", "medium", "large"]), default=None, help="Preset architecture.")
 @click.option("--steps", type=int, default=None)
 @click.option("--layers", type=int, default=None)
 @click.option("--embd", type=int, default=None)
 @click.option("--heads", type=int, default=None)
+@click.option("--kv-heads", type=int, default=None, help="Grouped-query attention: fewer key/value heads.")
 @click.option("--block", type=int, default=None)
 @click.option("--vocab", type=int, default=None)
 @click.option("--batch", type=int, default=None)
+@click.option("--accum", type=int, default=None, help="Gradient accumulation steps.")
+@click.option("--arch", type=click.Choice(["llama", "gpt"]), default=None)
+@click.option("--device", type=click.Choice(["auto", "cuda", "cpu"]), default=None)
 @click.option("--resume", is_flag=True, help="Continue from the saved weights instead of starting over.")
 @click.option("--minutes", type=float, default=None, help="Stop after this many minutes (checkpoint is saved).")
 @click.pass_obj
-def native_train(c: Ctx, steps, layers, embd, heads, block, vocab, batch, resume, minutes) -> None:
+def native_train(c: Ctx, size, steps, layers, embd, heads, kv_heads, block, vocab, batch, accum, arch, device, resume, minutes) -> None:
     """Train (or keep training) GaugeLM on everything Gauge has read plus your own chapters."""
-    from .native import ModelConfig, NativeTrainer, TrainConfig
+    from .native import ModelConfig, NativeTrainer, TrainConfig, preset_config
 
     n = c.cfg.native
-    mcfg = ModelConfig(vocab_size=vocab or n.vocab_size, block_size=block or n.block_size, n_layer=layers or n.n_layer,
-                       n_head=heads or n.n_head, n_embd=embd or n.n_embd)
-    tcfg = TrainConfig(steps=steps or n.steps, batch_size=batch or n.batch_size, lr=n.lr)
+    if size or (n.size and not any([layers, embd, heads, block])):
+        mcfg = preset_config(size or n.size, vocab)
+    else:
+        mcfg = ModelConfig(vocab_size=vocab or n.vocab_size, block_size=block or n.block_size, n_layer=layers or n.n_layer,
+                           n_head=heads or n.n_head, n_embd=embd or n.n_embd, n_kv_head=n.n_kv_head)
+    if layers:
+        mcfg.n_layer = layers
+    if embd:
+        mcfg.n_embd = embd
+    if heads:
+        mcfg.n_head = heads
+    if kv_heads is not None:
+        mcfg.n_kv_head = kv_heads
+    if block:
+        mcfg.block_size = block
+    if vocab:
+        mcfg.vocab_size = vocab
+    mcfg.arch = arch or n.arch
+    tcfg = TrainConfig(steps=steps or n.steps, batch_size=batch or n.batch_size, lr=n.lr, accum_steps=accum or n.accum_steps,
+                       chat_weight=n.chat_weight, device=device or n.device)
     docs = _native_docs(c)
     if not docs:
         console.print("[red]nothing to train on[/]: ingest or import some novels first")
         sys.exit(1)
     chars = sum(len(t) for _, t in docs)
-    console.print(f"corpus: {len(docs)} documents, {chars:,} characters. model: {mcfg.n_layer} layers x {mcfg.n_embd} dims, block {mcfg.block_size}")
-    console.print("Training on CPU with numpy. This is slow by design: a few thousand tokens per second. Ctrl+C keeps the last checkpoint.")
+    console.print(f"corpus: {len(docs)} documents, {chars:,} characters. model: {mcfg.arch}, {mcfg.n_layer} layers x {mcfg.n_embd} dims, "
+                  f"{mcfg.n_head} heads ({mcfg.kv_heads} kv), block {mcfg.block_size}, effective batch {tcfg.batch_size * tcfg.accum_steps}")
+    console.print(f"device: {tcfg.device}. Run `gauge native bench --size {size or n.size}` first to see how long this will take. Ctrl+C keeps the last checkpoint.")
     tr = NativeTrainer(c.cfg.native_dir)
 
     def progress(rec):
@@ -1374,7 +1397,8 @@ def native_continue(c: Ctx, steps, minutes) -> None:
     tr = NativeTrainer(c.cfg.native_dir)
     docs = _native_docs(c)
     res = tr.continue_training(docs, steps or c.cfg.native.daemon_steps, time_budget_s=(minutes or c.cfg.native.daemon_minutes) * 60,
-                               progress=lambda r: console.print(f"  step {r['step']} loss {r['loss']:.3f} val {r['val_loss']:.3f}"))
+                               progress=lambda r: console.print(f"  step {r['step']} loss {r['loss']:.3f} val {r['val_loss']:.3f}"),
+                               device=c.cfg.native.device)
     console.print_json(json.dumps(res))
 
 
@@ -1396,11 +1420,77 @@ def native_sample(c: Ctx, prompt: str, tokens: int, temperature: float) -> None:
     """Generate text with GaugeLM."""
     from .native import NativeLLM
 
-    llm = NativeLLM(c.cfg.llm, c.cfg.native_dir)
+    llm = NativeLLM(c.cfg.llm, c.cfg.native_dir, device=c.cfg.native.device)
     if not llm.available():
         console.print("[red]no native model yet[/]; run `gauge native train`")
         sys.exit(1)
     console.print(llm.generate(prompt, max_tokens=tokens, temperature=temperature, purpose="sample"))
+
+
+@native.command("presets")
+def native_presets() -> None:
+    """The preset sizes and their parameter counts."""
+    from .native.evaluate import preset_table
+
+    table = Table(title="GaugeLM presets")
+    for col in ("size", "layers", "embd", "heads", "kv", "block", "vocab", "params (M)"):
+        table.add_column(col)
+    for r in preset_table():
+        table.add_row(r["size"], str(r["n_layer"]), str(r["n_embd"]), str(r["n_head"]), str(r["n_kv_head"]), str(r["block_size"]),
+                      str(r["vocab_size"]), str(r["params_millions"]))
+    console.print(table)
+    console.print("tiny trains on a CPU in hours; small needs a day on CPU or an hour on a GPU; medium and large want a GPU (pip install cupy-cuda12x).")
+
+
+@native.command("bench")
+@click.option("--size", type=click.Choice(["tiny", "small", "medium", "large"]), default="tiny", show_default=True)
+@click.option("--device", type=click.Choice(["auto", "cuda", "cpu"]), default=None)
+@click.option("--batch", type=int, default=4, show_default=True)
+@click.pass_obj
+def native_bench(c: Ctx, size: str, device: Optional[str], batch: int) -> None:
+    """Measure training and generation speed for a preset on this machine, and the hours a run would take."""
+    from .native.evaluate import bench
+
+    console.print(f"benchmarking {size} on {device or c.cfg.native.device} ...")
+    console.print_json(json.dumps(bench(size, device or c.cfg.native.device, batch_size=batch)))
+
+
+@native.command("distill")
+@click.option("--rows", type=int, default=None, help="Teacher answers to collect (default native.distill_rows).")
+@click.pass_obj
+def native_distill(c: Ctx, rows: Optional[int]) -> None:
+    """Collect answers from the big local model on Gauge's own tasks, so GaugeLM can learn the behaviour."""
+    from .llm import make_llm
+    from .native.distill import distill, distill_summary
+
+    if c.cfg.llm.provider == "native":
+        console.print("[red]the teacher must be a bigger model[/]: set llm.provider to ollama/openai (gauge init --provider ollama) for distillation")
+        sys.exit(1)
+    teacher = make_llm(c.cfg.llm, "main")
+    if not teacher.available():
+        console.print(f"[red]teacher not reachable[/] ({teacher.describe()})")
+        sys.exit(1)
+    out = c.cfg.models_dir / "datasets" / "distill.jsonl"
+    res = distill(c.db, teacher, out, rows or c.cfg.native.distill_rows,
+                  progress=lambda r: console.print(f"  {r['written']} rows ({r['failed']} failed)"))
+    console.print_json(json.dumps(res))
+    console.print(f"by task: {distill_summary(out)}\nNext: gauge native train --resume  (instruction rows are upweighted)")
+
+
+@native.command("eval")
+@click.option("--probe/--no-probe", default=True, help="Also run the instruction-shape probes.")
+@click.pass_obj
+def native_eval(c: Ctx, probe: bool) -> None:
+    """Held-out perplexity and instruction-shape probes for the native model."""
+    from .native import NativeLLM
+    from .native.evaluate import evaluate_model
+
+    texts = [ch.text for n in c.db.novels()[:20] for ch in c.db.chapters(n.key)[-1:]]
+    llm = NativeLLM(c.cfg.llm, c.cfg.native_dir, device=c.cfg.native.device) if probe else None
+    if llm is not None and not llm.available():
+        console.print("[red]no native model yet[/]")
+        sys.exit(1)
+    console.print_json(json.dumps(evaluate_model(c.cfg.native_dir, texts, llm, device=c.cfg.native.device), default=str))
 
 
 @native.command("tokenizer")
