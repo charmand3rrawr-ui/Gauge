@@ -52,6 +52,40 @@ auto-posting into communities you don't own (`cross_community_post`) are refused
 This is social-media management of your own presence, the way a scheduling tool works — not outreach
 into communities, and not anything that pretends automated promotion is organic activity.
 
+### Publishing for real
+
+Adapters ship for platforms with clean official posting APIs: Mastodon, Bluesky, Telegram (your own
+channel), Discord (a webhook on your own server), and a generic webhook to any endpoint you run. Add
+`--send` to `gauge market social`, with the platform's credentials in the environment:
+
+```
+GAUGE_MASTODON_URL, GAUGE_MASTODON_TOKEN
+GAUGE_BLUESKY_APP_PASSWORD
+GAUGE_TELEGRAM_BOT_TOKEN, GAUGE_TELEGRAM_CHAT_ID
+GAUGE_DISCORD_WEBHOOK_URL
+GAUGE_WEBHOOK_URL
+```
+
+Credentials live in the environment, never in `config.json`. Each adapter runs the owned-account guard
+on every post and, without its credentials, stays a dry run and says what is missing. Platforms whose
+APIs need your own registered OAuth app (X/Twitter, Meta, LinkedIn, Reddit) are reached through a
+webhook to a small service you run that holds those tokens — Gauge never holds them.
+
+## Your opt-in mailing list
+
+The one channel you own outright. `gauge market subscribers import FILE` imports a list you exported of
+people who **signed up** — each row must carry consent (a signup/consent date, or an opt-in flag), and
+rows without it are refused, not stored. `gauge market subscribers unsubscribe EMAIL` marks someone
+gone, and a later import will not resurrect them.
+
+`gauge market newsletter PROJECT --url LINK --chapter TITLE` composes a new-chapter email and, by
+default, previews it to your consented subscribers without sending. Every message carries your sender
+identity and a working unsubscribe link — `send_newsletter` refuses to run without both, and only ever
+sends to addresses still marked subscribed. To send for real, pass `--from-name`, `--from-email`,
+`--unsubscribe-url` and `--send`, with your own SMTP server in `GAUGE_SMTP_HOST` / `GAUGE_SMTP_USER` /
+`GAUGE_SMTP_PASSWORD`. Gauge will not import a list without consent (`email_nonconsent`), and bought or
+scraped lists (`purchase_list`) are refused outright.
+
 ## Doing it right
 
 The durable channel is the one you own: a steady release schedule and a mailing list grown from a link

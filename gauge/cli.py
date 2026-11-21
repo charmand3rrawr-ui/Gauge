@@ -1253,8 +1253,9 @@ def market_plan(c: Ctx, project: str, url: str) -> None:
 @click.option("--weeks", type=int, default=4, show_default=True)
 @click.option("--per-week", type=int, default=3, show_default=True)
 @click.option("--url", default="", help="Your story's link.")
+@click.option("--send", "do_send", is_flag=True, help="Actually publish via each platform's official API (needs credentials in the environment).")
 @click.pass_obj
-def market_social(c: Ctx, project: str, accounts: tuple, weeks: int, per_week: int, url: str) -> None:
+def market_social(c: Ctx, project: str, accounts: tuple, weeks: int, per_week: int, url: str, do_send: bool) -> None:
     """Plan a social content calendar for accounts you OWN: distinct posts, varied by angle, disclosed.
     This previews what would post (a dry run); Gauge ships no live poster and never posts to accounts you
     don't own or varies content to dodge spam filters. Live posting plugs in via each platform's official API."""
@@ -1281,12 +1282,121 @@ def market_social(c: Ctx, project: str, accounts: tuple, weeks: int, per_week: i
         sys.exit(1)
     out = proj.dir / "social_calendar.md"
     out.write_text(calendar_markdown(cal), encoding="utf-8")
-    results = publish(cal)  # dry run: posts nothing
+    from .market.posters import RoutingPoster
+    poster = RoutingPoster(dry_run=not do_send)
+    results = publish(cal, poster)
+    sent = sum(1 for r in results if r.get("posted"))
+    previewed = sum(1 for r in results if r.get("dry_run"))
     console.print(f"[green]planned[/] {len(cal)} posts across {len(owned)} of your accounts -> {out}")
-    console.print(f"dry run: {sum(1 for r in results if r.get('dry_run'))} post(s) previewed, 0 sent.")
-    for r in results[:4]:
-        console.print(f"  [{r.get('platform')}] {r.get('angle')}: {r.get('preview', '')[:70]}")
-    console.print("To publish, wire your platform's official API to the Poster interface; the owned-account guard still applies.")
+    console.print(f"{'sent ' + str(sent) + ' post(s)' if do_send else 'dry run: ' + str(previewed) + ' previewed'}, "
+                  f"{'' if do_send else '0 sent'}")
+    for r in results[:6]:
+        if r.get("refused"):
+            console.print(f"  [yellow]refused:[/] {r['refused']}")
+        elif r.get("error"):
+            console.print(f"  [red]error:[/] {r['error']}")
+        elif r.get("note"):
+            console.print(f"  [{r.get('platform')}] not sent: {r['note']}")
+        else:
+            console.print(f"  [{r.get('platform')}] {r.get('angle', '')}: {r.get('preview', r.get('id', 'ok'))}"[:90])
+    if not do_send:
+        console.print("This was a dry run. Add --send with your platform credentials in the environment to publish to your own accounts.")
+
+
+@market.group()
+def subscribers() -> None:
+    """Your opt-in mailing list: people who signed up. Import, list, and honour unsubscribes."""
+
+
+@subscribers.command("import")
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_obj
+def subscribers_import(c: Ctx, path: str) -> None:
+    """Import a list you exported of people who signed up (CSV/JSON). Rows must carry consent (a
+    signup/consent date or an opt-in flag); rows without it are refused, not stored."""
+    import csv as _csv
+    import json as _json
+
+    p = Path(path)
+    if p.suffix.lower() == ".json":
+        rows = _json.loads(p.read_text(encoding="utf-8"))
+        rows = rows if isinstance(rows, list) else rows.get("subscribers", [])
+    else:
+        with p.open(encoding="utf-8", newline="") as fh:
+            rows = list(_csv.DictReader(fh))
+    from .market.email_list import import_subscribers
+
+    s = import_subscribers(c.db, rows, source=p.name)
+    console.print(f"[green]added {s['added']}[/]  already {s['already']}  kept-unsubscribed {s['kept_unsubscribed']}  "
+                  f"[yellow]refused: no-consent {s['no_consent']}, invalid-email {s['invalid_email']}[/]")
+
+
+@subscribers.command("list")
+@click.pass_obj
+def subscribers_list(c: Ctx) -> None:
+    """Counts by status."""
+    counts = c.db.subscriber_counts()
+    console.print("subscribers: " + (", ".join(f"{k} {v}" for k, v in counts.items()) or "(none yet)"))
+
+
+@subscribers.command("unsubscribe")
+@click.argument("email")
+@click.pass_obj
+def subscribers_unsub(c: Ctx, email: str) -> None:
+    """Mark one address unsubscribed (it will never be re-added by a later import)."""
+    from .market.email_list import unsubscribe
+
+    ok = unsubscribe(c.db, email)
+    console.print(f"[green]unsubscribed[/] {email}" if ok else f"[yellow]no such subscriber[/] {email}")
+
+
+@market.command("newsletter")
+@click.argument("project")
+@click.option("--url", default="", help="The link to the latest chapter / the story.")
+@click.option("--chapter", "chapter_title", default="", help="Latest chapter title, if announcing one.")
+@click.option("--from-name", "from_name", default="", help="Sender name (required to send).")
+@click.option("--from-email", "from_email", default="", help="Sender email (required to send).")
+@click.option("--address", default="", help="Your postal address (CAN-SPAM requires one in commercial email).")
+@click.option("--unsubscribe-url", "unsub", default="", help="Base URL for one-click unsubscribe.")
+@click.option("--send", "do_send", is_flag=True, help="Actually send via SMTP (needs GAUGE_SMTP_* in the environment).")
+@click.pass_obj
+def market_newsletter(c: Ctx, project: str, url: str, chapter_title: str, from_name: str, from_email: str,
+                      address: str, unsub: str, do_send: bool) -> None:
+    """Email your opt-in list about a new chapter. Dry run by default: previews to consented subscribers,
+    sends nothing. Every message carries your identity and an unsubscribe link."""
+    from .market.email_list import Sender, build_newsletter, send_newsletter
+    from .market.launchkit import build_launch_kit
+
+    pipe = _pipeline_or_exit(c)
+    proj = pipe.open_project(project)
+    kit = build_launch_kit(pipe.llm, proj)
+    nl = build_newsletter(kit, url=url, chapter_title=chapter_title)
+    sender = Sender(from_name or "the author", from_email or "", postal_address=address)
+    subscribed = len(c.db.subscribers(status="subscribed"))
+    console.print(f"[bold]{nl.subject}[/]")
+    if not do_send:
+        from .market.email_list import render_message
+        preview = render_message(nl, "subscriber@example.com", sender, unsub or "https://your-site/unsubscribe")
+        console.print("--- preview (not sent) ---")
+        console.print(preview)
+        console.print("--------------------------")
+        console.print(f"would go to {subscribed} consented, subscribed recipient(s). DRY RUN, 0 sent.")
+        console.print("To send: --from-name, --from-email, --unsubscribe-url, and --send with GAUGE_SMTP_* in the environment.")
+        return
+    import os
+    host = os.environ.get("GAUGE_SMTP_HOST")
+    if not host:
+        console.print("[red]--send needs GAUGE_SMTP_HOST (and GAUGE_SMTP_USER / GAUGE_SMTP_PASSWORD) in the environment[/]")
+        sys.exit(1)
+    from .market.email_list import SMTPMailer
+    mailer = SMTPMailer(host, int(os.environ.get("GAUGE_SMTP_PORT", "587")),
+                        os.environ.get("GAUGE_SMTP_USER", ""), os.environ.get("GAUGE_SMTP_PASSWORD", ""))
+    try:
+        res = send_newsletter(c.db, nl, sender, unsub, mailer)
+    except PermissionError as e:
+        console.print(f"[red]refused:[/] {e}")
+        sys.exit(1)
+    console.print(f"sent {res['sent']} of {res['recipients']} consented subscriber(s); {res['failed']} failed.")
 
 
 @main.command()

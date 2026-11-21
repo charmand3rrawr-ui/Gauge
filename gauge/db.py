@@ -90,6 +90,10 @@ CREATE TABLE IF NOT EXISTS feedback (
     project TEXT NOT NULL, chapter INTEGER NOT NULL, views REAL, comments REAL, likes REAL, at TEXT,
     PRIMARY KEY (project, chapter)
 );
+CREATE TABLE IF NOT EXISTS subscribers (
+    email TEXT PRIMARY KEY, name TEXT, status TEXT NOT NULL DEFAULT 'subscribed',
+    consent_at TEXT, source TEXT, at TEXT
+);
 CREATE TABLE IF NOT EXISTS comments (
     novel_key TEXT NOT NULL, idx INTEGER NOT NULL, author TEXT, text TEXT, at TEXT, hash TEXT,
     PRIMARY KEY (novel_key, idx, hash)
@@ -418,6 +422,36 @@ class Database:
     def feedback(self, project: str) -> dict[int, dict[str, Optional[float]]]:
         rows = self._conn.execute("SELECT chapter, views, comments, likes FROM feedback WHERE project=? ORDER BY chapter", (project,))
         return {int(r[0]): {"views": r[1], "comments": r[2], "likes": r[3]} for r in rows}
+
+    # ---- opt-in mailing list (people who signed up) ---------------------------------
+    def add_subscriber(self, email: str, name: str, consent_at: str, source: str) -> str:
+        """Add a consented subscriber. Never resurrects someone who unsubscribed. Returns the outcome."""
+        with self.tx() as c:
+            existing = c.execute("SELECT status FROM subscribers WHERE email=?", (email,)).fetchone()
+            if existing:
+                if existing[0] == "unsubscribed":
+                    return "kept_unsubscribed"  # consent was withdrawn; do not re-add
+                return "already"
+            c.execute("INSERT INTO subscribers (email, name, status, consent_at, source, at) VALUES (?,?,?,?,?,?)",
+                      (email, name, "subscribed", consent_at, source, utcnow().isoformat()))
+            return "added"
+
+    def set_subscriber_status(self, email: str, status: str) -> bool:
+        with self.tx() as c:
+            cur = c.execute("UPDATE subscribers SET status=?, at=? WHERE email=?", (status, utcnow().isoformat(), email))
+            return cur.rowcount > 0
+
+    def subscribers(self, status: Optional[str] = None) -> list[dict[str, Any]]:
+        q = "SELECT email, name, status, consent_at, source FROM subscribers"
+        args: tuple = ()
+        if status:
+            q += " WHERE status=?"
+            args = (status,)
+        return [dict(r) for r in self._conn.execute(q + " ORDER BY at", args)]
+
+    def subscriber_counts(self) -> dict[str, int]:
+        rows = self._conn.execute("SELECT status, COUNT(*) FROM subscribers GROUP BY status")
+        return {str(r[0]): int(r[1]) for r in rows}
 
     # ---- reader comments on ingested chapters --------------------------------------
     def add_comments(self, novel_key: str, idx: int, comments: list[dict[str, Any]]) -> int:

@@ -10,4 +10,5 @@ from .policy import ALLOWED, DISCLOSURE, REFUSED, check_action
 
 __all__ = ["CHANNELS", "channel", "channels_for", "LaunchKit", "build_launch_kit", "posting_plan",
            "ALLOWED", "REFUSED", "DISCLOSURE", "check_action",
-           "OwnedAccount", "SocialPost", "DryRunPoster", "content_calendar", "publish", "calendar_markdown"]
+           "OwnedAccount", "SocialPost", "DryRunPoster", "content_calendar", "publish", "calendar_markdown",
+           "make_poster", "RoutingPoster", "import_subscribers", "unsubscribe", "build_newsletter", "send_newsletter", "Sender", "Newsletter", "DryRunMailer"]

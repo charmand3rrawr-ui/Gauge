@@ -16,6 +16,7 @@ ALLOWED = {
     "plan": "produce a checklist of where and how to share, with each community's rules and disclosure",
     "channel_guidance": "explain a community's self-promotion rules",
     "schedule_own": "schedule and publish posts to accounts the author owns, via the platform's official API, disclosed",
+    "email_optin": "send to a mailing list of people who signed up, with sender identity and an unsubscribe link in every message",
 }
 
 # Things Gauge refuses, with the reason. These have no implementation here by design.
@@ -32,6 +33,8 @@ REFUSED = {
     "reply_bot": "auto-replying into strangers' threads to inject the book is spam, however it is worded",
     "cross_community_post": "auto-posting into communities or accounts the author does not own is spam",
     "evade_spam_detection": "varying content to slip past a platform's abuse detection is defeating its controls",
+    "email_nonconsent": "emailing people who did not sign up is spam and breaks anti-spam law (CAN-SPAM, GDPR, CASL)",
+    "purchase_list": "bought, scraped or harvested email lists are never consented; sending to them is spam",
 }
 
 # Every drafted post carries this, so promotion is never passed off as something else.
