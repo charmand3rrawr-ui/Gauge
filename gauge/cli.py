@@ -2061,6 +2061,49 @@ def scout_log(c: Ctx, project: Optional[str]) -> None:
     console.print(table)
 
 
+# ---------------------------------------------------------------------------- corpus (training library)
+@main.group()
+def corpus() -> None:
+    """Compile the training library the AI learns from — only text you may train on, licence-tracked."""
+
+
+@corpus.command("stats")
+@click.option("--include-third-party", is_flag=True, help="Also count scraped third-party fiction (copyrighted; off by default).")
+@click.pass_obj
+def corpus_stats(c: Ctx, include_third_party: bool) -> None:
+    """Show what the training library would contain, by source and licence, with excluded counts."""
+    from .learn.corpus import compile_corpus
+
+    rep = compile_corpus(c.db, c.cfg.projects_dir, include_third_party=include_third_party)
+    console.print(f"[bold]Training library[/]: {len(rep.docs)} documents, ~{rep.est_tokens:,} tokens")
+    for src, info in sorted(rep.by_source().items(), key=lambda kv: -kv[1]["chars"]):
+        console.print(f"  {src:<12} {info['docs']:>4} docs  {info['chars'] // 1000:>6}k chars  [{info['permission']}]  {info['note']}")
+    if rep.excluded:
+        console.print(f"[yellow]excluded[/] {len(rep.excluded)} third-party docs from {', '.join(sorted({d.source for d in rep.excluded}))} "
+                      "(copyrighted; use --include-third-party only for text you hold the rights to)")
+
+
+@corpus.command("build")
+@click.option("--out", default=None, help="Output directory (default: data/models/corpus).")
+@click.option("--include-third-party", is_flag=True, help="Include scraped third-party fiction (copyrighted; your legal call).")
+@click.pass_obj
+def corpus_build(c: Ctx, out: Optional[str], include_third_party: bool) -> None:
+    """Compile and export the training library (corpus.jsonl + corpus.txt + a licence MANIFEST)."""
+    from .learn.corpus import compile_corpus, export_corpus
+
+    rep = compile_corpus(c.db, c.cfg.projects_dir, include_third_party=include_third_party)
+    if not rep.docs:
+        console.print("[yellow]nothing to compile[/]: import public-domain books (`gauge scout gutenberg`), your own "
+                      "files (`gauge import`), or write chapters first.")
+        return
+    dest = Path(out) if out else (c.cfg.models_dir / "corpus")
+    manifest = export_corpus(rep, dest)
+    console.print(f"[green]compiled[/] {manifest['documents']} documents (~{manifest['est_tokens']:,} tokens) -> {dest}")
+    console.print(f"  sources: {', '.join(manifest['by_source'])}")
+    if include_third_party:
+        console.print("[yellow]note:[/] third-party copyrighted text was included at your request; ensure you hold the rights.")
+
+
 # ---------------------------------------------------------------------------- native model (GaugeLM)
 @main.group()
 def native() -> None:
