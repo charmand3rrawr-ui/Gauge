@@ -34,6 +34,24 @@ These are not throttled or gated-behind-a-switch; they are absent. The legitimat
 a rules-respecting plan a human executes with disclosure — is the version that actually gets a book
 read instead of banned.
 
+## Social PR on accounts you own
+
+`gauge market social PROJECT --account platform:handle [--weeks N] [--per-week K] --url LINK` plans a
+content calendar for accounts **you own**: distinct posts varied by angle (teaser, quote, logline,
+invitation), scheduled across the weeks, each carrying your story link. It is a dry run — it previews
+what would post and sends nothing. Live posting plugs in per platform through that platform's official
+API, behind the same guard.
+
+The guard (`gauge/market/social.py`) will only post to an account the caller affirms it owns
+(`i_own_this`) and that uses the official API; there is no code for engagement, replies, DMs, or other
+people's communities. The variety between posts exists because repeating one post is low-quality
+marketing — it is not, and the policy refuses, variation to slip past spam detection
+(`evade_spam_detection`). Buying or botting engagement (`buy_engagement`), reply-bots (`reply_bot`) and
+auto-posting into communities you don't own (`cross_community_post`) are refused and unimplemented.
+
+This is social-media management of your own presence, the way a scheduling tool works — not outreach
+into communities, and not anything that pretends automated promotion is organic activity.
+
 ## Doing it right
 
 The durable channel is the one you own: a steady release schedule and a mailing list grown from a link

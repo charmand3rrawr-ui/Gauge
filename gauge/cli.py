@@ -1247,6 +1247,48 @@ def market_plan(c: Ctx, project: str, url: str) -> None:
     console.print("Gauge drafted these; you post them yourself, under your own account, following each venue's rules.")
 
 
+@market.command("social")
+@click.argument("project")
+@click.option("--account", "accounts", multiple=True, help="An account you OWN, as platform:handle (repeatable).")
+@click.option("--weeks", type=int, default=4, show_default=True)
+@click.option("--per-week", type=int, default=3, show_default=True)
+@click.option("--url", default="", help="Your story's link.")
+@click.pass_obj
+def market_social(c: Ctx, project: str, accounts: tuple, weeks: int, per_week: int, url: str) -> None:
+    """Plan a social content calendar for accounts you OWN: distinct posts, varied by angle, disclosed.
+    This previews what would post (a dry run); Gauge ships no live poster and never posts to accounts you
+    don't own or varies content to dodge spam filters. Live posting plugs in via each platform's official API."""
+    from .market.launchkit import build_launch_kit
+    from .market.social import OwnedAccount, calendar_markdown, content_calendar, publish
+
+    if not accounts:
+        console.print("[yellow]name at least one account you own[/], e.g. --account mastodon:yourhandle")
+        return
+    owned = []
+    for a in accounts:
+        platform, _, handle = a.partition(":")
+        if not handle:
+            console.print(f"[red]bad account {a!r}[/]; use platform:handle")
+            sys.exit(1)
+        owned.append(OwnedAccount(platform.strip(), handle.strip(), official_api=True, i_own_this=True))
+    pipe = _pipeline_or_exit(c)
+    proj = pipe.open_project(project)
+    kit = build_launch_kit(pipe.llm, proj)
+    try:
+        cal = content_calendar(kit, owned, weeks=weeks, per_week=per_week, url=url)
+    except PermissionError as e:
+        console.print(f"[red]{e}[/]")
+        sys.exit(1)
+    out = proj.dir / "social_calendar.md"
+    out.write_text(calendar_markdown(cal), encoding="utf-8")
+    results = publish(cal)  # dry run: posts nothing
+    console.print(f"[green]planned[/] {len(cal)} posts across {len(owned)} of your accounts -> {out}")
+    console.print(f"dry run: {sum(1 for r in results if r.get('dry_run'))} post(s) previewed, 0 sent.")
+    for r in results[:4]:
+        console.print(f"  [{r.get('platform')}] {r.get('angle')}: {r.get('preview', '')[:70]}")
+    console.print("To publish, wire your platform's official API to the Poster interface; the owned-account guard still applies.")
+
+
 @main.command()
 @click.option("--project", default=None, help="Limit to one project.")
 @click.option("--days", type=int, default=None, help="Only the last N days.")
