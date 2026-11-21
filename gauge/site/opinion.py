@@ -9,7 +9,7 @@ statistics and present them as sourced. It is an op-ed assistant, not a news wir
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from ..llm.client import LLM, generate_json
 from .integrity import OPINION_DISCLAIMER, check_byline, check_headline, flag_claims
@@ -34,6 +34,7 @@ class OpinionDraft:
     summary: str = ""
     headline_flags: list[str] = field(default_factory=list)
     claims_to_verify: list[str] = field(default_factory=list)
+    balance_flags: list[str] = field(default_factory=list)
 
 
 # Voice registers for the column. All honest and labelled; "contrarian" is the punchy, consensus-skeptical
@@ -46,14 +47,19 @@ VOICES = {
 }
 
 
-def draft_opinion(llm: LLM, thesis: str, byline: str, angle: str = "", voice: str = "plain") -> OpinionDraft:
+def draft_opinion(llm: LLM, thesis: str, byline: str, angle: str = "", voice: str = "plain",
+                  stance: Optional[Any] = None, comedic: bool = False) -> OpinionDraft:
     ok, why = check_byline(byline)
     if not ok:
         raise PermissionError(why)
     voice_note = VOICES.get(voice, VOICES["plain"])
+    stance_block = ""
+    if stance is not None:
+        from .stance import stance_guidance
+        stance_block = stance_guidance(stance, comedic=comedic) + "\n"
     prompt = ("Draft an opinion column (not news). Argue this thesis; do not invent facts, quotes or statistics, "
-              "and mark where evidence would be needed.\n"
-              f"VOICE: {voice_note}\nTHESIS: {thesis}\n" + (f"ANGLE: {angle}\n" if angle else "") +
+              "and mark where evidence would be needed. Engage the strongest opposing view before answering it.\n"
+              f"{stance_block}VOICE: {voice_note}\nTHESIS: {thesis}\n" + (f"ANGLE: {angle}\n" if angle else "") +
               "Return JSON {title, body, summary}. The title must be accurate, not clickbait.")
     try:
         d: dict[str, Any] = generate_json(llm, prompt, system=_SYSTEM, schema=_SCHEMA, temperature=0.8,
@@ -72,5 +78,6 @@ def draft_opinion(llm: LLM, thesis: str, byline: str, angle: str = "", voice: st
         pass
     labelled = f"*{OPINION_DISCLAIMER}*\n\nBy {byline}\n\n{body}"
     hc = check_headline(title)
+    from .stance import balance_check
     return OpinionDraft(title=title, body=labelled, byline=byline, summary=str(d.get("summary", "")).strip(),
-                        headline_flags=hc.flags, claims_to_verify=flag_claims(body))
+                        headline_flags=hc.flags, claims_to_verify=flag_claims(body), balance_flags=balance_check(body))

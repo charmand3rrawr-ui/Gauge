@@ -15,7 +15,17 @@ from .integrity import (
 )
 from .opinion import draft_opinion
 from .publisher import Article, build_site
+from .stance import (
+    EditorialStance,
+    balance_check,
+    default_stance,
+    editorial_page_body,
+    load_stance,
+    save_stance,
+    stance_guidance,
+)
 
 __all__ = ["check_byline", "check_headline", "flag_claims", "OPINION_DISCLAIMER", "IMPERSONATION_DENYLIST",
            "draft_opinion", "Article", "build_site",
-           "Headline", "suggest_headlines", "rank_headlines", "in_context", "score_headline"]
+           "Headline", "suggest_headlines", "rank_headlines", "in_context", "score_headline",
+           "EditorialStance", "default_stance", "stance_guidance", "balance_check", "load_stance", "save_stance", "editorial_page_body"]

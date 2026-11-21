@@ -1201,26 +1201,54 @@ def _article_dir(c: Ctx, project: str):
     return p, d
 
 
+@site.command("stance")
+@click.option("--set", "set_json", type=click.Path(exists=True), default=None, help="Replace the stance from a JSON file.")
+@click.pass_obj
+def site_stance(c: Ctx, set_json: Optional[str]) -> None:
+    """Show (or set) the platform's declared editorial stance. It is a transparent point of view, not a
+    claim of neutrality; it shapes labelled opinion and is published on the site's editorial page."""
+    import json as _json
+
+    from .site.stance import EditorialStance, editorial_page_body, load_stance, save_stance
+
+    path = c.cfg.root / "stance.json"
+    if set_json:
+        d = _json.loads(Path(set_json).read_text(encoding="utf-8"))
+        save_stance(path, EditorialStance(**{k: d[k] for k in ("name", "principles", "lean_rule", "tone", "rails") if k in d}))
+        console.print(f"[green]saved stance[/] -> {path}")
+    stance = load_stance(path)
+    console.print(f"[bold]{stance.name}[/]")
+    for p in stance.principles:
+        console.print(f"  - {p}")
+    console.print(f"lean: {stance.lean_rule}")
+    console.print(f"tone: {stance.tone}")
+    console.print("\n[dim]editorial page:[/]\n" + editorial_page_body(stance))
+
+
 @site.command("opinion")
 @click.argument("project")
 @click.option("--thesis", required=True, help="The argument you want the column to make.")
 @click.option("--byline", required=True, help="Your name or an owned pen name (not an outlet or shared pseudonym).")
 @click.option("--angle", default="", help="Optional angle or framing.")
 @click.option("--voice", type=click.Choice(["plain", "punchy", "contrarian"]), default="plain", help="Register: plain, punchy, or contrarian (honest, your byline).")
+@click.option("--stance/--no-stance", default=True, help="Write from the platform's declared editorial stance.")
+@click.option("--comedic/--no-comedic", default=True, help="Punchy, comedic tone (a joke never fakes a fact).")
 @click.pass_obj
-def site_opinion(c: Ctx, project: str, thesis: str, byline: str, angle: str, voice: str) -> None:
+def site_opinion(c: Ctx, project: str, thesis: str, byline: str, angle: str, voice: str, stance: bool, comedic: bool) -> None:
     """Draft a labelled opinion column from your thesis. Saved for the next `site build`; claims are
     flagged for you to verify, and the piece is marked Opinion under your byline."""
     import json as _json
     import re as _re
 
     from .site.opinion import draft_opinion
+    from .site.stance import load_stance
     from .util import utcnow
 
     p, d = _article_dir(c, project)
     pipe = _pipeline_or_exit(c)
+    editorial = load_stance(c.cfg.root / "stance.json") if stance else None
     try:
-        draft = draft_opinion(pipe.llm, thesis, byline, angle, voice=voice)
+        draft = draft_opinion(pipe.llm, thesis, byline, angle, voice=voice, stance=editorial, comedic=comedic)
     except PermissionError as e:
         console.print(f"[red]refused:[/] {e}")
         sys.exit(1)
@@ -1235,6 +1263,8 @@ def site_opinion(c: Ctx, project: str, thesis: str, byline: str, angle: str, voi
         console.print("[yellow]verify before publishing:[/]")
         for cl in draft.claims_to_verify[:8]:
             console.print(f"  - {cl}")
+    for b in draft.balance_flags:
+        console.print(f"[yellow]balance:[/] {b}")
     console.print(f"[green]saved[/] -> {d / (slug + '.json')}; include it with `gauge site build {project} --byline ...`")
 
 
@@ -1259,6 +1289,11 @@ def site_build(c: Ctx, project: str, byline: str, url: str, chapters: bool) -> N
     articles: list[Article] = [Article("about", p.state.name, (kit.blurb_long or kit.blurb_short or p.state.name),
                                         byline, kind="post", summary=kit.tagline or kit.blurb_short[:160],
                                         published_at=utcnow().date().isoformat())]
+    from .site.stance import editorial_page_body, load_stance
+    st = load_stance(c.cfg.root / "stance.json")  # the saved stance, or the evidence-first default
+    articles.append(Article("editorial-stance", "Where we stand", editorial_page_body(st), byline, kind="post",
+                            summary="Our declared editorial stance — a point of view, not a claim of neutrality.",
+                            published_at=utcnow().date().isoformat()))
     if chapters:
         for n in range(1, p.state.written + 1):
             text = p.read_chapter(n)

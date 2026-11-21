@@ -43,6 +43,28 @@ Opinion columns take a `--voice`: `plain`, `punchy`, or `contrarian`. The contra
 and skeptical of the consensus — a ZeroHedge-like *flavour* — but it stays honest (no invented facts),
 labelled as opinion, and published under your own name or an owned pen name, never a borrowed byline.
 
+## A declared editorial stance
+
+A platform has a point of view; the honest thing is to declare it rather than pretend to be neutral.
+`gauge site stance` shows the stance and `--set FILE` customises it. The default is an evidence-first
+centrist desk: fiscal prudence, compassion for people, and following the evidence rather than the
+tribe — leaning conservative or liberal only where the evidence and those principles point, and saying
+plainly which way a piece lands and why.
+
+`gauge site opinion` writes from that stance by default (`--no-stance` to turn it off), in a punchy,
+comedic register (`--no-comedic` to drop the jokes). Two things keep "moderate and logical" honest
+rather than merely asserted:
+
+- **A balance check.** A finished column that argues only one side is flagged: it should state the
+  strongest opposing view and answer it. Steelman, not strawman.
+- **The facts stay separate.** The stance shapes opinion, not reporting. It is no licence to bend facts:
+  claims are still flagged for verification, opinion is labelled, satire is labelled, and nothing is
+  invented.
+
+`gauge site build` publishes a **Where we stand** page from the stance, so every reader sees the lens.
+It says in as many words that it is a point of view, not a claim of neutrality. There is no "pure
+objectivity" on offer here — a stated, consistent, evidence-first lens is the honest substitute.
+
 ## What this is not
 
 It will not generate news articles with invented facts, quotes or events (`fabricate_news`), write
