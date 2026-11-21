@@ -172,7 +172,10 @@ class Daemon:
                     if llm.available():
                         kb = KnowledgeBase(extra_dir=self.cfg.knowledge_dir)
                         kb.index_self(repo_root() / "gauge")
-                        out["self_heal"] = SelfProgrammer(llm, kb, self.cfg.self_dir).heal(entries, auto_apply=self.cfg.code.auto_apply)
+                        out["self_heal"] = SelfProgrammer(
+                            llm, kb, self.cfg.self_dir, mutation_check=self.cfg.code.mutation_check,
+                            mutation_min_score=self.cfg.code.mutation_min_score, mutation_max_mutants=self.cfg.code.mutation_max_mutants,
+                        ).heal(entries, auto_apply=self.cfg.code.auto_apply)
             except Exception as e:
                 self._journal("self_heal", e)
         self.db.log_run("daemon_cycle", started, out)

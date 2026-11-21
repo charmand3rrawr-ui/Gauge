@@ -1922,6 +1922,48 @@ def code_learn(c: Ctx, path: str) -> None:
     console.print(f"[green]learned[/] {len(cards)} card(s): " + ", ".join(x.key for x in cards))
 
 
+@code.command("lang")
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_obj
+def code_lang(c: Ctx, path: str) -> None:
+    """Read any source file: detect the language, measure its shape, flag smells, show idioms."""
+    from .code.languages import analyze, tips
+
+    code_text = Path(path).read_text(encoding="utf-8", errors="replace")
+    shape = analyze(Path(path).name, code_text)
+    console.print(f"[bold]{path}[/]  language={shape.language or 'unknown'}  lines={shape.lines}  tokens={shape.tokens}  "
+                  f"functions={shape.functions}  classes={shape.classes}  comments={shape.comment_ratio:.0%}  max-nesting={shape.max_indent}")
+    for s in shape.smells:
+        console.print(f"  - {s}")
+    if shape.language:
+        console.print(tips(shape.language))
+
+
+@code.command("binary")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--bytes", "n_bytes", type=int, default=256, show_default=True, help="How many bytes to dump.")
+@click.pass_obj
+def code_binary(c: Ctx, path: str, n_bytes: int) -> None:
+    """Read any file at the binary level: identify it, hexdump it, measure its entropy."""
+    from .code.binary import entropy, hexdump, identify
+
+    data = Path(path).read_bytes()
+    console.print(f"[bold]{path}[/]  {len(data)} bytes  type={identify(data)}  entropy={entropy(data[:65536])} bits/byte")
+    console.print(hexdump(data, limit=n_bytes))
+
+
+@code.command("disasm")
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_obj
+def code_disasm(c: Ctx, path: str) -> None:
+    """Disassemble a Python source file to bytecode."""
+    from .code.binary import disassemble
+
+    d = disassemble(Path(path).read_text(encoding="utf-8", errors="replace"))
+    console.print(f"[bold]{d.name}[/]: {len(d.instructions)} instructions")
+    console.print(d.text[:4000])
+
+
 @main.group(name="self")
 def self_group() -> None:
     """Self-modification with guardrails: propose -> test in isolation -> apply (human-approved by default) -> rollback."""
@@ -1932,7 +1974,9 @@ def _selfp(c: Ctx):
     from .llm import make_llm
 
     llm = make_llm(c.cfg.llm, "main")
-    return SelfProgrammer(llm, _kb(c, with_self=True), c.cfg.self_dir)
+    return SelfProgrammer(llm, _kb(c, with_self=True), c.cfg.self_dir,
+                          mutation_check=c.cfg.code.mutation_check, mutation_min_score=c.cfg.code.mutation_min_score,
+                          mutation_max_mutants=c.cfg.code.mutation_max_mutants)
 
 
 @self_group.command("propose")

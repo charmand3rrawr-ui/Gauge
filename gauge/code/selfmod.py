@@ -46,6 +46,7 @@ class Proposal:
     created: str = ""
     tested: Optional[bool] = None
     test_report: str = ""
+    mutation_score: Optional[float] = None  # fraction of mutants the tests killed, when the mutation gate ran
     applied: bool = False
     diff: str = ""
     source: str = "user"  # user | journal
@@ -57,12 +58,16 @@ def repo_root() -> Path:
 
 
 class SelfProgrammer:
-    def __init__(self, llm: LLM, kb: KnowledgeBase, self_dir: Path, root: Optional[Path] = None, test_timeout: int = 900):
+    def __init__(self, llm: LLM, kb: KnowledgeBase, self_dir: Path, root: Optional[Path] = None, test_timeout: int = 900,
+                 mutation_check: bool = False, mutation_min_score: float = 0.5, mutation_max_mutants: int = 8):
         self.llm = llm
         self.kb = kb
         self.dir = self_dir
         self.root = root or repo_root()
         self.test_timeout = test_timeout
+        self.mutation_check = mutation_check
+        self.mutation_min_score = mutation_min_score
+        self.mutation_max_mutants = mutation_max_mutants
         (self.dir / "proposals").mkdir(parents=True, exist_ok=True)
 
     # ---- guardrails -----------------------------------------------------------------------
@@ -258,10 +263,50 @@ Respond with ONLY JSON: {{"files": {{"<relative path>": "<complete new content>"
             except subprocess.TimeoutExpired:
                 ok = False
                 report.append("tests timed out")
+            # Mutation gate: only when the normal tests passed. Prove the tests actually cover the change.
+            if ok and self.mutation_check:
+                mscore, mreport = self._mutation_gate(prop, copy, env)
+                prop.mutation_score = mscore
+                if mreport:
+                    report.append("mutation gate:\n" + mreport)
+                    if mscore is not None and mscore < self.mutation_min_score:
+                        ok = False
         prop.tested = ok
         prop.test_report = "\n".join(report)[-6000:]
         self.save(prop)
         return ok, prop.test_report
+
+    def _mutation_gate(self, prop: Proposal, copy: Path, env: dict) -> tuple[Optional[float], Optional[str]]:
+        """Mutate each changed non-test .py file and confirm the suite catches it. Returns (worst score, report)."""
+        from .mutation import mutation_score
+        from .mutation import report as mut_report
+
+        targets = {rel: content for rel, content in prop.files.items()
+                   if rel.endswith(".py") and "/tests/" not in rel and not rel.replace("\\", "/").startswith("tests/")}
+        if not targets:
+            return None, None
+        worst: Optional[float] = None
+        notes: list[str] = []
+        for rel, content in list(targets.items())[:2]:  # bound cost: at most two files per proposal
+            target_path = copy / rel
+
+            def tests_pass(mutated: str, _tp=target_path) -> bool:
+                _tp.write_text(mutated, encoding="utf-8")
+                try:
+                    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider"],
+                                       cwd=str(copy), capture_output=True, text=True, timeout=self.test_timeout, env=env, check=False)
+                    return r.returncode == 0
+                except subprocess.TimeoutExpired:
+                    return False
+
+            try:
+                res = mutation_score(content, tests_pass, max_mutants=self.mutation_max_mutants)
+            finally:
+                target_path.write_text(content, encoding="utf-8")  # restore the real proposal content
+            worst = res.score if worst is None else min(worst, res.score)
+            r = mut_report(res, self.mutation_min_score)
+            notes.append(f"{rel}: {res.killed}/{res.total} mutants killed ({res.score:.0%})" + (f" - {r}" if r else ""))
+        return worst, "\n".join(notes) if notes else None
 
     # ---- applying and rolling back ------------------------------------------------------------------
     def apply(self, prop: Proposal, commit: bool = True) -> dict[str, Any]:

@@ -87,6 +87,8 @@ SWITCHES: list[Switch] = [
            warning="Gauge will write proposals to change its own source. They are tested in isolation and wait for you unless auto-apply is on."),
     Switch("code.auto_apply", "Auto-apply self-fixes", "bool", "Apply proposals that pass the full test suite without asking you.", "Automation",
            warning="Gauge will commit changes to its own code while you are not watching. Protected files and tests stay out of reach; rollback exists. Keep off unless you trust it."),
+    Switch("code.mutation_check", "Mutation-test self-edits", "bool", "After a proposal passes, mutate the changed code to prove the tests actually cover it; a proposal whose tests miss too many mutations is blocked.", "Automation"),
+    Switch("code.mutation_min_score", "Minimum mutation score", "float", "Fraction of mutants the tests must kill for a self-edit to pass (when mutation-testing is on).", "Automation", 0, 1),
 ]
 
 BY_KEY = {s.key: s for s in SWITCHES}

@@ -174,6 +174,24 @@ and restart workers with the new one; re-seal (`gauge security seal`) only after
 to the sanitiser or scanner if an injection or bad code got through; write a test that reproduces it; `gauge self unlock`
 when done. Keep backups of data/ off the machine; BitLocker or an encrypted container protects it at rest.""",
 
+    "programming-languages": """READING MANY LANGUAGES (gauge.code.languages). Gauge writes bots in Python but reads many languages to understand
+dependencies and port idioms. detect(filename, code) ids the language (extension first, then Pygments); analyze(filename, code) ->
+CodeShape (language, lines, tokens, comment_ratio, functions, classes, max_indent, smells); tips(lang)/idioms(lang)/gotchas(lang)
+give the knowledge base for python, js, ts, rust, go, c, cpp, java, csharp, ruby, powershell, bash, sql. This is literacy, not
+uniform expert authorship: strongest when writing Python, careful and structural when reading the rest. `gauge code lang <file>`.""",
+
+    "binary-level": """SPEAKING AT THE BINARY LEVEL (gauge.code.binary). The useful, honest version of "down to the binary": identify(data)
+names a blob from its magic number (ELF, PE, ZIP, PNG, PDF, SQLite...); hexdump(data) is the offset/hex/ASCII view; to_bits/from_bits
+and to_hex/from_hex convert; pack_struct/unpack_struct/parse_record read and write binary records with struct; disassemble(func or
+source) shows Python bytecode via dis; entropy(data) flags compressed/encrypted regions. Binary is a representation; the skill is
+crossing between layers, not mysticism. `gauge code binary <file>`, `gauge code disasm <file.py>`.""",
+
+    "mutation-testing": """MUTATION TESTING SELF-EDITS (gauge.code.mutation). A change that passes the suite might still be untested. The mutation
+gate breaks the changed code on purpose (== becomes !=, + becomes -, True becomes False, a boundary flips) and confirms the tests then
+fail. Surviving mutants are coverage holes. Turn it on with code.mutation_check; a proposal whose tests kill fewer than
+code.mutation_min_score of mutants is blocked so a human looks first. It runs only after the normal tests pass, on changed non-test
+Python files, bounded by code.mutation_max_mutants.""",
+
     "gauge-internals": """GAUGE INTERNALS (for bots and self-changes). Package `gauge`: config.GaugeConfig.load(data_dir) -> .db_path, .models_dir,
 .projects_dir, .native_dir; db.Database(path) with novels(), chapters(key), features(level), feedback(project), call_summary(),
 notes(), workers(); write.project.Project(root, name): state.outline, read_chapter(n), write_chapter(); features.chapter_features(ChapterRecord);

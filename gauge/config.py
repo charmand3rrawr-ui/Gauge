@@ -81,6 +81,9 @@ class CodeConfig(BaseModel):
     self_heal: bool = False  # let the daemon turn recurring errors into tested proposals
     auto_apply: bool = False  # apply proposals that pass tests without a human (off by default; keep it off unless you trust it)
     min_recurrences: int = 3  # an error must repeat this often before self-heal proposes a fix
+    mutation_check: bool = False  # after a proposal passes tests, mutate the changed code to prove the tests cover it
+    mutation_min_score: float = 0.5  # a proposal whose tests kill fewer than this fraction of mutants is blocked
+    mutation_max_mutants: int = 8  # mutants per changed file (each re-runs the suite, so keep it small)
 
 
 class SecurityConfig(BaseModel):
