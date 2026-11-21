@@ -38,9 +38,29 @@ class Daemon:
         except Exception:  # journaling must never raise
             pass
 
+    def _security_check(self, out: dict[str, object]) -> bool:
+        """Verify the sealed tree and score the threat. Returns False when automation must stay off this cycle."""
+        from .code.selfmod import repo_root
+        from .security import AuditLog, assess, lockdown, verify
+
+        audit = AuditLog(self.cfg.security_dir / "audit.jsonl")
+        status = "unsealed"
+        if self.cfg.security.verify_each_cycle:
+            v = verify(repo_root(), self.cfg.security_dir, [self.cfg.native_dir])
+            status = v["status"]
+            if status in ("tampered", "corrupt"):
+                audit.event("integrity", f"{status}: changed={v['changed'][:5]} removed={v['removed'][:5]}", 3, v)
+        threat = assess(audit, status)
+        out["security"] = {"integrity": status, "threat": threat.level, "reasons": threat.reasons}
+        if threat.level >= 3 and self.cfg.security.auto_lockdown and not self.cfg.security.locked:
+            out["lockdown"] = lockdown(self.cfg, audit, "; ".join(threat.reasons)[:300])
+            log.error("SECURITY LOCKDOWN: %s", threat.reasons)
+        return not (self.cfg.security.locked or status in ("tampered", "corrupt"))
+
     def once(self, write: Optional[bool] = None) -> dict[str, object]:
         started = utcnow()
         out: dict[str, object] = {}
+        automation_ok = self._security_check(out)
         ingest = IngestRunner(self.cfg, self.db)
         try:
             out["ingest"] = ingest.run()
@@ -126,7 +146,7 @@ class Daemon:
             else:
                 out["write"] = f"skipped: LLM not reachable ({pipe.llm.describe()})"
         # Scheduled bots (plain programs; deterministic ones cannot reach the model).
-        if self.cfg.code.bots_enabled:
+        if self.cfg.code.bots_enabled and automation_ok:
             try:
                 from .code import BotRegistry
 
@@ -141,7 +161,7 @@ class Daemon:
             except Exception as e:
                 self._journal("bots", e)
         # Self-healing: recurring errors become tested proposals; applied only if you allow it.
-        if self.cfg.code.self_heal:
+        if self.cfg.code.self_heal and automation_ok:
             try:
                 entries = self.db.recurring_errors(self.cfg.code.min_recurrences)
                 if entries:

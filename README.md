@@ -166,6 +166,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge code cards/search/learn` | programming knowledge cards and your own notes |
 | `gauge self propose/test/apply/rollback/list/journal/heal` | guarded self-modification; see [docs/SELF.md](docs/SELF.md) |
 | `gauge settings list/show/on/off/set/reset` | the switches; same catalog as the Studio panel; see [docs/SWITCHES.md](docs/SWITCHES.md) |
+| `gauge security seal/verify/status/log/lockdown/unlock/scan/check-text` | defences; see [docs/SECURITY.md](docs/SECURITY.md) |
 | `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
@@ -220,6 +221,16 @@ announce themselves on your LAN with a shared token, and Gauge spreads generatio
 model-averaging training rounds across them. It never scans networks or touches machines you
 have not set up. See [docs/COMPUTE.md](docs/COMPUTE.md).
 
+## Security
+
+Untrusted text is data: scraped chapters, comments and research are scrubbed of hidden characters
+and instruction-shaped spans before any model sees them. Code the model writes is statically
+scanned and runs in a sandbox with no secrets, no model and no network unless declared. Workers
+accept only tokened, private-network, rate-limited requests. Gauge's own source and models are
+sealed with signed hashes and verified every cycle; a hash-chained audit log records every event;
+a sentinel locks risky automation down when the threat level rises. See
+[docs/SECURITY.md](docs/SECURITY.md).
+
 ## The switches
 
 Every behaviour you might want to flip is a labelled switch with a description and, where it
@@ -265,11 +276,12 @@ gauge/
   native/          GaugeLM: tokenizer.py, model.py (numpy transformer + backprop), train.py, client.py
   compute/         detect.py (GPU sensing), worker.py, pool.py (discovery, PoolLLM, distributed rounds)
   code/            knowledge.py (cards), toolkit.py, engineer.py (bots), selfmod.py (guarded self-modification)
+  security/        sanitize, codescan, sandbox, integrity (seal/verify), audit (hash chain), sentinel (lockdown)
   write/           project, characters (matrix, agents), world (physics, crowds), muse (directions, novelty),
                    agents/ (the writing room: 11 agents + council), planner, drafter, critic, pipeline, prompts, schemas
   llm/             ollama / openai-compatible / fake clients, embeddings
   daemon.py  report.py  cli.py  db.py (sqlite)  config.py
-docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, RESEARCH, NATIVE, COMPUTE, BOTS, SELF, SWITCHES, WINDOWS, ETHICS, ROADMAP
+docs/              ARCHITECTURE, LEARNING, LOCAL_LIBRARY, CHARACTERS, WORLD, CREATIVITY, AGENTS, RESEARCH, NATIVE, COMPUTE, BOTS, SELF, SWITCHES, SECURITY, WINDOWS, ETHICS, ROADMAP
 installer/         double-click installer (bootstrap.ps1) and Gauge Studio GUI launcher
 tests/             pytest suite, runs offline with a fake LLM
 ```

@@ -11,11 +11,13 @@ request; announcements carry only its hash.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import socket
 import threading
 import time
+from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional
@@ -29,11 +31,83 @@ from .protocol import ANNOUNCE_PORT, announcement, check_token, pack_arrays, unp
 log = logging.getLogger(__name__)
 
 
+def is_private(host: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
+class Guard:
+    """Per-peer rate limiting and failed-auth lockout for the worker."""
+
+    def __init__(self, per_minute: int = 120, lockout_failures: int = 10, lockout_s: float = 600.0, allow_public: bool = False, audit=None):
+        self.per_minute = per_minute
+        self.lockout_failures = lockout_failures
+        self.lockout_s = lockout_s
+        self.allow_public = allow_public
+        self.audit = audit
+        self.hits: dict[str, deque] = defaultdict(deque)
+        self.failures: dict[str, int] = defaultdict(int)
+        self.locked_until: dict[str, float] = {}
+        self.lock = threading.Lock()
+
+    def admit(self, host: str) -> Optional[str]:
+        """None if the request may proceed, else a reason to refuse."""
+        now = time.monotonic()
+        with self.lock:
+            if not self.allow_public and not is_private(host):
+                self._note("worker_rejected_peer", f"non-private peer {host}", 2)
+                return "peers outside private networks are not accepted"
+            if self.locked_until.get(host, 0) > now:
+                return "too many failed tokens; try later"
+            q = self.hits[host]
+            while q and now - q[0] > 60:
+                q.popleft()
+            if len(q) >= self.per_minute:
+                self._note("rate_limit", f"{host} over {self.per_minute}/min", 2)
+                return "rate limit"
+            q.append(now)
+        return None
+
+    def auth_failed(self, host: str) -> None:
+        with self.lock:
+            self.failures[host] += 1
+            self._note("auth_failure", f"bad token from {host}", 2)
+            if self.failures[host] >= self.lockout_failures:
+                self.locked_until[host] = time.monotonic() + self.lockout_s
+                self.failures[host] = 0
+                self._note("auth_lockout", f"{host} locked out for {int(self.lockout_s)}s", 3)
+
+    def auth_ok(self, host: str) -> None:
+        with self.lock:
+            self.failures[host] = 0
+
+    def _note(self, kind: str, detail: str, sev: int) -> None:
+        if self.audit is not None:
+            try:
+                self.audit.event(kind, detail, sev)
+            except Exception:
+                pass
+
+
 class WorkerState:
     def __init__(self, cfg: GaugeConfig, name: str, token: str, llm=None, model_dir: Optional[Path] = None):
         self.cfg = cfg
         self.name = name
         self.token = token
+        sec = getattr(cfg, "security", None)
+        audit = None
+        try:
+            from ..security.audit import AuditLog
+
+            audit = AuditLog(cfg.security_dir / "audit.jsonl")
+        except Exception:
+            audit = None
+        self.guard = Guard(per_minute=getattr(sec, "rate_limit_per_minute", 120), lockout_failures=getattr(sec, "auth_lockout_failures", 10),
+                           allow_public=getattr(sec, "allow_public_workers", False), audit=audit)
+        self.max_body = getattr(sec, "max_request_bytes", 256 * 1024 * 1024)
         self.llm = llm  # any LLM protocol object; None = no generation service
         self.model_dir = model_dir  # for /train: where a model+tokenizer can be loaded (optional)
         self.devices = scan()
@@ -79,8 +153,15 @@ def make_handler(state: WorkerState):
             log.debug("worker: " + fmt, *args)
 
         def _auth(self) -> bool:
+            host = self.client_address[0]
+            refused = state.guard.admit(host)
+            if refused:
+                self._json(429 if "rate" in refused or "failed" in refused else 403, {"error": refused})
+                return False
             if check_token(self.headers.get("X-Gauge-Token", ""), state.token):
+                state.guard.auth_ok(host)
                 return True
+            state.guard.auth_failed(host)
             self._json(401, {"error": "bad token"})
             return False
 
@@ -94,6 +175,8 @@ def make_handler(state: WorkerState):
 
         def _body(self) -> bytes:
             n = int(self.headers.get("Content-Length", "0"))
+            if n > state.max_body:
+                raise ValueError(f"request body too large ({n} bytes)")
             return self.rfile.read(n) if n else b""
 
         def do_GET(self):  # noqa: N802

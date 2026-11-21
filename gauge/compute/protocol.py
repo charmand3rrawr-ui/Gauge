@@ -43,6 +43,8 @@ def pack_arrays(arrays: dict[str, np.ndarray]) -> bytes:
     return buf.getvalue()
 
 
-def unpack_arrays(data: bytes) -> dict[str, np.ndarray]:
-    with np.load(io.BytesIO(data)) as z:
+def unpack_arrays(data: bytes, max_bytes: int = 512 * 1024 * 1024) -> dict[str, np.ndarray]:
+    if len(data) > max_bytes:
+        raise ValueError(f"payload too large ({len(data)} bytes)")
+    with np.load(io.BytesIO(data), allow_pickle=False) as z:  # never unpickle from the network
         return {k: z[k] for k in z.files}

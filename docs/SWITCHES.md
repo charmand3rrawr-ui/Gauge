@@ -29,6 +29,7 @@ treats other people's servers, work or machines.
 | The room | characters, character weight, improv, world, world agency and weight, muse, room size (full/lean/off), room weight, content flags block |
 | Learning | prompt bandit, fine-tuning pairs, lessons in prompt, Scout research, honour robots.txt (!), fact-check |
 | Model | provider, writer model, fast model, GaugeLM device, auto GPU switch, workers for generation, workers for training |
+| Security | instruction-shaped text handling, verify sealed code each cycle, automatic lockdown, scan generated code (!), accept public workers (!) |
 | Automation | daemon writes chapters, scheduled bots, self-heal proposals (!), auto-apply self-fixes (!) |
 
 Switches marked (!) carry a warning you will see when turning them on:

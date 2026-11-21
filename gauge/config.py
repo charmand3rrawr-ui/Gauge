@@ -83,6 +83,23 @@ class CodeConfig(BaseModel):
     min_recurrences: int = 3  # an error must repeat this often before self-heal proposes a fix
 
 
+class SecurityConfig(BaseModel):
+    """Defences. See docs/SECURITY.md."""
+
+    injection_action: str = "scrub"  # scrub | flag | drop: what to do with instruction-shaped text in ingested content
+    verify_each_cycle: bool = True  # check the sealed source tree at the start of every daemon cycle
+    auto_lockdown: bool = True  # the sentinel switches risky automation off when the threat level reaches lockdown
+    allow_public_workers: bool = False  # workers accept only private-network peers unless true
+    max_request_bytes: int = 256 * 1024 * 1024
+    rate_limit_per_minute: int = 120
+    auth_lockout_failures: int = 10  # failed tokens from one peer before it is ignored for a while
+    scan_generated_code: bool = True
+    bots_network_default: bool = False  # bots get network only when their manifest says so
+    locked: bool = False
+    locked_reason: str = ""
+    locked_previous: dict[str, bool] = Field(default_factory=dict)
+
+
 class IngestConfig(BaseModel):
     user_agent: str = "Gauge/0.1 (open-source web novel research tool)"
     request_delay_seconds: float = 2.5
@@ -192,6 +209,11 @@ class GaugeConfig(BaseModel):
     native: NativeConfig = Field(default_factory=NativeConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
     code: CodeConfig = Field(default_factory=CodeConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+
+    @property
+    def security_dir(self) -> Path:
+        return self.root / "security"
 
     @property
     def bots_dir(self) -> Path:

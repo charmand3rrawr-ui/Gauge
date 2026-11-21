@@ -33,7 +33,9 @@ log = logging.getLogger(__name__)
 SYSTEM = """You are a careful senior engineer writing small, dependency-free automation for a Windows desktop user.
 You prefer plain code to clever code, the standard library to packages, and you never call a language model from a
 program unless the task genuinely needs judgement about natural language. Every program you write has a test, handles
-errors with clear messages, is idempotent, and exits non-zero on failure."""
+errors with clear messages, is idempotent, and exits non-zero on failure. Security is not optional: validate inputs, never
+build shell strings, never eval, keep paths inside the working folder, no secrets in code, no network unless the task is
+network, nothing destructive without a backup or --dry-run."""
 
 DETERMINISTIC_HINTS = ("count", "rename", "copy", "backup", "convert", "export", "csv", "json", "schedule", "watch", "report",
                        "statistics", "stats", "import", "move", "zip", "format", "html", "epub", "sync", "clean", "delete", "list")
@@ -113,13 +115,14 @@ class BotRegistry:
 
     def run(self, name: str, args: Optional[list[str]] = None, timeout: int = 1800, env_extra: Optional[dict[str, str]] = None) -> dict[str, Any]:
         man = self.manifest(name)
+        if man.get("blocked"):
+            return {"name": name, "exit": 125, "stdout": "", "stderr": "this bot was blocked by the security scan and will not run", "seconds": 0.0}
         d = self.path(name)
         entry = d / man.get("entry", "main.py")
-        env = dict(os.environ)
-        env["GAUGE_BOT"] = "1"
-        if not man.get("needs_ai"):
-            env["GAUGE_NO_LLM"] = "1"  # deterministic bots may not reach the model
-        env.update(env_extra or {})
+        from ..security.sandbox import minimal_env
+
+        env = minimal_env(env_extra or {}, allow_network=bool(man.get("network", False)), allow_llm=bool(man.get("needs_ai", False)))
+        env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2]) + os.pathsep + os.environ.get("PYTHONPATH", "")
         if entry.suffix == ".py":
             cmd = [sys.executable, str(entry), *(args or [])]
         elif entry.suffix == ".ps1":
@@ -164,16 +167,13 @@ class BotRegistry:
 
 
 def run_tests(bot_dir: Path, timeout: int = 300) -> tuple[bool, str]:
-    env = dict(os.environ)
-    env["GAUGE_BOT"] = "1"
-    env["GAUGE_NO_LLM"] = "1"
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2]) + os.pathsep + env.get("PYTHONPATH", "")
-    try:
-        p = subprocess.run([sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", str(bot_dir)], capture_output=True, text=True,
-                           timeout=timeout, env=env, check=False, cwd=str(bot_dir))
-    except subprocess.TimeoutExpired:
-        return False, f"tests timed out after {timeout}s"
-    return p.returncode == 0, (p.stdout + p.stderr)[-6000:]
+    """The bot's own tests, in the sandbox: no secrets, no model, no network."""
+    from ..security.sandbox import run_isolated
+
+    extra = {"PYTHONPATH": str(Path(__file__).resolve().parents[2]) + os.pathsep + os.environ.get("PYTHONPATH", "")}
+    res = run_isolated([sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", str(bot_dir)], cwd=bot_dir, timeout=timeout,
+                       allow_network=False, allow_llm=False, extra_env=extra)
+    return res["exit"] == 0, (res["stdout"] + res["stderr"])[-6000:]
 
 
 class Engineer:
@@ -258,7 +258,25 @@ Respond with ONLY JSON: {{"files": {files_hint}, "notes": "one line about design
             if not spec.files or "main.py" not in spec.files:
                 report = "the model returned no main.py"
                 break
-            bot_dir = self.registry.save(spec, {"classification": cls, "attempts": attempt + 1})
+            from ..security.codescan import report as scan_report
+            from ..security.codescan import scan_files, worst
+
+            findings = scan_files(spec.files)
+            if worst(findings) >= 3:
+                # Blocking findings: keep the files for inspection, never runnable, and tell the model why.
+                spec_dir = self.registry.save(spec, {"classification": cls, "attempts": attempt + 1, "blocked": True, "scan": scan_report(findings)})
+                passed, report = False, "SECURITY SCAN BLOCKED THIS CODE:\n" + scan_report(findings)
+                feedback = report + "\nRewrite without these constructs."
+                if progress:
+                    progress({"attempt": attempt + 1, "passed": False, "blocked": True})
+                if attempt >= self.max_fix_rounds:
+                    man = self.registry.manifest(name)
+                    man.update({"tests_passed": False, "blocked": True, "test_report": report[-2000:]})
+                    (spec_dir / "manifest.json").write_text(json.dumps(man, indent=2), encoding="utf-8")
+                    return {"name": name, "needs_ai": spec.needs_ai, "language": spec.language, "schedule": spec.schedule, "tests_passed": False,
+                            "blocked": True, "files": sorted(spec.files), "dir": str(spec_dir), "report": report[-1500:], "why": cls["why"], "notes": spec.notes}
+                continue
+            bot_dir = self.registry.save(spec, {"classification": cls, "attempts": attempt + 1, "scan": scan_report(findings)})
             passed, report = run_tests(bot_dir) if any(f.startswith("test_") for f in spec.files) else (True, "no tests provided")
             if progress:
                 progress({"attempt": attempt + 1, "passed": passed})

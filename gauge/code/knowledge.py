@@ -137,6 +137,43 @@ os.startfile(path) (Windows only). Paths: use pathlib; %APPDATA%, %LOCALAPPDATA%
 Run hidden: pythonw.exe; start "" /min. Long-running loops: handle Ctrl+C (KeyboardInterrupt), write a log file, exit cleanly.
 Avoid admin rights; avoid modifying system PATH; install per-user. Antivirus may flag fresh .exe/.bat: keep scripts readable.""",
 
+    "security-basics": """SECURITY BASICS (for every program Gauge writes). Treat all input as hostile: validate type, length and range at the
+boundary; fail closed with a clear message. Never build shell commands from strings (subprocess with a list, shell=False);
+never eval/exec; never unpickle or deserialise untrusted data (json only; np.load(allow_pickle=False)). Paths: resolve and
+check they stay inside the allowed folder (Path.resolve(), relative_to) before reading or writing; never follow '..'. Secrets
+live in files with owner-only permissions or the OS keychain, never in code, logs or URLs; redact tokens when printing
+(show last 4). Least privilege: no admin, no system PATH edits, no registry writes, no scheduled tasks unless the task is exactly
+that. Network: pin exact hosts, timeouts always, TLS verification on, identify the client, back off on 429/5xx. Logging: no
+secrets, no raw user content at INFO. Dependencies: standard library first; pin versions; prefer pure-Python. Idempotent and
+reversible: back up before overwrite, --dry-run for anything destructive. Tests include the hostile cases (empty, huge,
+wrong type, path traversal, unicode).""",
+
+    "security-threats": """THREATS AGAINST GAUGE AND THE DEFENCES. 1) Prompt injection: scraped chapters, comments and research text may
+contain instructions aimed at the model ("ignore previous instructions", fake system markers, requests to run commands or
+exfiltrate config.json). Defence: gauge.security.sanitize scrubs control/zero-width characters, neutralises instruction-shaped
+spans, fences untrusted text in prompts, and logs findings; untrusted text never reaches the Engineer or the self-programmer.
+2) Malicious generated code: a model can be steered to write a bot that deletes files, phones home or persists. Defence:
+gauge.security.codescan blocks dynamic execution, shell=True, encoded payloads, credential paths, registry/task changes;
+bots run in gauge.security.sandbox with a minimal env (secrets stripped, GAUGE_NO_LLM, GAUGE_NO_NETWORK + dead proxy), a
+timeout, POSIX resource limits; deterministic bots are refused a model in code. 3) Worker abuse: forged or brute-forced
+requests. Defence: shared token with constant-time compare, private-network peers only by default, per-peer rate limit,
+failed-auth lockout, body size cap, npz without pickle, every refusal audited. 4) Tampering with Gauge's own code or models:
+Defence: gauge.security.integrity seals SHA-256 hashes signed with a local HMAC key; the daemon verifies each cycle and
+refuses self-modification and bot runs while tampered. 5) Covering tracks: Defence: the audit log is a hash chain; editing
+or deleting an entry breaks it. 6) Runaway automation: Defence: the sentinel scores threat from audit counts and integrity
+and locks down self-heal, auto-apply, bots, pool and research until a person unlocks. Limits, honestly: a Python process on
+Windows is not a jail; the sandbox is defence in depth, not containment; there is no "mythical" tier.""",
+
+    "security-incident": """INCIDENT RESPONSE FOR GAUGE. 1) Contain: `gauge security lockdown "reason"` switches off self-heal, auto-apply,
+bots, worker pool, research and daemon writing; stop the daemon; stop workers (`Ctrl+C` where `gauge worker` runs). 2) Assess:
+`gauge security status` (threat level, counts), `gauge security verify` (which files changed), `gauge security log --min 2`
+(what happened, in order; the chain tells you if the log itself was edited), `gauge self list` (recent proposals/applications),
+`gauge bot list` (what ran). 3) Recover: `gauge self rollback <id>` for applied proposals; restore changed files from git
+(`git diff`, `git checkout -- path`) or from drafts/accepted copies; rotate the worker token (`gauge compute token --rotate`)
+and restart workers with the new one; re-seal (`gauge security seal`) only after the tree is clean. 4) Learn: add the pattern
+to the sanitiser or scanner if an injection or bad code got through; write a test that reproduces it; `gauge self unlock`
+when done. Keep backups of data/ off the machine; BitLocker or an encrypted container protects it at rest.""",
+
     "gauge-internals": """GAUGE INTERNALS (for bots and self-changes). Package `gauge`: config.GaugeConfig.load(data_dir) -> .db_path, .models_dir,
 .projects_dir, .native_dir; db.Database(path) with novels(), chapters(key), features(level), feedback(project), call_summary(),
 notes(), workers(); write.project.Project(root, name): state.outline, read_chapter(n), write_chapter(); features.chapter_features(ChapterRecord);

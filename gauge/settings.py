@@ -61,6 +61,15 @@ SWITCHES: list[Switch] = [
     Switch("compute.auto_device", "Switch to a GPU when one appears", "bool", "The daemon re-scans every cycle.", "Model"),
     Switch("compute.pool_generation", "Use your workers for generation", "bool", "Spread prose calls over machines you started `gauge worker` on.", "Model"),
     Switch("compute.distributed_training", "Use your workers for training", "bool", "Model-averaging rounds across your workers.", "Model"),
+    # ---- security -------------------------------------------------------------------------
+    Switch("security.injection_action", "Instruction-shaped text in sources", "choice",
+           "scrub = neutralise it; flag = keep but log; drop = discard suspicious passages.", "Security", choices=["scrub", "flag", "drop"]),
+    Switch("security.verify_each_cycle", "Verify sealed code every cycle", "bool", "The daemon checks Gauge's own files against the seal before running automation.", "Security"),
+    Switch("security.auto_lockdown", "Automatic lockdown", "bool", "When the threat level reaches lockdown, risky automation is switched off until you unlock.", "Security"),
+    Switch("security.scan_generated_code", "Scan generated code", "bool", "Block bots and proposals that contain dangerous constructs.", "Security",
+           warning="Turning this off lets model-written code with eval/shell/credential access run on your machine."),
+    Switch("security.allow_public_workers", "Accept workers from public networks", "bool", "Workers accept only private-network peers unless on.", "Security",
+           warning="Exposes the worker API beyond your LAN; use only behind a VPN you control."),
     # ---- automation -----------------------------------------------------------------------
     Switch("daemon.write_after_learning", "Daemon writes chapters", "bool", "Each learning cycle also writes the next chapter of the active project.", "Automation"),
     Switch("code.bots_enabled", "Run scheduled bots", "bool", "The daemon runs the bots whose schedule is due.", "Automation"),

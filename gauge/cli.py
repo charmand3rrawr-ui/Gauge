@@ -1585,16 +1585,24 @@ def compute_watch(c: Ctx, interval: float, max_minutes: Optional[float]) -> None
 
 
 @compute.command("token")
+@click.option("--rotate", is_flag=True, help="Generate a new token (restart workers with it).")
+@click.option("--reveal", is_flag=True, help="Print the full token (default shows only the last 4 characters).")
 @click.pass_obj
-def compute_token(c: Ctx) -> None:
-    """Generate (or show) the shared token your workers must be started with."""
+def compute_token(c: Ctx, rotate: bool, reveal: bool) -> None:
+    """Generate, rotate or show the shared token your workers must be started with."""
     import secrets
 
-    if not c.cfg.compute.token:
+    if rotate or not c.cfg.compute.token:
         c.cfg.compute.token = secrets.token_urlsafe(24)
         c.cfg.save()
-    console.print(f"token: {c.cfg.compute.token}\nStart a worker on another machine you own with:\n"
-                  f"  gauge worker --token {c.cfg.compute.token} --name \"office-pc\"")
+        try:
+            _audit(c).event("token_rotated" if rotate else "token_created", "worker token", 2)
+        except Exception:
+            pass
+    tok = c.cfg.compute.token
+    shown = tok if reveal else "*" * 8 + tok[-4:]
+    console.print(f"token: {shown}" + ("" if reveal else "   (add --reveal to print it)") + "\nStart a worker on another machine you own with:\n"
+                  "  gauge worker --token <token> --name \"office-pc\"")
 
 
 @compute.command("discover")
@@ -2056,6 +2064,135 @@ def settings_reset(c: Ctx, key: str) -> None:
         console.print(f"[red]{e}[/]")
         sys.exit(1)
     console.print(f"[green]{key}[/] reset to {v}")
+
+
+# ---------------------------------------------------------------------------- security
+@main.group()
+def security() -> None:
+    """Defences: seal and verify Gauge's code, audit log, threat status, lockdown, code scan, token rotation."""
+
+
+def _audit(c: Ctx):
+    from .security import AuditLog
+
+    return AuditLog(c.cfg.security_dir / "audit.jsonl")
+
+
+@security.command("seal")
+@click.pass_obj
+def security_seal(c: Ctx) -> None:
+    """Record signed hashes of Gauge's source, installers and models (run after you update or approve changes)."""
+    from .code.selfmod import repo_root
+    from .security import seal
+
+    res = seal(repo_root(), c.cfg.security_dir, [c.cfg.native_dir])
+    _audit(c).event("seal", f"{res['files']} files sealed", 1)
+    console.print(f"[green]sealed[/] {res['files']} files; signature {res['signature']}...  (key: {c.cfg.security_dir / 'integrity.key'})")
+
+
+@security.command("verify")
+@click.pass_obj
+def security_verify(c: Ctx) -> None:
+    """Compare the current files with the seal."""
+    from .code.selfmod import repo_root
+    from .security import verify
+
+    v = verify(repo_root(), c.cfg.security_dir, [c.cfg.native_dir])
+    colour = "green" if v["status"].startswith("ok") else "red"
+    console.print(f"[{colour}]{v['status']}[/]  signature_ok={v['signature_ok']}  sealed_at={v.get('sealed_at')}")
+    for k in ("changed", "removed", "added"):
+        if v[k]:
+            console.print(f"  {k}: " + ", ".join(v[k][:20]) + (" ..." if len(v[k]) > 20 else ""))
+    sys.exit(0 if v["status"].startswith("ok") or v["status"] == "unsealed" else 1)
+
+
+@security.command("status")
+@click.pass_obj
+def security_status(c: Ctx) -> None:
+    """Threat level, recent event counts, lock state, audit chain integrity."""
+    from .code.selfmod import repo_root
+    from .security import assess, verify
+
+    audit = _audit(c)
+    v = verify(repo_root(), c.cfg.security_dir, [c.cfg.native_dir])
+    t = assess(audit, v["status"])
+    names = {0: "calm", 1: "watch", 2: "elevated", 3: "LOCKDOWN"}
+    console.print(f"threat: [bold]{names[t.level]}[/] ({t.level})  integrity: {v['status']}  locked: {c.cfg.security.locked}"
+                  + (f" ({c.cfg.security.locked_reason})" if c.cfg.security.locked else ""))
+    for r in t.reasons:
+        console.print(f"  - {r}")
+    console.print(f"events (24h): {t.counts or '{}'}")
+    chain = audit.verify_chain()
+    console.print(f"audit chain: {'intact' if chain['ok'] else 'BROKEN at line ' + str(chain.get('broken_at'))} ({chain['entries']} entries)")
+    risky = [k for k in ("code.auto_apply", "code.self_heal", "security.allow_public_workers") if __import__("gauge.settings", fromlist=["get"]).get(c.cfg, k)]
+    if risky:
+        console.print(f"[yellow]risky switches on:[/] {', '.join(risky)}")
+    if not c.cfg.research.respect_robots_txt:
+        console.print("[yellow]robots.txt is not honoured for research[/]")
+
+
+@security.command("log")
+@click.option("--min", "min_sev", type=int, default=1, show_default=True)
+@click.option("--limit", type=int, default=40, show_default=True)
+@click.pass_obj
+def security_log(c: Ctx, min_sev: int, limit: int) -> None:
+    """The tamper-evident audit log."""
+    rows = _audit(c).read(limit=limit, min_severity=min_sev)
+    if not rows:
+        console.print("(no events)")
+        return
+    for r in rows:
+        console.print(f"{r['at']}  sev{r['severity']}  {r['kind']:<16} {r['detail'][:140]}", markup=False, highlight=False)
+
+
+@security.command("lockdown")
+@click.argument("reason", default="manual")
+@click.pass_obj
+def security_lockdown(c: Ctx, reason: str) -> None:
+    """Switch off self-heal, auto-apply, bots, worker pool, research and daemon writing until unlocked."""
+    from .security import lockdown
+
+    console.print_json(json.dumps(lockdown(c.cfg, _audit(c), reason)))
+
+
+@security.command("unlock")
+@click.option("--no-restore", is_flag=True, help="Leave the switched-off automation off.")
+@click.pass_obj
+def security_unlock(c: Ctx, no_restore: bool) -> None:
+    """End a lockdown. Previously-on switches come back except auto-apply, which you must turn on again yourself."""
+    from .security import unlock
+
+    console.print_json(json.dumps(unlock(c.cfg, _audit(c), restore=not no_restore)))
+
+
+@security.command("scan")
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_obj
+def security_scan(c: Ctx, path: str) -> None:
+    """Static-scan a script or folder (Python, PowerShell, batch, JavaScript) for dangerous constructs."""
+    from .security import report, scan_files, worst
+
+    p = Path(path)
+    files = {str(f.relative_to(p)): f.read_text(encoding="utf-8", errors="replace") for f in (p.rglob("*") if p.is_dir() else [p]) if f.is_file()} \
+        if p.is_dir() else {p.name: p.read_text(encoding="utf-8", errors="replace")}
+    findings = scan_files(files)
+    console.print(report(findings))
+    sys.exit(1 if worst(findings) >= 3 else 0)
+
+
+@security.command("check-text")
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_obj
+def security_check_text(c: Ctx, path: str) -> None:
+    """Show instruction-shaped text the sanitiser would flag in a file."""
+    from .security import find_injections
+
+    hits = find_injections(Path(path).read_text(encoding="utf-8", errors="replace"))
+    if not hits:
+        console.print("clean")
+        return
+    for h in hits:
+        console.print(f"sev{h['severity']} {h['label']}: {h['match']}")
 
 
 # ---------------------------------------------------------------------------- gui

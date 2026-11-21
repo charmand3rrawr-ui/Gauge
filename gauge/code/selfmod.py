@@ -82,6 +82,18 @@ class SelfProgrammer:
                 compile(new, rel, "exec")
         except SyntaxError as e:
             return f"refused: {rel} does not compile ({e})"
+        if rel.endswith(".py") and not rel.startswith("tests/"):
+            from ..security.codescan import report as scan_report
+            from ..security.codescan import scan_text, worst
+
+            findings = scan_text(rel, new)
+            old_findings = scan_text(rel, old) if old else []
+            # New blocking constructs are refused; pre-existing ones (e.g. documented subprocess use) are allowed to stay.
+            new_blocks = [f for f in findings if f.severity >= 3 and f.rule not in {o.rule for o in old_findings}]
+            if new_blocks:
+                return "refused: security scan blocks new construct(s) in " + rel + ": " + scan_report([(rel, f) for f in new_blocks])[:300]
+            if worst(findings) >= 3 and not old:
+                return f"refused: new file {rel} contains blocked constructs"
         if old is not None and old.strip():
             ratio = len(new) / max(1, len(old))
             if ratio > MAX_GROWTH or ratio < 0.4:
@@ -126,6 +138,10 @@ class SelfProgrammer:
             if p.exists():
                 shown.append(f"===== {rel} =====\n{p.read_text(encoding='utf-8')[:14000]}")
         cards = self.kb.render([c for c in self.kb.search(instruction, k=3) if not c.key.startswith("self:")], max_chars=2500)
+        if context:
+            from ..security.sanitize import fence, scrub
+
+            context = fence("error context", scrub(context).text[:3000])
         ctx_block = ("CONTEXT (error / journal entry):\n" + context) if context else ""
         prompt = f"""[self:propose]
 INSTRUCTION: {instruction}

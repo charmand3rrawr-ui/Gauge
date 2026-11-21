@@ -198,6 +198,10 @@ def now_iso() -> str:
 # ---- http (polite, cached, no model) ------------------------------------------------
 def http_get(url: str, cache_dir: Optional[str | Path] = None, max_age_s: int = 3600, timeout: int = 30,
              user_agent: str = "GaugeBot/1 (local automation)") -> str:
+    import os
+
+    if os.environ.get("GAUGE_NO_NETWORK"):
+        raise PermissionError("this bot runs without network access (set \"network\": true in its manifest if it truly needs it)")
     import requests
 
     if cache_dir:

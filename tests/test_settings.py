@@ -20,7 +20,7 @@ def test_catalog_matches_config_and_coerces(tmp_path):
         st.get(cfg, sw.key)  # every key resolves
         if sw.kind == "choice":
             assert st.get(cfg, sw.key) in sw.choices or sw.kind == "text"
-    assert st.groups() == ["Writing", "The room", "Learning", "Model", "Automation"]
+    assert st.groups() == ["Writing", "The room", "Learning", "Model", "Security", "Automation"]
     # booleans accept words
     assert st.set_value(cfg, "write.rebel", "on", save=False) is True and st.get(cfg, "write.rebel") is True
     assert st.set_value(cfg, "write.rebel", "0", save=False) is False

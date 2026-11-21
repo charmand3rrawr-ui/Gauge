@@ -56,6 +56,16 @@ chapter. Change what is not yours in spirit. Serial readers are sharp and loyal;
 authors who show up, not pipelines that ship. Gauge's best use is as an editor that has read ten
 thousand chapters and can tell you, with numbers, that your ending resolves too much.
 
+## Defending itself
+
+Gauge defends itself only in ways that stay on its own machine: it scrubs
+prompt injection out of scraped text, scans code before it runs it, sandboxes
+its bots, seals and verifies its own files, keeps a tamper-evident audit log and
+switches its own automation off when something looks wrong. It never scans,
+probes, counter-attacks or deceives anyone else, and nothing in the security
+package can be turned toward another system. See `docs/SECURITY.md` for what
+Gauge is entitled to refuse and what it does when it is attacked.
+
 ## Disclosure
 
 Many platforms now ask or require that AI-assisted work be labelled. Follow the rules of the

@@ -127,8 +127,28 @@ class Scout:
         except Exception as e:  # a source outage must never stop a chapter
             log.warning("scout: %s failed for %r: %s", source, query, e)
             snippets = []
+        snippets = self._sanitize(snippets)
         self.db.research_store(key, source, query, [s.to_dict() for s in snippets])
         return Finding(query, source, snippets, why=why)
+
+    def _sanitize(self, snippets: list[Snippet]) -> list[Snippet]:
+        from ..security.sanitize import scrub
+
+        action = getattr(getattr(self.cfg, "security", None), "injection_action", "scrub")
+        out = []
+        for sn in snippets:
+            r = scrub(sn.text, action)
+            if r.suspicious:
+                try:
+                    from ..security.audit import AuditLog
+
+                    AuditLog(self.cfg.security_dir / "audit.jsonl").event("injection", f"research snippet {sn.source}: {sn.title}", 2)
+                except Exception:
+                    pass
+            if r.text:
+                sn.text = r.text
+                out.append(sn)
+        return out
 
     def research(self, queries: list[dict[str, str]], project: Optional[str] = None, chapter: Optional[int] = None) -> Dossier:
         """queries: [{"query": ..., "source": ..., "why": ...}]"""

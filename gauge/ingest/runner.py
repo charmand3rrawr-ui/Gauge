@@ -70,6 +70,7 @@ class IngestRunner:
             ch = src.fetch_chapter(novel, ref)
             if ch is None:
                 continue
+            self._sanitize_chapter(ch, novel.key)
             self.db.upsert_chapter(ch)
             if ch.comment_texts:
                 self.db.add_comments(novel.key, ch.index, ch.comment_texts)
@@ -77,6 +78,33 @@ class IngestRunner:
         self.db.touch_follow(url)
         log.info("%s: %d new chapters (%d total listed)", novel.title, got, len(refs))
         return {"novels": 1, "chapters": got}
+
+    def _sanitize_chapter(self, ch, novel_key: str) -> None:
+        """Untrusted text is data: strip hidden characters, neutralise instruction-shaped spans, log what was found."""
+        from ..security.sanitize import scrub
+
+        action = getattr(getattr(self.cfg, "security", None), "injection_action", "scrub")
+        r = scrub(ch.text, action)
+        ch.text = r.text
+        cleaned_comments = []
+        flagged = list(r.findings)
+        for cm in ch.comment_texts or []:
+            rc = scrub(str(cm.get("text", "")), action)
+            if rc.text:
+                cleaned_comments.append({**cm, "text": rc.text})
+            flagged += rc.findings
+        ch.comment_texts = cleaned_comments
+        if flagged and max(f["severity"] for f in flagged) >= 2:
+            self._audit("injection", f"{novel_key}#{ch.index}: " + "; ".join(f"{f['label']} ({f['match'][:40]})" for f in flagged[:3]),
+                        2, {"count": len(flagged)})
+
+    def _audit(self, kind: str, detail: str, sev: int, data: Optional[dict] = None) -> None:
+        try:
+            from ..security.audit import AuditLog
+
+            AuditLog(self.cfg.security_dir / "audit.jsonl").event(kind, detail, sev, data)
+        except Exception as e:  # auditing must never break ingestion
+            log.debug("audit failed: %s", e)
 
     def run(self, max_novels: Optional[int] = None) -> dict[str, int]:
         started = utcnow()
@@ -127,6 +155,7 @@ class IngestRunner:
                 prev = have.get(ch.index)
                 if prev == ch.content_hash:
                     continue
+                self._sanitize_chapter(ch, n.key)
                 self.db.upsert_chapter(ch)
                 if prev is None:
                     new += 1
