@@ -6,17 +6,17 @@ one shippable change. Effort is a rough size: **S** a session, **M** a few, **L*
 Items marked *(needs X)* depend on a capability or external data. This is the plan to work through in
 tested batches — not a promise that all 100 exist yet.
 
-## A. Prose and craft realism (builds on the realism layer)
-1. Subtext editor: flag on-the-nose dialogue where characters state exactly what they feel/want. **M**
-2. Dialogue realism: detect everyone speaking in the same register; reward interruptions, overlap, silence. **M**
-3. Metaphor freshness: flag cliché similes against a cliché lexicon; reward novel, apt images. **S**
-4. Paragraph-rhythm pass: vary paragraph length deliberately; flag monotone blocks. **S**
-5. White-space/beat pacing: ensure action beats break up dialogue; flag talking-heads scenes. **S**
-6. POV discipline: detect head-hopping within a scene for limited-POV projects. **M**
-7. Tense/aspect consistency checker across a chapter. **S**
-8. Sentence-opener variety: flag repeated openings (She… She… She…). **S**
-9. Concrete-verb pass: flag weak verb + adverb pairs ("walked slowly" → "trudged"). **S**
-10. Period/register diction guard for historical settings (anachronism lexicon). **M** *(needs setting metadata)*
+## A. Prose and craft realism (builds on the realism layer)  — DONE (gauge.write.prose + Craft Editor)
+1. [done] Subtext editor: flag on-the-nose dialogue where characters state exactly what they feel/want. **M**
+2. [done] Dialogue realism: detect everyone speaking in the same register; reward interruptions, overlap, silence. **M**
+3. [done] Metaphor freshness: flag cliché similes against a cliché lexicon; reward novel, apt images. **S**
+4. [done] Paragraph-rhythm pass: vary paragraph length deliberately; flag monotone blocks. **S**
+5. [done] White-space/beat pacing: ensure action beats break up dialogue; flag talking-heads scenes. **S**
+6. [done] POV discipline: detect head-hopping within a scene for limited-POV projects. **M**
+7. [done] Tense/aspect consistency checker across a chapter. **S**
+8. [done] Sentence-opener variety: flag repeated openings (She… She… She…). **S**
+9. [done] Concrete-verb pass: flag weak verb + adverb pairs ("walked slowly" → "trudged"). **S**
+10. [done] Period/register diction guard for historical settings (anachronism lexicon). **M** *(needs setting metadata)*
 
 ## B. Characters and psychology
 11. Want-vs-need tracker per character across the arc; flag a protagonist with no visible need. **M**

@@ -5,6 +5,7 @@ from .base import AgentReview, SceneContext, StoryAgent
 from .comedian import Comedian
 from .continuity_auditor import ContinuityAuditor
 from .council import ALL_AGENTS, AgentCouncil, build_council
+from .craft_editor import CraftEditor
 from .editor import LineEditor
 from .librarian import Librarian
 from .pacing import PacingDirector
@@ -21,4 +22,4 @@ from .theme import ThemeKeeper
 from .voice_coach import VoiceCoach
 
 __all__ = ["Archivist", "AgentReview", "SceneContext", "StoryAgent", "Comedian", "ALL_AGENTS", "AgentCouncil", "build_council",
-           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper", "VoiceCoach", "ReadabilityCoach", "SuitabilityChecker", "ArcKeeper", "SensoryEditor", "ContinuityAuditor"]
+           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper", "VoiceCoach", "ReadabilityCoach", "SuitabilityChecker", "ArcKeeper", "SensoryEditor", "ContinuityAuditor", "CraftEditor"]
