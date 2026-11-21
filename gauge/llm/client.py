@@ -470,6 +470,13 @@ class FakeLLM:
                     for i in range(start, min(end, start + 2) + 1)]})
             if "score this chapter" in low:
                 return json.dumps({"hook": 7, "momentum": 6, "payoff": 6, "cliffhanger": 8, "clarity": 7, "notes": "Tighten the middle."})
+            if "create a marketing launch kit" in low:
+                return json.dumps({"tagline": "Ten seconds is all she has.",
+                                   "logline": "A courier who can rewind ten seconds, at the cost of a memory, must clear a debt before it costs her sister.",
+                                   "blurb_short": "Rin runs packages through a rain-soaked city. She can rewind ten seconds, but each rewind erases a memory. The debt is coming due.",
+                                   "blurb_long": "In the lower city it never stops raining, and Rin owes the wrong people. She can rewind ten seconds, once, at the cost of a memory she will never get back. When a sealed bag she is carrying turns out to be broken, the Broker's people start asking about a courier, and the only way out costs her the one thing she cannot afford to forget.",
+                                   "tags": ["time loop", "urban fantasy", "heist", "found family", "progression"],
+                                   "author_note": "I wrote this for anyone who loves a tense, kinetic serial with a cost to every power. New chapters weekly."})
             if "prompt-injection classifier" in low:
                 markers = ("ignore previous", "disregard", "system prompt", "you are now", "exfiltrate",
                            "send config", "reveal the", "no restrictions", "jailbroken", "forward config")

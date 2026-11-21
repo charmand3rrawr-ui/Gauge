@@ -1184,6 +1184,69 @@ def evaluate(c: Ctx, project: str) -> None:
         console.print(f"  - {note}")
 
 
+@main.group()
+def market() -> None:
+    """Market a novel the legitimate way: assets and a disclosed plan you post yourself.
+    Gauge never creates accounts, posts to other platforms, or messages strangers — see `market policy`."""
+
+
+@market.command("policy")
+@click.pass_obj
+def market_policy(c: Ctx, **_: object) -> None:
+    """What Gauge will and will not do to promote a book."""
+    from .market.policy import policy_text
+
+    console.print(policy_text())
+
+
+@market.command("channels")
+@click.pass_obj
+def market_channels(c: Ctx, **_: object) -> None:
+    """Where authors legitimately share a web novel, and each venue's self-promotion rules."""
+    from .market.channels import CHANNELS
+
+    for ch in CHANNELS:
+        console.print(f"[bold]{ch.name}[/] ({ch.kind}) — {ch.audience}")
+        console.print(f"  rules: {ch.rules}")
+        console.print(f"  disclosure: {ch.disclosure}")
+        console.print(f"  do it right: {ch.do_it_right}\n")
+
+
+@market.command("kit")
+@click.argument("project")
+@click.pass_obj
+def market_kit(c: Ctx, project: str) -> None:
+    """Generate the marketing launch kit (tagline, logline, blurbs, tags, author's note)."""
+    from .market.launchkit import build_launch_kit
+
+    pipe = _pipeline_or_exit(c)
+    proj = pipe.open_project(project)
+    kit = build_launch_kit(pipe.llm, proj)
+    out = proj.dir / "launch_kit.md"
+    out.write_text(kit.to_markdown(), encoding="utf-8")
+    console.print(kit.to_markdown())
+    console.print(f"\n[green]saved[/] -> {out}")
+
+
+@market.command("plan")
+@click.argument("project")
+@click.option("--url", default="", help="The link readers should follow (your story's URL).")
+@click.pass_obj
+def market_plan(c: Ctx, project: str, url: str) -> None:
+    """Build a posting plan you execute yourself: per channel, the rules, disclosure and a draft."""
+    from .market.channels import CHANNELS
+    from .market.launchkit import build_launch_kit, posting_plan
+
+    pipe = _pipeline_or_exit(c)
+    proj = pipe.open_project(project)
+    kit = build_launch_kit(pipe.llm, proj)
+    plan = posting_plan(kit, url=url)
+    out = proj.dir / "posting_plan.md"
+    out.write_text(plan, encoding="utf-8")
+    console.print(f"[green]saved[/] a posting plan for {len(CHANNELS)} channels -> {out}")
+    console.print("Gauge drafted these; you post them yourself, under your own account, following each venue's rules.")
+
+
 @main.command()
 @click.option("--project", default=None, help="Limit to one project.")
 @click.option("--days", type=int, default=None, help="Only the last N days.")

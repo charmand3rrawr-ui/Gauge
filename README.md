@@ -166,9 +166,13 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge code cards/search/learn` | programming knowledge cards and your own notes |
 | `gauge self propose/test/apply/rollback/list/journal/heal` | guarded self-modification; see [docs/SELF.md](docs/SELF.md) |
 | `gauge settings list/show/on/off/set/reset` | the switches; same catalog as the Studio panel; see [docs/SWITCHES.md](docs/SWITCHES.md) |
-| `gauge security seal/verify/status/log/lockdown/unlock/scan/check-text` | defences; see [docs/SECURITY.md](docs/SECURITY.md) |
+| `gauge security seal/verify/status/log/lockdown/unlock/scan/check-text/range/drill/defense/deps` | defences, cyber-range and adversarial drill; see [docs/SECURITY.md](docs/SECURITY.md) |
+| `gauge market kit/plan/channels/policy` | marketing assets and a disclosed plan you post yourself; see [docs/MARKETING.md](docs/MARKETING.md) |
+| `gauge code lang/binary/disasm` | read any language, read files at the binary level, disassemble Python |
+| `gauge feedback` / `gauge feedback-import` / `gauge evaluate` / `gauge profile` | record real reader numbers, bulk-import them, check score-vs-retention, see cost/latency |
+| `gauge build-sft PROJECT` | curate instruction-tuning data from accepted chapters |
 | `gauge gui` | open Gauge Studio (the big-button window) |
-| `gauge write NAME [--chapters N] [--fresh]` | draft, score, revise, save; resumes checkpointed drafts |
+| `gauge write NAME [--chapters N] [--fresh] [--seed S]` | draft, score, revise, save; resumes checkpointed drafts; `--seed` makes it reproducible |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
 | `gauge projects [NAME]` | list projects / status |
 | `gauge character new/roll/sync/list/show/set/brief/chat/remove` | characters as independent agents with personality matrices; see [docs/CHARACTERS.md](docs/CHARACTERS.md) |
