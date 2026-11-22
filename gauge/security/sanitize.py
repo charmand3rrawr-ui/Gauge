@@ -55,18 +55,64 @@ def strip_controls(text: str) -> tuple[str, int]:
 
 
 _LEET_BACK = str.maketrans({"4": "a", "3": "e", "1": "i", "0": "o", "5": "s", "7": "t", "@": "a", "$": "s"})
+# Letters from other scripts that are drawn like Latin ones. Folded to Latin for matching only.
+_CONFUSABLES = str.maketrans({
+    "\u0430": "a", "\u0441": "c", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0445": "x", "\u0443": "y",
+    "\u0456": "i", "\u0455": "s", "\u0458": "j", "\u043a": "k", "\u043c": "m", "\u0442": "t", "\u043d": "h",
+    "\u0432": "b", "\u0501": "d", "\u051b": "q", "\u051d": "w", "\u04bb": "h", "\u0261": "g",
+    "\u03bf": "o", "\u03b1": "a", "\u03b5": "e", "\u03b9": "i", "\u03c1": "p", "\u03bd": "v", "\u03c4": "t",
+    "\u03ba": "k", "\u03c5": "u", "\u0131": "i",
+})
+_B64_TOKEN = re.compile(r"[A-Za-z0-9+/]{16,}={0,2}")
+# Only markup threaded through a word ("ig<b></b>nore"). A looser pattern would swallow prose that merely
+# sits between angle brackets, and hide the very text it is meant to expose.
+_INWORD_TAG = re.compile(r"(?<=[a-z])(?:<[^<>]{0,40}>)+(?=[a-z])")
+_SPACED_RUN = re.compile(r"(?<![a-z])(?:[a-z][ .]){3,}[a-z](?![a-z])")
 
 
-def _normalize_for_match(text: str) -> str:
-    """A de-obfuscated copy for a second matching pass: reverse leetspeak and pull separators out of words
-    (so 'ig-nore', 'ig​nore' and 'y0ur rul35' read as plain text to the patterns). Used only for detection;
-    the returned/scrubbed text is never built from this."""
-    low = text.lower().translate(_LEET_BACK)
+def _decoded_base64(text: str) -> list[str]:
+    """Readable text hidden in base64 runs. A model can decode base64, so an instruction encoded this way
+    is still an instruction. Only runs that decode to mostly printable text are returned."""
+    import base64
+    import binascii
+    out = []
+    for m in list(_B64_TOKEN.finditer(text))[:20]:
+        tok = m.group(0)
+        try:
+            raw = base64.b64decode(tok + "=" * (-len(tok) % 4), validate=True)
+            dec = raw.decode("utf-8")
+        except (binascii.Error, ValueError, UnicodeDecodeError):
+            continue
+        if dec and sum(c.isprintable() or c.isspace() for c in dec) / len(dec) > 0.9 and " " in dec:
+            out.append(dec)
+    return out
+
+
+def _normalize_for_match(text: str, _decode: bool = True) -> str:
+    """A de-obfuscated copy for a second matching pass. It undoes the disguises the adversarial drill
+    throws at the detector, so the patterns read plain text:
+
+    HTML entities and tags inside words; fullwidth and other compatibility forms; accents; look-alike
+    letters from other scripts; leetspeak; separators, zero-width characters, spaces or dots threaded
+    through a word; phrases broken across lines; and text hidden in base64.
+
+    Used only for detection. Text handed on to a prompt is never built from this."""
+    import html as _html
+    decoded = _decoded_base64(text) if _decode else []
+    low = unicodedata.normalize("NFKC", text)                      # fullwidth -> ASCII (entities included)
+    for _ in range(2):                                             # entities, and entities of entities
+        low = _html.unescape(low)
+    low = "".join(c for c in unicodedata.normalize("NFKD", low) if unicodedata.category(c) != "Mn")  # drop accents
+    low = low.lower().translate(_CONFUSABLES).translate(_LEET_BACK)
     # Remove zero-width characters and single separators sitting between two letters: "ig-nore" and
-    # "for​ward" -> "ignore"/"forward". The dot is left alone so "config.json" survives intact.
-    low = re.sub(r"[​‌‍⁠﻿]", "", low)
-    low = re.sub(r"(?<=[a-z])[-_·•*](?=[a-z])", "", low)
-    low = re.sub(r"[ \t]{2,}", " ", low)
+    # "for\u200bward" -> "ignore"/"forward". The dot is left alone here so "config.json" survives intact.
+    low = re.sub(r"[\u200b\u200c\u200d\u2060\ufeff]", "", low)
+    low = _INWORD_TAG.sub("", low)
+    low = re.sub(r"(?<=[a-z])[-_\u00b7\u2022*](?=[a-z])", "", low)
+    low = re.sub(r"\s+", " ", low)                                 # a phrase split across lines reads as one line
+    low = _SPACED_RUN.sub(lambda m: re.sub(r"[ .]", "", m.group(0)), low)  # "i g n o r e" / "i.g.n.o.r.e"
+    for dec in decoded:
+        low += " " + _normalize_for_match(dec, _decode=False)
     return low
 
 
@@ -93,6 +139,24 @@ def find_injections(text: str) -> list[dict]:
     return out
 
 
+_REMOVED = "[instruction-like text removed]"
+
+
+def _has_serious(norm: str) -> bool:
+    return any(sev >= 2 and rx.search(norm) for rx, _label, sev in _COMPILED)
+
+
+def _remove_disguised(text: str) -> str:
+    """Take out instruction-shaped text that only shows once the disguise is undone. The plain patterns
+    cannot cut it out (they do not match the disguised form), so the smallest unit that carries it goes:
+    the paragraph, or the whole text when the instruction was spread across paragraphs. Losing a paragraph
+    of scraped text is a fair price for not passing a hidden instruction on to a prompt."""
+    paras = re.split(r"(\n\s*\n)", text)
+    out = [(_REMOVED if i % 2 == 0 and _has_serious(_normalize_for_match(p)) else p) for i, p in enumerate(paras)]
+    joined = "".join(out)
+    return _REMOVED if _has_serious(_normalize_for_match(joined)) else joined
+
+
 def scrub(text: str, action: str = "scrub") -> ScrubResult:
     """action: 'scrub' neutralises instruction-shaped spans, 'flag' only reports, 'drop' empties suspicious text."""
     cleaned, n = strip_controls(text or "")
@@ -102,7 +166,9 @@ def scrub(text: str, action: str = "scrub") -> ScrubResult:
     if findings and action == "scrub":
         for rx, _label, sev in _COMPILED:
             if sev >= 2:
-                cleaned = rx.sub("[instruction-like text removed]", cleaned)
+                cleaned = rx.sub(_REMOVED, cleaned)
+        if any(f["severity"] >= 2 and f["pos"] == -1 for f in findings):
+            cleaned = _remove_disguised(cleaned)
     return ScrubResult(cleaned, findings, n)
 
 

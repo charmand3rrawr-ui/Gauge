@@ -95,6 +95,9 @@ SWITCHES: list[Switch] = [
     # ---- automation -----------------------------------------------------------------------
     Switch("dry_run", "Dry run (hold everything outward)", "bool", "Hold posting, email, newsdesk publishing, self-modification, restore, daemon chapter writes and bots; report what a real run would have done. Same as gauge --dry-run.", "Automation"),
     Switch("daemon.write_after_learning", "Daemon writes chapters", "bool", "Each learning cycle also writes the next chapter of the active project.", "Automation"),
+    Switch("daemon.error_budget", "Error budget (per window)", "int", "Unresolved errors the daemon may accumulate per window before it holds chapter writes, newsdesk, bots and auto-apply and slows down. 0 turns the budget off.", "Automation", 0, 1000),
+    Switch("daemon.error_window_hours", "Error budget window (hours)", "int", "The rolling window the error budget is counted over.", "Automation", 1, 720),
+    Switch("logs.structured", "Structured log file", "bool", "Also write every log record as a JSON line to logs/gauge.jsonl in the data directory (rotated, secrets masked).", "Automation"),
     Switch("newsdesk.enabled", "Newsdesk in the daemon", "bool", "Each daemon cycle discovers trends, drafts original commentary into the review queue, and publishes one due piece.", "Automation"),
     Switch("newsdesk.interval_minutes", "Publish interval (minutes)", "int", "At most one piece is published per interval.", "Automation", 5, 1440),
     Switch("newsdesk.max_per_day", "Pieces per day (cap)", "int", "Hard daily ceiling on published pieces.", "Automation", 1, 96),

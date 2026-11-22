@@ -60,6 +60,8 @@ def render_report(cfg: Any) -> str:
     dry = is_dry_run() or bool(getattr(cfg, "dry_run", False))
     lines = ["Gauge automation audit", "", f"Security lockdown: {'ACTIVE' if cfg.security.locked else 'off'}",
              f"Dry run: {'ACTIVE: held = ' + ', '.join(HELD_ACTIONS) if dry else 'off (gauge --dry-run holds every outward or hard-to-undo action)'}",
+             (f"Error budget: {cfg.daemon.error_budget} unresolved errors per {cfg.daemon.error_window_hours}h, then the daemon "
+              "holds its automation and slows down" if cfg.daemon.error_budget else "Error budget: off"),
              ""]
     for a in audit_report(cfg):
         lines.append(f"[{'ON ' if a.on else 'off'}] {a.name}")

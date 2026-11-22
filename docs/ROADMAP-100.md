@@ -116,11 +116,11 @@ tested batches — not a promise that all 100 exist yet.
 
 ## J. Safety, reliability, and operations
 91. Content-provenance manifest: sign published pieces so edits are detectable. **M**
-92. Expand the adversarial drill with new obfuscation families each release. **S**
+92. [done] Expand the adversarial drill with new obfuscation families each release (family registry, 13 new, `--sweep`). **S**
 93. Red-team the newsdesk against planted misinformation sources. **M**
 94. [done] Backup/restore of the whole data dir with integrity verification. **S**
 95. [done] Config migration framework for schema changes across versions. **S**
-96. Structured logging and an error budget the daemon respects. **S**
+96. [done] Structured logging and an error budget the daemon respects (`gauge logs`, `gauge budget`). **S**
 97. [done] A "dry-run everything" mode for a safe first run of any automation (`gauge --dry-run`). **S**
 98. Property-based tests across the pipeline (extends the mutation gate). **M**
 99. A one-command Windows installer update channel with signed releases. **M**

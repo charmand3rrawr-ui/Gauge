@@ -377,6 +377,11 @@ class Database:
         q = "SELECT * FROM journal" + (" WHERE resolved=0" if unresolved_only else "") + " ORDER BY id DESC LIMIT ?"
         return [dict(r) for r in self._conn.execute(q, (limit,))]
 
+    def journal_since(self, since_iso: str, unresolved_only: bool = True) -> list[dict[str, Any]]:
+        """Journal entries at or after a timestamp (for the daemon's error budget)."""
+        q = "SELECT id, at, kind, message FROM journal WHERE at >= ?" + (" AND resolved=0" if unresolved_only else "") + " ORDER BY id"
+        return [dict(r) for r in self._conn.execute(q, (since_iso,))]
+
     def recurring_errors(self, min_count: int = 2) -> list[dict[str, Any]]:
         rows = self._conn.execute("SELECT message, COUNT(*) AS n, MAX(traceback) AS traceback, MAX(kind) AS kind FROM journal "
                                   "WHERE resolved=0 GROUP BY substr(message, 1, 80) HAVING n >= ? ORDER BY n DESC", (min_count,))

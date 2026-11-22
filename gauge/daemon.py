@@ -61,6 +61,20 @@ class Daemon:
         started = utcnow()
         out: dict[str, object] = {}
         automation_ok = self._security_check(out)
+        # Error budget: too many unresolved failures in the window and the optional automation is held.
+        from .ops.budget import budget_for
+        from .ops.logs import event
+
+        budget = budget_for(self.cfg, self.db).status()
+        degraded = budget.exhausted
+        if budget.enabled:
+            out["error_budget"] = {"state": budget.state, "spent": budget.spent, "allowed": budget.allowed,
+                                   "window_hours": budget.window_hours}
+        if degraded:
+            event(log, "error_budget_exhausted", logging.WARNING,
+                  f"error budget exhausted ({budget.spent}/{budget.allowed} in {budget.window_hours}h): holding chapter writes, "
+                  "newsdesk, bots and auto-apply; learning continues", spent=budget.spent, allowed=budget.allowed,
+                  by_kind=budget.by_kind)
         ingest = IngestRunner(self.cfg, self.db)
         try:
             out["ingest"] = ingest.run()
@@ -81,6 +95,7 @@ class Daemon:
                                              self.cfg.learn.target).run(self.cfg.learn.absorb_per_cycle)
                 except Exception as e:
                     log.exception("absorb failed: %s", e)
+                    self._journal("absorb", e)
                     out["absorb"] = f"failed: {e}"
             else:
                 out["absorb"] = "skipped: LLM not reachable"
@@ -133,13 +148,16 @@ class Daemon:
                             out["distributed"] = rnd
                 except Exception as e:
                     log.exception("native training failed: %s", e)
+                    self._journal("native", e)
                     out["native"] = f"failed: {e}"
         do_write = self.cfg.daemon.write_after_learning if write is None else write
         from .dryrun import hold, is_dry_run
         dry = is_dry_run()
         if dry:
             out["dry_run"] = True
-        if do_write and self.cfg.daemon.active_project and dry:
+        if do_write and self.cfg.daemon.active_project and degraded:
+            out["write"] = "held: error budget exhausted"
+        elif do_write and self.cfg.daemon.active_project and dry:
             hold("daemon chapter writes", f"next chapter of {self.cfg.daemon.active_project}")
             out["write"] = "held: dry run"
         elif do_write and self.cfg.daemon.active_project:
@@ -153,7 +171,7 @@ class Daemon:
             else:
                 out["write"] = f"skipped: LLM not reachable ({pipe.llm.describe()})"
         # Newsdesk: trends -> original sourced commentary into the review queue -> publish one due piece.
-        if self.cfg.newsdesk.enabled and automation_ok:
+        if self.cfg.newsdesk.enabled and automation_ok and not degraded:
             try:
                 from .llm import make_llm
                 from .newsdesk.desk import run_cycle
@@ -164,7 +182,7 @@ class Daemon:
             except Exception as e:
                 self._journal("newsdesk", e)
         # Scheduled bots (plain programs; deterministic ones cannot reach the model).
-        if self.cfg.code.bots_enabled and automation_ok:
+        if self.cfg.code.bots_enabled and automation_ok and not degraded:
             try:
                 from .code import BotRegistry
 
@@ -197,11 +215,24 @@ class Daemon:
                         out["self_heal"] = SelfProgrammer(
                             llm, kb, self.cfg.self_dir, mutation_check=self.cfg.code.mutation_check,
                             mutation_min_score=self.cfg.code.mutation_min_score, mutation_max_mutants=self.cfg.code.mutation_max_mutants,
-                        ).heal(entries, auto_apply=self.cfg.code.auto_apply)
+                        ).heal(entries, auto_apply=self.cfg.code.auto_apply and not degraded)  # propose, do not self-apply when unhealthy
             except Exception as e:
                 self._journal("self_heal", e)
+        failed = sorted(k for k, v in out.items() if isinstance(v, str) and v.startswith("failed"))
+        event(log, "cycle_done", logging.WARNING if failed else logging.INFO,
+              f"cycle done in {(utcnow() - started).total_seconds():.0f}s" + (f"; failed steps: {', '.join(failed)}" if failed else ""),
+              duration_s=round((utcnow() - started).total_seconds(), 1), failed_steps=failed, degraded=degraded,
+              budget_state=budget.state, steps=sorted(out))
         self.db.log_run("daemon_cycle", started, out)
         return out
+
+    def _backoff(self) -> float:
+        """How much longer to sleep between cycles, from the error budget (1.0 when healthy or off)."""
+        try:
+            from .ops.budget import budget_for
+            return budget_for(self.cfg, self.db).status().backoff
+        except Exception:  # the budget must never stop the loop
+            return 1.0
 
     def run_forever(self) -> None:
         try:
@@ -215,10 +246,12 @@ class Daemon:
                 summary = self.once()
                 log.info("cycle done: %s", summary)
             except Exception as e:  # never let one bad cycle kill the loop
-                log.exception("cycle failed: %s", e)
+                from .ops.logs import event
+                event(log, "cycle_failed", logging.ERROR, f"cycle failed: {e}", exc_info=True)
                 self._journal("cycle", e)
-            wait = max(60.0, self.cfg.daemon.cycle_minutes * 60 - (time.monotonic() - t0))
-            log.info("sleeping %.0f minutes", wait / 60)
+            backoff = self._backoff()
+            wait = max(60.0, self.cfg.daemon.cycle_minutes * 60 * backoff - (time.monotonic() - t0))
+            log.info("sleeping %.0f minutes%s", wait / 60, f" (error budget backoff x{backoff:g})" if backoff > 1 else "")
             end = time.monotonic() + wait
             while not self._stop and time.monotonic() < end:
                 time.sleep(min(5.0, end - time.monotonic()))

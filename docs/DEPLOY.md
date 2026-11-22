@@ -65,6 +65,41 @@ inherit it through the environment. Reading, analysis, training and drafting int
 run, and so does anything you run explicitly that only writes inside the data directory (`gauge write`,
 `gauge site build`). `gauge audit` shows whether a dry run is active.
 
+## Logs you can search
+
+Alongside the readable console output, every log record is written as one JSON object per line to
+`<data>/logs/gauge.jsonl`: a UTC timestamp, level, logger, message, structured fields (`event`,
+`duration_s`, `failed_steps`, `budget_state` ...) and, for errors, the exception type, message and
+traceback. The file rotates at `logs.max_mb` (default 5 MB) and keeps `logs.backups` old files, so an
+unattended daemon cannot fill the disk. Credentials are masked: any field whose name looks like a token,
+password, secret or API key, and `token=...`-shaped fragments inside messages.
+
+```
+gauge logs                         # the last 30 records
+gauge logs --level warning         # warnings and errors only
+gauge logs --event cycle_done      # one record per daemon cycle
+gauge logs --json --tail 200       # raw lines, for jq or a log shipper
+```
+
+Turn it off with the **Structured log file** switch (`logs.structured`).
+
+## The error budget
+
+A loop that fails the same way every cycle should not keep writing, publishing and running bots at full
+speed while nobody is watching. The daemon counts unresolved errors in a rolling window
+(`daemon.error_budget`, default 10 per `daemon.error_window_hours`, default 24):
+
+| state | when | what the daemon does |
+| --- | --- | --- |
+| healthy | under half spent | normal pace |
+| strained | half or more spent | doubles its sleep between cycles |
+| exhausted | all spent | sleeps `daemon.max_backoff` times longer (default 4) and holds chapter writes, newsdesk, bots and auto-applying self-fixes |
+
+While exhausted, ingest, analysis and training continue, and self-heal still proposes fixes (it just
+does not apply them on its own), since that is the way back. The budget refills as errors age out of the
+window, or at once when they are resolved. `gauge budget` shows the state and which steps are spending
+it; `gauge audit` shows the allowance. Set `daemon.error_budget` to 0 to turn it off.
+
 ## Security
 
 This is a control API: it can write chapters and run cycles. It is built to the same posture as the rest

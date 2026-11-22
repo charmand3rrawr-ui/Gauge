@@ -268,6 +268,15 @@ class DaemonConfig(BaseModel):
     cycle_minutes: int = 180
     write_after_learning: bool = False
     active_project: str = ""
+    error_budget: int = 10  # unresolved errors allowed per window before the daemon holds its automation; 0 = off
+    error_window_hours: int = 24  # the rolling window the budget is counted over
+    max_backoff: int = 4  # when the budget is exhausted, sleep this many times longer between cycles
+
+
+class LogsConfig(BaseModel):
+    structured: bool = True  # also write every log record as a JSON line to <data>/logs/gauge.jsonl
+    max_mb: int = 5  # rotate the file at this size
+    backups: int = 3  # rotated files to keep
 
 
 CONFIG_VERSION = 1  # bump when a migration is added to GaugeConfig._migrate
@@ -291,6 +300,7 @@ class GaugeConfig(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     newsdesk: NewsdeskConfig = Field(default_factory=NewsdeskConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
+    logs: LogsConfig = Field(default_factory=LogsConfig)
 
     @property
     def security_dir(self) -> Path:

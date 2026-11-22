@@ -44,6 +44,11 @@ def main(ctx: click.Context, data_dir: Optional[str], verbose: bool, dry_run: bo
     """Gauge: learn what makes web novels addictive, then write them. Local, open source."""
     _setup_logging(verbose)
     ctx.obj = Ctx(data_dir)
+    if ctx.obj.cfg.logs.structured:
+        from .ops.logs import remove_structured_log, setup_structured_log
+
+        setup_structured_log(ctx.obj.cfg.root / "logs" / "gauge.jsonl", ctx.obj.cfg.logs.max_mb, ctx.obj.cfg.logs.backups)
+        ctx.call_on_close(remove_structured_log)
     from . import dryrun
 
     if dry_run or ctx.obj.cfg.dry_run or dryrun.is_dry_run():
@@ -2661,6 +2666,51 @@ def restore(c: Ctx, path: str, into: Optional[str], verify_only: bool, overwrite
 
 
 @main.command()
+@click.option("--tail", type=int, default=30, show_default=True, help="How many records to show.")
+@click.option("--level", type=click.Choice(["debug", "info", "warning", "error"]), default=None, help="Only this level and above.")
+@click.option("--event", "event_name", default=None, help="Only records for this event (e.g. cycle_done, cycle_failed).")
+@click.option("--json", "as_json", is_flag=True, help="Print the raw JSON lines.")
+@click.pass_obj
+def logs(c: Ctx, tail: int, level: Optional[str], event_name: Optional[str], as_json: bool) -> None:
+    """Read the structured log (<data>/logs/gauge.jsonl): filter by level or event."""
+    from .ops.logs import read_log
+
+    path = c.cfg.root / "logs" / "gauge.jsonl"
+    rows = read_log(path, tail=tail, min_level=level, event_name=event_name)
+    if not rows:
+        console.print(f"no matching records in {path}" + ("" if c.cfg.logs.structured else " (logs.structured is off)"))
+        return
+    for r in rows:
+        if as_json:
+            console.print(json.dumps(r, ensure_ascii=False), markup=False, highlight=False, soft_wrap=True)
+            continue
+        extra = " ".join(f"{k}={r[k]}" for k in ("event", "duration_s", "failed_steps", "budget_state") if r.get(k) not in (None, "", []))
+        err = f" [{r['error']['type']}: {r['error']['message'][:80]}]" if isinstance(r.get("error"), dict) else ""
+        console.print(f"{str(r.get('ts', ''))[:19]} {str(r.get('level', '')).upper():7} {r.get('msg', '')[:110]}{err}"
+                      + (f"  ({extra})" if extra else ""), markup=False, highlight=False)
+
+
+@main.command()
+@click.pass_obj
+def budget(c: Ctx) -> None:
+    """The daemon's error budget: unresolved failures in the rolling window, and what that means for it."""
+    from .ops.budget import budget_for
+
+    b = budget_for(c.cfg, c.db).status()
+    if not b.enabled:
+        console.print("error budget: off (daemon.error_budget is 0)")
+        return
+    colour = {"healthy": "green", "strained": "yellow", "exhausted": "red"}[b.state]
+    console.print(f"error budget: [{colour}]{b.state}[/]  {b.spent} of {b.allowed} spent in the last {b.window_hours}h "
+                  f"({b.remaining} left); sleep between cycles x{b.backoff:g}")
+    if b.by_kind:
+        console.print("  by kind: " + ", ".join(f"{k} {n}" for k, n in b.by_kind.items()))
+    if b.exhausted:
+        console.print("  the daemon is holding chapter writes, newsdesk, bots and auto-apply; learning and self-heal proposals continue.")
+        console.print("  it refills as errors age out, or at once when they are resolved (see `gauge self journal`).")
+
+
+@main.command()
 @click.pass_obj
 def audit(c: Ctx) -> None:
     """Plain-language report of every automation: what is on, what it can do, what bounds it."""
@@ -3296,12 +3346,26 @@ def security_range(c: Ctx) -> None:
 @click.option("--rounds", type=int, default=None, help="How many adversarial rounds (default: config).")
 @click.option("--seed", type=int, default=None, help="Base seed for reproducibility (default: random each run).")
 @click.option("--show", type=int, default=6, show_default=True, help="How many evasions to list.")
+@click.option("--sweep", is_flag=True, help="Exhaustive pass: fire every obfuscation family on its own and report each one's detection rate.")
 @click.pass_obj
-def security_drill(c: Ctx, rounds: Optional[int], seed: Optional[int], show: int) -> None:
+def security_drill(c: Ctx, rounds: Optional[int], seed: Optional[int], show: int, sweep: bool) -> None:
     """Adversarial self-play: mutate the attacks and vary the defence parameters every round, then
     report which mutated attacks slipped through so they can be hardened. All inward; nothing is run or sent."""
-    from .security.adversary import run_drill
+    from .security.adversary import FAMILY_SINCE, family_sweep, run_drill
 
+    if sweep:
+        rows = family_sweep(seed or 0)
+        table = Table(title="Obfuscation families, each on its own (weakest first)")
+        for col in ("family", "since", "caught", "fired", "rate"):
+            table.add_column(col)
+        for name, hit, fired, rate in rows:
+            table.add_row(name, FAMILY_SINCE.get(name.split(":", 1)[1], "?"), str(hit), str(fired),
+                          f"[green]{rate:.0%}[/]" if rate >= 1.0 else f"[yellow]{rate:.0%}[/]")
+        console.print(table)
+        weak = [r for r in rows if r[3] < 1.0]
+        console.print(f"[yellow]{len(weak)} family(ies) below 100%: harden these first[/]" if weak
+                      else f"[green]all {len(rows)} families held on their own[/]")
+        return
     n = rounds if rounds is not None else c.cfg.security.drill_rounds
     rep = run_drill(rounds=n, base_seed=seed, audit=_audit(c))
     console.print(f"[bold]Adversarial drill[/]: {rep.detected}/{rep.fired} mutated attacks caught "
@@ -3309,6 +3373,9 @@ def security_drill(c: Ctx, rounds: Optional[int], seed: Optional[int], show: int
     for r in rep.rounds:
         console.print(f"  round {r.index}: {r.detected}/{r.fired} caught; cats={','.join(r.plan.categories)}; "
                       f"depth={r.plan.depth}; cap={r.defense.body_cap // 1024}k, lockout={r.defense.lockout_failures}, action={r.defense.injection_action}")
+    weakest = [r for r in rep.family_scores() if r[3] < 1.0][:5]
+    if weakest:
+        console.print("weakest obfuscation families: " + ", ".join(f"{n} {d}/{f}" for n, d, f, _ in weakest))
     if rep.evasions:
         console.print(f"[yellow]{len(rep.evasions)} evasion(s) to harden:[/]")
         for e in rep.evasions[:show]:

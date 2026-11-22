@@ -89,6 +89,35 @@ aliased `import subprocess as sp` that dodged the shell rule, and secret-over-ne
 same hard limits hold: every payload is a test input for Gauge's own detectors, never executed, never
 sent, never written out as a tool.
 
+**Obfuscation families.** Each disguise is a named *family*, registered with the release it arrived in,
+so every release can add families without touching the drill loop and the report can say which one the
+detectors are weakest against. The second release added thirteen:
+
+| against the injection detector | against the code scanner |
+| --- | --- |
+| `homoglyph` (Cyrillic letters that look Latin) | `module-alias` (`import os as o`) |
+| `fullwidth` (ｆｕｌｌｗｉｄｔｈ forms) | `from-import` (`from os import system as go`) |
+| `diacritics` (accents on the vowels) | `getattr-indirect` (the name assembled from pieces) |
+| `spaced-letters` (`i g n o r e`, `i.g.n.o.r.e`) | `name-lookup` (a builtin reached through `globals()`) |
+| `tag-split` (markup inside a word) | `dynamic-import` (`importlib` with an assembled name) |
+| `html-entity` (`&#105;gnore`) | |
+| `newline-split` (the phrase broken across lines) | |
+| `base64` (the whole instruction encoded) | |
+
+Adding them found real holes, now closed. Before the fix the detector caught 0 of 280 fullwidth and
+base64 payloads and almost no homoglyph or entity ones, and the scanner missed every aliased
+`os.system`. The sanitiser now undoes each disguise before matching, and the scanner has rules for the
+indirections. Two things changed in how the drill counts:
+
+- **Handled means neutralised, not noticed.** Under `scrub`, a payload only counts as caught if the text
+  handed on no longer carries the instruction. A disguised instruction that the plain patterns cannot
+  cut out takes its paragraph with it; under `drop` the text must come back empty.
+- **`gauge security drill --sweep`** fires every family on its own, under every injection action. Stacked
+  disguises only mean something once each family holds alone; a family below 100% is listed first.
+
+Ordinary text is left alone, and a test keeps it that way: prose, Russian, Greek, accented French, HTML,
+initials, hashes and Japanese fullwidth all pass through unflagged and unchanged.
+
 ## What Gauge is entitled to refuse
 
 Treat this as Gauge's standing policy, enforced in code rather than promised in prose:
@@ -114,6 +143,7 @@ gauge security seal | verify | status | log [--min 2] | lockdown "reason" | unlo
 gauge security scan PATH | check-text FILE
 gauge security range                         # fire synthetic attacks at the defences, score what is caught
 gauge security drill [--rounds N] [--seed S]  # adversarial self-play: mutate attacks + vary defences each round
+gauge security drill --sweep                  # every obfuscation family on its own, weakest first
 gauge security defense [--plant api-key] [--evidence]   # show the posture; plant honeytokens; list evidence
 gauge compute token [--rotate] [--reveal]
 gauge settings list --group Security
