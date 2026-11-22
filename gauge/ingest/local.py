@@ -471,8 +471,11 @@ def import_novel(path: Path | str, meta_override: Optional[dict[str, Any]] = Non
         merged.update({k: v for k, v in layer.items() if v not in (None, "", [], {})})
 
     slug = slug or slugify(merged.get("title") or path.stem)
+    # A source tag records provenance/licence (e.g. standardebooks, cc-by) so the corpus compiler knows it
+    # is safe to train on. Defaults to "local" (your own files).
+    source = str(merged.get("source") or "local").lower()
     novel = NovelRecord(
-        source="local", source_id=slug, url=str(path.resolve()),
+        source=source, source_id=slug, url=str(path.resolve()),
         title=str(merged.get("title") or path.stem), author=str(merged.get("author", "")),
         blurb=str(merged.get("blurb", "")), genres=list(merged.get("genres", [])), tags=list(merged.get("tags", [])),
         status=str(merged.get("status", "")), followers=merged.get("followers"), favorites=merged.get("favorites"),

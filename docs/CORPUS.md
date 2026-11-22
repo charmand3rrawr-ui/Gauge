@@ -7,16 +7,22 @@ sources you have the right to train on, tracking the licence and provenance of e
 
 ```
 gauge corpus stats                    # what the library would contain, by source and licence
+gauge corpus fetch --source gutenberg --query "<topic>"   # pull public-domain books into the library
+gauge corpus fetch --source wikisource --title "On Liberty"
 gauge corpus build [--out DIR]        # export corpus.jsonl + corpus.txt + a licence MANIFEST
 ```
 
-Both take `--include-third-party` to add scraped third-party fiction — off by default (see below).
+`stats` and `build` take `--include-third-party` to add scraped third-party fiction — off by default
+(see below). `fetch` needs network access, so run it on your own machine or the daemon (it no-ops under
+`GAUGE_OFFLINE`); it never reaches a scraped fiction site.
 
 ## What goes in, and what does not
 
 | source | licence | trained on by default |
 | --- | --- | --- |
-| Project Gutenberg (`gauge scout gutenberg`) | public domain | yes |
+| Project Gutenberg (`gauge corpus fetch --source gutenberg`) | public domain | yes |
+| Wikisource (`gauge corpus fetch --source wikisource`) | public domain (verify the work) | yes |
+| Standard Ebooks / CC works (`gauge import --source-tag`) | public domain / Creative Commons | yes |
 | files you imported (`gauge import`) | yours to use | yes |
 | your own written chapters | yours | yes |
 | scraped sites (Royal Road, Scribble Hub, …) | someone else's copyright | **no** |
@@ -29,7 +35,11 @@ count, token estimate, and the licence and provenance of every source.
 
 ## Building the library up
 
-- **Public domain:** `gauge scout gutenberg "<topic or author>"` imports Project Gutenberg books.
+- **Public domain:** `gauge corpus fetch --source gutenberg "<topic or author>"` pulls Project Gutenberg
+  books (full text, boilerplate stripped); `--source wikisource --title "<page>"` pulls a Wikisource page.
+- **Standard Ebooks & Creative Commons:** these ship as EPUB/text files — download them, then
+  `gauge import <file> --source-tag standardebooks` (or `cc-by`, `cc0`, `publicdomain`) so the compiler
+  knows the licence is safe to train on.
 - **Your own files:** `gauge import <folder>` (see LOCAL_LIBRARY.md) imports text you hold the rights to.
 - **Your serials:** every chapter Gauge writes is already part of the library.
 

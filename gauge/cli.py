@@ -151,10 +151,12 @@ def ingest(c: Ctx, url: Optional[str], max_novels: Optional[int], max_chapters: 
 @click.option("--views", type=int, default=None)
 @click.option("--rating", type=float, default=None, help="Site rating, e.g. 4.5")
 @click.option("--stars", type=float, default=None, help="YOUR 1-5 verdict (user_rating target).")
+@click.option("--source-tag", "source_tag", default=None,
+              help="Provenance/licence tag so the corpus knows it is trainable: standardebooks, wikisource, cc-by, cc0, publicdomain.")
 @click.pass_obj
 def import_(c: Ctx, path: str, library: Optional[bool], watch: bool, title: Optional[str], author: Optional[str],
             genres: tuple, followers: Optional[int], views: Optional[int], rating: Optional[float],
-            stars: Optional[float]) -> None:
+            stars: Optional[float], source_tag: Optional[str]) -> None:
     """Import a novel or a whole library from disk.
 
     PATH may be a folder of chapter files (.txt .md .html .docx), a single book (.txt .md .epub .docx),
@@ -164,7 +166,7 @@ def import_(c: Ctx, path: str, library: Optional[bool], watch: bool, title: Opti
 
     override = {k: v for k, v in {"title": title, "author": author, "genres": list(genres) or None,
                                    "followers": followers, "views": views, "rating": rating,
-                                   "user_rating": stars}.items() if v is not None}
+                                   "user_rating": stars, "source": source_tag}.items() if v is not None}
     r = IngestRunner(c.cfg, c.db)
     results = r.import_local(path, library=library, meta_override=override or None)
     if not results:
@@ -2081,6 +2083,41 @@ def corpus_stats(c: Ctx, include_third_party: bool) -> None:
     if rep.excluded:
         console.print(f"[yellow]excluded[/] {len(rep.excluded)} third-party docs from {', '.join(sorted({d.source for d in rep.excluded}))} "
                       "(copyrighted; use --include-third-party only for text you hold the rights to)")
+
+
+@corpus.command("fetch")
+@click.option("--source", type=click.Choice(["gutenberg", "wikisource"]), default="gutenberg", show_default=True)
+@click.option("--query", default="", help="Search terms (Gutenberg) — e.g. an author or subject.")
+@click.option("--title", default="", help="Exact page title (Wikisource).")
+@click.option("--limit", type=int, default=5, show_default=True, help="Max books (Gutenberg).")
+@click.pass_obj
+def corpus_fetch(c: Ctx, source: str, query: str, title: str, limit: int) -> None:
+    """Fetch public-domain books into the training library (Gutenberg full texts, or a Wikisource page)."""
+    import os as _os
+
+    from .ingest.public_domain import fetch_gutenberg, fetch_wikisource, store_books
+    if _os.environ.get("GAUGE_OFFLINE"):
+        console.print("[yellow]offline[/]: set GAUGE_OFFLINE off and run on a machine with network access.")
+        return
+    from .config import IngestConfig
+    from .ingest.http import Fetcher
+    fetcher = Fetcher(IngestConfig(user_agent=c.cfg.ingest.user_agent + " (corpus)",
+                                   request_delay_seconds=max(1.0, c.cfg.ingest.request_delay_seconds)))
+    if source == "gutenberg":
+        if not query:
+            console.print("[red]--query is required for Gutenberg[/]")
+            sys.exit(1)
+        books = fetch_gutenberg(fetcher, query, limit)
+    else:
+        if not title:
+            console.print("[red]--title is required for Wikisource[/]")
+            sys.exit(1)
+        books = fetch_wikisource(fetcher, title)
+    stored = store_books(c.db, books)
+    console.print(f"[green]fetched[/] {stored} public-domain work(s) into the library from {source}"
+                  if stored else f"[yellow]nothing fetched[/] from {source} (no results, or robots.txt refused)")
+    if stored:
+        console.print("run `gauge corpus build` to compile the library, then train with `gauge native train`.")
 
 
 @corpus.command("build")
