@@ -140,6 +140,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | Command | What it does |
 | --- | --- |
 | `gauge init` / `gauge doctor` / `gauge config` | set up, health-check, show config |
+| `gauge --dry-run <any command>` | hold every outward-facing or hard-to-undo action and report what a real run would have done; see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `gauge discover SOURCE LISTING` | follow novels from a site listing (`best-rated`, `trending`, `rising-stars`, ...) |
 | `gauge follow URL` | follow one novel |
 | `gauge ingest [--url U]` | fetch followed novels; only new chapters |

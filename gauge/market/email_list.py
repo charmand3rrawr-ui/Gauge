@@ -158,6 +158,10 @@ def send_newsletter(db: Database, newsletter: Newsletter, sender: Sender, unsubs
         raise PermissionError("an unsubscribe link base is required in every message; refusing to send without one")
     mailer = mailer or DryRunMailer()
     recipients = db.subscribers(status="subscribed")
+    from ..dryrun import hold, is_dry_run
+    if is_dry_run() and not isinstance(mailer, DryRunMailer):   # the global switch outranks a real mailer
+        hold("newsletter sending", f"'{newsletter.subject}' to {len(recipients)} subscriber(s)")
+        mailer = DryRunMailer()
     results = {"recipients": len(recipients), "sent": 0, "dry_run": isinstance(mailer, DryRunMailer), "failed": 0, "at": utcnow().isoformat()}
     for sub in recipients:
         body = render_message(newsletter, sub["email"], sender, unsubscribe_base)

@@ -35,12 +35,33 @@ class Ctx:
 @click.group()
 @click.option("--data-dir", envvar="GAUGE_DATA_DIR", default=None, help="Where Gauge keeps everything (default ./data).")
 @click.option("-v", "--verbose", is_flag=True)
+@click.option("--dry-run", "dry_run", is_flag=True,
+              help="Hold every outward-facing or hard-to-undo action (posting, email, publishing, self-modification, "
+                   "restore, daemon writes, bots) and report what a real run would have done.")
 @click.version_option(__version__, prog_name="gauge")
 @click.pass_context
-def main(ctx: click.Context, data_dir: Optional[str], verbose: bool) -> None:
+def main(ctx: click.Context, data_dir: Optional[str], verbose: bool, dry_run: bool) -> None:
     """Gauge: learn what makes web novels addictive, then write them. Local, open source."""
     _setup_logging(verbose)
     ctx.obj = Ctx(data_dir)
+    from . import dryrun
+
+    if dry_run or ctx.obj.cfg.dry_run or dryrun.is_dry_run():
+        import os
+
+        previous = os.environ.get(dryrun.ENV)
+        dryrun.reset()
+        dryrun.set_dry_run(True)
+        console.print("[yellow]DRY RUN[/]: outward-facing and hard-to-undo actions are held; local analysis and drafting still run.")
+
+        def _finish() -> None:
+            console.print(dryrun.summary(), markup=False, highlight=False)
+            if previous is None:
+                dryrun.set_dry_run(False)
+            else:
+                os.environ[dryrun.ENV] = previous
+
+        ctx.call_on_close(_finish)
 
 
 # ---------------------------------------------------------------------------- setup
@@ -1486,10 +1507,12 @@ def site_opinion(c: Ctx, project: str, thesis: str, byline: str, angle: str, voi
 @site.command("build")
 @click.argument("project")
 @click.option("--byline", required=True, help="The byline for the landing page and chapters.")
-@click.option("--url", default="", help="Your site's base URL (for the RSS feed links).")
+@click.option("--url", default="", help="Your site's base URL (feeds and the sitemap need it for absolute links).")
 @click.option("--chapters/--no-chapters", default=True, help="Include the serial's chapters as pages.")
+@click.option("--theme", type=click.Choice(["classic", "paper", "slate", "noir"]), default="classic", show_default=True,
+              help="Site palette; every theme has a light and a dark variant and a reader toggle.")
 @click.pass_obj
-def site_build(c: Ctx, project: str, byline: str, url: str, chapters: bool) -> None:
+def site_build(c: Ctx, project: str, byline: str, url: str, chapters: bool, theme: str) -> None:
     """Build the static site: a landing page, the serial's chapters, and any opinion columns you drafted.
     Writes a folder you upload to any host. Refuses an impersonating byline or a clickbait opinion title."""
     import json as _json
@@ -1526,7 +1549,7 @@ def site_build(c: Ctx, project: str, byline: str, url: str, chapters: bool) -> N
             console.print(f"[yellow]skipped {f.name}: {e}[/]")
     out = p.dir / "site"
     try:
-        written = build_site(p.state.name, articles, out, base_url=url)
+        written = build_site(p.state.name, articles, out, base_url=url, theme=theme)
     except PermissionError as e:
         console.print(f"[red]refused:[/] {e}")
         sys.exit(1)
@@ -1697,8 +1720,13 @@ def market_social(c: Ctx, project: str, accounts: tuple, weeks: int, per_week: i
     sent = sum(1 for r in results if r.get("posted"))
     previewed = sum(1 for r in results if r.get("dry_run"))
     console.print(f"[green]planned[/] {len(cal)} posts across {len(owned)} of your accounts -> {out}")
-    console.print(f"{'sent ' + str(sent) + ' post(s)' if do_send else 'dry run: ' + str(previewed) + ' previewed'}, "
-                  f"{'' if do_send else '0 sent'}")
+    from .dryrun import is_dry_run
+    held_send = do_send and is_dry_run()
+    if held_send:
+        console.print(f"dry run: --send was held; {previewed} previewed, 0 sent")
+    else:
+        console.print(f"{'sent ' + str(sent) + ' post(s)' if do_send else 'dry run: ' + str(previewed) + ' previewed'}, "
+                      f"{'' if do_send else '0 sent'}")
     for r in results[:6]:
         if r.get("refused"):
             console.print(f"  [yellow]refused:[/] {r['refused']}")
@@ -1708,7 +1736,9 @@ def market_social(c: Ctx, project: str, accounts: tuple, weeks: int, per_week: i
             console.print(f"  [{r.get('platform')}] not sent: {r['note']}")
         else:
             console.print(f"  [{r.get('platform')}] {r.get('angle', '')}: {r.get('preview', r.get('id', 'ok'))}"[:90])
-    if not do_send:
+    if held_send:
+        console.print("Run again without --dry-run to publish to your own accounts.")
+    elif not do_send:
         console.print("This was a dry run. Add --send with your platform credentials in the environment to publish to your own accounts.")
 
 
@@ -1805,7 +1835,10 @@ def market_newsletter(c: Ctx, project: str, url: str, chapter_title: str, from_n
     except PermissionError as e:
         console.print(f"[red]refused:[/] {e}")
         sys.exit(1)
-    console.print(f"sent {res['sent']} of {res['recipients']} consented subscriber(s); {res['failed']} failed.")
+    if res.get("dry_run"):
+        console.print(f"dry run: --send was held; would go to {res['recipients']} consented subscriber(s), 0 sent.")
+    else:
+        console.print(f"sent {res['sent']} of {res['recipients']} consented subscriber(s); {res['failed']} failed.")
 
 
 @main.command()
@@ -2621,7 +2654,10 @@ def restore(c: Ctx, path: str, into: Optional[str], verify_only: bool, overwrite
         return
     dest = Path(into) if into else Path(f"restored-{Path(path).stem}")
     r = restore_backup(Path(path), dest, overwrite=overwrite)
-    console.print(f"[green]restored[/] {r['restored']} files -> {r['into']}")
+    if r.get("dry_run"):
+        console.print(f"dry run: would restore {r['would_restore']} files -> {r['into']}; nothing written")
+    else:
+        console.print(f"[green]restored[/] {r['restored']} files -> {r['into']}")
 
 
 @main.command()

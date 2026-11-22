@@ -93,6 +93,7 @@ SWITCHES: list[Switch] = [
     Switch("security.active_defense_level", "Active defence level", "int", "How hard Gauge pushes back on its OWN machine: 0 passive, 1 tarpit+evidence, 2 +honeytokens+decoys, 3 maximum. Never touches other systems.", "Security", 0, 3),
     Switch("security.active_defense_auto", "Escalate defence with threat", "bool", "Raise the active-defence level automatically as the sentinel's threat level rises.", "Security"),
     # ---- automation -----------------------------------------------------------------------
+    Switch("dry_run", "Dry run (hold everything outward)", "bool", "Hold posting, email, newsdesk publishing, self-modification, restore, daemon chapter writes and bots; report what a real run would have done. Same as gauge --dry-run.", "Automation"),
     Switch("daemon.write_after_learning", "Daemon writes chapters", "bool", "Each learning cycle also writes the next chapter of the active project.", "Automation"),
     Switch("newsdesk.enabled", "Newsdesk in the daemon", "bool", "Each daemon cycle discovers trends, drafts original commentary into the review queue, and publishes one due piece.", "Automation"),
     Switch("newsdesk.interval_minutes", "Publish interval (minutes)", "int", "At most one piece is published per interval.", "Automation", 5, 1440),

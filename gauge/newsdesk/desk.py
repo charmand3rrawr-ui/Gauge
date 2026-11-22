@@ -109,7 +109,11 @@ def run_cycle(cfg: Any, llm: Any, fetcher: Any = None, topics: Optional[list[Top
             q.add(c)
             rep.drafted.append(c.title)
     item = q.tick(now or utcnow(), nd.interval_minutes, nd.auto_publish, nd.max_per_day)
-    if item is not None:
+    from ..dryrun import hold, is_dry_run
+    if item is not None and is_dry_run():   # the piece stays in the queue, untouched
+        hold("newsdesk publishing", item.title)
+        rep.notes.append(f"dry run: '{item.title}' is due and would have been published; it stays queued")
+    elif item is not None:
         if nd.project:
             from ..write.project import Project
             if Project.exists(cfg.projects_dir, nd.project):

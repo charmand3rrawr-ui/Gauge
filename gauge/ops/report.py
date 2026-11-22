@@ -56,7 +56,11 @@ def audit_report(cfg: Any) -> list[AutomationStatus]:
 
 
 def render_report(cfg: Any) -> str:
-    lines = ["Gauge automation audit", "", f"Security lockdown: {'ACTIVE' if cfg.security.locked else 'off'}", ""]
+    from ..dryrun import HELD_ACTIONS, is_dry_run
+    dry = is_dry_run() or bool(getattr(cfg, "dry_run", False))
+    lines = ["Gauge automation audit", "", f"Security lockdown: {'ACTIVE' if cfg.security.locked else 'off'}",
+             f"Dry run: {'ACTIVE: held = ' + ', '.join(HELD_ACTIONS) if dry else 'off (gauge --dry-run holds every outward or hard-to-undo action)'}",
+             ""]
     for a in audit_report(cfg):
         lines.append(f"[{'ON ' if a.on else 'off'}] {a.name}")
         lines.append(f"      does: {a.does}")

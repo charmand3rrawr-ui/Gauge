@@ -135,7 +135,14 @@ class Daemon:
                     log.exception("native training failed: %s", e)
                     out["native"] = f"failed: {e}"
         do_write = self.cfg.daemon.write_after_learning if write is None else write
-        if do_write and self.cfg.daemon.active_project:
+        from .dryrun import hold, is_dry_run
+        dry = is_dry_run()
+        if dry:
+            out["dry_run"] = True
+        if do_write and self.cfg.daemon.active_project and dry:
+            hold("daemon chapter writes", f"next chapter of {self.cfg.daemon.active_project}")
+            out["write"] = "held: dry run"
+        elif do_write and self.cfg.daemon.active_project:
             from .write.pipeline import WritePipeline
 
             pipe = WritePipeline(self.cfg, self.db, trainer=trainer)
@@ -165,6 +172,10 @@ class Daemon:
                 ran = {}
                 for name in reg.due():
                     if not reg.manifest(name).get("tests_passed", True):
+                        continue
+                    if dry:   # a bot is an arbitrary program; do not run it in a dry run
+                        hold("scheduled bots", name)
+                        ran[name] = "held: dry run"
                         continue
                     ran[name] = reg.run(name, env_extra={"GAUGE_DATA_DIR": str(self.cfg.root)})["exit"]
                 if ran:

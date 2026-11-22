@@ -35,6 +35,12 @@ class _Base:
         ok, why = post.account.postable()
         if not ok:
             return {"posted": False, "refused": why}
+        from ..dryrun import hold, is_dry_run
+        if not self.dry_run and is_dry_run():   # the global switch outranks --send
+            hold("social posting", f"{post.account.platform} {post.account.handle}: {post.text[:60]}")
+            return {"posted": False, "dry_run": True, "platform": post.account.platform,
+                    "handle": post.account.handle, "angle": post.angle, "preview": post.text[:200],
+                    "note": "held by the global dry run"}
         if self.dry_run:
             return {"posted": False, "dry_run": True, "platform": post.account.platform,
                     "handle": post.account.handle, "angle": post.angle, "preview": post.text[:200], "note": self.note}

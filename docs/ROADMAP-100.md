@@ -103,7 +103,7 @@ tested batches — not a promise that all 100 exist yet.
 80. Reader comment ingestion from your own site into the learning loop. **M**
 
 ## I. Platform, site, and newsdesk
-81. Themeable static-site templates and a dark/light toggle. **S**
+81. [done] Themeable static-site templates and a dark/light toggle (4 AA-contrast themes, `--theme`). **S**
 82. [done] Full-text search on the published site (client-side index). **S**
 83. [done] Multi-author bylines with per-author pages and disclosure. **S**
 84. [done] Newsdesk source-diversity check: flag over-reliance on one outlet. **S**
@@ -111,7 +111,7 @@ tested batches — not a promise that all 100 exist yet.
 86. Topic-desk specialisation (finance, tech) with per-desk stances. **M**
 87. Scheduled digest email of the week's commentary to the opt-in list. **S**
 88. [done] Comment moderation queue with the sanitiser already built. **S**
-89. RSS/Atom output for the opinion blog and the serial. **S** *(partly done)*
+89. [done] RSS/Atom output for the opinion blog and the serial (feed.xml, atom.xml, feeds/serial.xml, feeds/opinion.xml). **S**
 90. Translation of the author's own pieces into other languages, labelled as translations. **M**
 
 ## J. Safety, reliability, and operations
@@ -121,7 +121,7 @@ tested batches — not a promise that all 100 exist yet.
 94. [done] Backup/restore of the whole data dir with integrity verification. **S**
 95. [done] Config migration framework for schema changes across versions. **S**
 96. Structured logging and an error budget the daemon respects. **S**
-97. A "dry-run everything" mode for a safe first run of any automation. **S**
+97. [done] A "dry-run everything" mode for a safe first run of any automation (`gauge --dry-run`). **S**
 98. Property-based tests across the pipeline (extends the mutation gate). **M**
 99. A one-command Windows installer update channel with signed releases. **M**
 100. [done] A plain-language audit report: every automation, what it can do, what it cannot. **S**

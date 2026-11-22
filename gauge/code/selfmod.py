@@ -314,6 +314,10 @@ Respond with ONLY JSON: {{"files": {{"<relative path>": "<complete new content>"
             raise PermissionError("proposal has not passed tests; run `gauge self test` first")
         if prop.applied:
             return {"applied": False, "reason": "already applied"}
+        from ..dryrun import hold, is_dry_run
+        if is_dry_run():   # never rewrite Gauge's own source in a dry run
+            hold("self-modification", f"proposal {prop.id}: {', '.join(list(prop.files)[:4])}")
+            return {"applied": False, "dry_run": True, "reason": "dry run: proposal left unapplied"}
         backup = self.dir / "backups" / prop.id
         backup.mkdir(parents=True, exist_ok=True)
         changed = []

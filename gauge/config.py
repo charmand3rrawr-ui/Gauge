@@ -277,6 +277,7 @@ class GaugeConfig(BaseModel):
     data_dir: str = str(DEFAULT_DATA_DIR)
     config_version: int = CONFIG_VERSION  # stamped on save; _migrate upgrades older files on load
     seed: Optional[int] = None  # when set, makes a run reproducible (seeds RNGs and the prompt bandit)
+    dry_run: bool = False  # hold every outward-facing or hard-to-undo action (same as `gauge --dry-run`)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     learn: LearnConfig = Field(default_factory=LearnConfig)

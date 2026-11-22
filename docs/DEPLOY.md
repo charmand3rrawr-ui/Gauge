@@ -37,6 +37,34 @@ curl -H "X-Gauge-Token: $TOKEN" http://host:8800/api/projects
 curl -X POST -H "X-Gauge-Token: $TOKEN" "http://host:8800/api/projects/My%20Serial/write"
 ```
 
+## A safe first run: `--dry-run`
+
+Before you let any automation loose on a new machine, run it once with the global dry-run switch:
+
+```
+gauge --dry-run daemon --once
+gauge --dry-run newsdesk run
+gauge --dry-run market social PROJECT --account mastodon:@you --send
+```
+
+`--dry-run` (or `GAUGE_DRY_RUN=1`, or `"dry_run": true` in config, or the **Dry run** switch) holds every
+outward-facing or hard-to-undo action and prints, at the end, exactly what a real run would have done:
+
+| held | what happens instead |
+| --- | --- |
+| social posting | previewed, nothing sent, even with `--send` |
+| newsletter sending | previewed, nothing sent, even with a real SMTP mailer |
+| newsdesk publishing | the due piece stays in the queue |
+| self-modification | the proposal stays unapplied |
+| restoring a backup | integrity is verified, nothing is written |
+| daemon chapter writes, scheduled bots | skipped |
+
+It is enforced at the lowest-level effect points (the poster, the mailer, the publish step, `apply`,
+`restore`), not in each command, so no command path can bypass it, and worker and bot subprocesses
+inherit it through the environment. Reading, analysis, training and drafting into local queues still
+run, and so does anything you run explicitly that only writes inside the data directory (`gauge write`,
+`gauge site build`). `gauge audit` shows whether a dry run is active.
+
 ## Security
 
 This is a control API: it can write chapters and run cycles. It is built to the same posture as the rest

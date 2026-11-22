@@ -88,3 +88,103 @@ def test_cli_site(tmp_path):
     r = runner.invoke(main, ["--data-dir", data, "site", "build", "Ten Seconds", "--byline", "Jane Doe", "--url", "https://me"])
     assert r.exit_code == 0 and "built" in r.output
     assert (cfg.projects_dir / "ten-seconds" / "site" / "index.html").exists()
+
+
+# ------------------------------------------------------------------ themes and the light/dark toggle
+def _arts():
+    return [
+        Article("about", "Ten Seconds", "A courier who can rewind.", "Jane Doe", kind="post",
+                summary="A rain-soaked serial.", published_at="2026-11-01"),
+        Article("chapter-001", "Chapter 1: The Seal", "Rain fell.", "Jane Doe", kind="chapter",
+                summary="Chapter 1 of Ten Seconds", published_at="2026-11-03"),
+        Article("op1", "Serials are reshaping publishing", "Opinion body argued here.", "Jane Doe",
+                kind="opinion", summary="An op-ed & a half.", published_at="2026-11-02T09:30:00"),
+    ]
+
+
+def test_every_theme_meets_contrast_in_both_modes():
+    from gauge.site.publisher import THEMES, theme_contrast_issues
+    assert set(THEMES) >= {"classic", "paper", "slate", "noir"}
+    for name in THEMES:
+        assert theme_contrast_issues(name) == [], name  # text, muted text and accent all clear WCAG AA
+
+
+def test_theme_css_follows_system_and_honours_the_toggle():
+    from gauge.site.publisher import THEMES, theme_css
+    css = theme_css("slate")
+    assert THEMES["slate"]["light"]["bg"] in css and THEMES["slate"]["dark"]["bg"] in css
+    assert "prefers-color-scheme:dark" in css and ":root:not([data-theme=light])" in css  # system dark, unless reader chose light
+    assert ":root[data-theme=dark]" in css                                               # reader chose dark
+    assert theme_css("no-such-theme") == theme_css("classic")                             # safe fallback
+
+
+def test_built_pages_carry_theme_toggle_and_feed_links(tmp_path):
+    from gauge.site.publisher import THEMES, accessibility_report
+    build_site("Rin Writes", _arts(), tmp_path / "site", base_url="https://me", theme="paper")
+    page = (tmp_path / "site" / "articles" / "op1.html").read_text(encoding="utf-8")
+    assert THEMES["paper"]["light"]["bg"] in page
+    assert 'id="theme-toggle"' in page and "aria-pressed" in page and " hidden>" in page  # no dead button without JS
+    assert "gauge-theme" in page                                                         # the choice is remembered
+    assert 'type="application/rss+xml"' in page and 'href="../feed.xml"' in page         # autodiscovery, correct depth
+    assert 'type="application/atom+xml"' in page
+    assert accessibility_report(page) == []
+    with pytest.raises(ValueError):
+        build_site("S", _arts(), tmp_path / "s2", theme="neon")
+
+
+# ------------------------------------------------------------------ RSS and Atom
+def test_feeds_are_well_formed_and_dated(tmp_path):
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
+    site = tmp_path / "site"
+    build_site("Rin Writes", _arts(), site, base_url="https://me")
+    rss = ET.fromstring((site / "feed.xml").read_text(encoding="utf-8"))
+    items = rss.findall("./channel/item")
+    assert len(items) == 3
+    first = items[0]
+    assert first.findtext("link") == "https://me/articles/chapter-001.html"   # newest first
+    assert first.find("guid").get("isPermaLink") == "true"
+    assert parsedate_to_datetime(first.findtext("pubDate")).year == 2026       # RFC 822 date
+    assert first.findtext("{http://purl.org/dc/elements/1.1/}creator") == "Jane Doe"
+    self_link = rss.find("./channel/{http://www.w3.org/2005/Atom}link")
+    assert self_link.get("href") == "https://me/feed.xml" and self_link.get("rel") == "self"
+
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    atom = ET.fromstring((site / "atom.xml").read_text(encoding="utf-8"))
+    entries = atom.findall("a:entry", ns)
+    assert len(entries) == 3 and atom.findtext("a:id", namespaces=ns) == "https://me/"
+    for e in entries:
+        assert e.findtext("a:id", namespaces=ns).startswith("https://me/articles/")
+        assert e.findtext("a:updated", namespaces=ns).endswith("+00:00")       # RFC 3339 with an offset
+        assert e.findtext("a:author/a:name", namespaces=ns) == "Jane Doe"
+
+
+def test_opinion_is_labelled_in_feeds_and_sections_split(tmp_path):
+    import xml.etree.ElementTree as ET
+    site = tmp_path / "site"
+    written = build_site("Rin Writes", _arts(), site, base_url="https://me")
+    names = {str(p.relative_to(site)) for p in written}
+    assert {"feed.xml", "atom.xml", "feeds/serial.xml", "feeds/opinion.xml"} <= names
+    op = ET.fromstring((site / "feeds" / "opinion.xml").read_text(encoding="utf-8"))
+    items = op.findall("./channel/item")
+    assert len(items) == 1 and items[0].findtext("category") == "Opinion"
+    assert items[0].findtext("description").startswith("[Opinion]")            # labelled wherever it travels
+    assert "&" in items[0].findtext("description")                             # escaped in the file, intact when parsed
+    serial = ET.fromstring((site / "feeds" / "serial.xml").read_text(encoding="utf-8"))
+    assert [i.findtext("category") for i in serial.findall("./channel/item")] == ["Chapter"]
+
+
+def test_feeds_without_base_url_or_dates_stay_valid(tmp_path):
+    import xml.etree.ElementTree as ET
+    site = tmp_path / "site"
+    arts = [Article("a", "Undated \x07 note", "Body.", "Jane Doe", summary="No date.")]  # a stray control char
+    written = build_site("Rin Writes", arts, site)
+    assert not (site / "feeds").exists()                                       # no serial/opinion -> no section feeds
+    rss = ET.fromstring((site / "feed.xml").read_text(encoding="utf-8"))
+    item = rss.find("./channel/item")
+    assert item.find("pubDate") is None and item.find("guid").get("isPermaLink") == "false"
+    assert item.findtext("title") == "Undated  note"                           # control char dropped, still well-formed
+    atom = ET.fromstring((site / "atom.xml").read_text(encoding="utf-8"))
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    assert atom.findtext("a:entry/a:id", namespaces=ns) == "urn:gauge:rin-writes:a"
+    assert any(p.name == "atom.xml" for p in written)

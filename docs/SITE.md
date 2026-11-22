@@ -10,9 +10,36 @@ outlet's identity.
 - **`gauge site opinion PROJECT --thesis "..." --byline "Your Name"`** — drafts an opinion column that
   argues your thesis in a strong, honest voice, labels it Opinion, attaches your byline, and flags every
   factual-looking claim for you to verify. Saved for the next build.
-- **`gauge site build PROJECT --byline "Your Name" [--url https://your-site]`** — renders the static
-  site (landing page, chapter pages, opinion columns, an RSS feed) into `projects/<slug>/site/`, ready to
-  upload to any host.
+- **`gauge site build PROJECT --byline "Your Name" [--url https://your-site] [--theme classic|paper|slate|noir]`**
+  — renders the static site (landing page, chapter pages, opinion columns, feeds) into
+  `projects/<slug>/site/`, ready to upload to any host.
+
+## Themes and the light/dark toggle
+
+Four palettes: `classic` (the default serif), `paper` (warm, bookish), `slate` (cool, sans-serif) and
+`noir` (high contrast, suits thrillers). Each has a light and a dark variant, and in both the body text,
+muted text and link colour clear WCAG AA contrast against the background — a test enforces that for
+every theme.
+
+Pages follow the reader's system preference. A **Dark mode / Light mode** button at the top of every page
+overrides it and remembers the choice in the reader's browser. The button only appears when JavaScript is
+available, so nobody gets a dead control; without it the system preference still applies.
+
+## Feeds
+
+Every build writes:
+
+| file | what |
+| --- | --- |
+| `feed.xml` | RSS 2.0, everything, newest first |
+| `atom.xml` | Atom 1.0, everything |
+| `feeds/serial.xml` | RSS, the serial's chapters only (when there are any) |
+| `feeds/opinion.xml` | RSS, opinion columns only (when there are any) |
+
+Each item carries its byline and a category (Chapter, Opinion, Post). Opinion stays labelled as opinion
+in a feed reader: its summary is prefixed `[Opinion]`. Pages advertise the feeds for auto-discovery.
+Pass `--url` so feed links, ids and the self-link are absolute; without it the feeds are still
+well-formed but their links are relative, which most readers handle poorly.
 
 ## The integrity rails
 

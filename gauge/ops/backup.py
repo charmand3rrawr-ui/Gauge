@@ -110,6 +110,10 @@ def restore_backup(path: Path, dest_dir: Path, overwrite: bool = False) -> dict:
     v = verify_backup(path)
     if not v.ok:
         raise ValueError(f"backup failed integrity check: {len(v.mismatched)} mismatched, {len(v.missing)} missing")
+    from ..dryrun import hold, is_dry_run
+    if is_dry_run():   # verified above; write nothing
+        hold("backup restore", f"{v.files} files into {dest}")
+        return {"restored": 0, "would_restore": v.files, "into": str(dest), "created": v.created, "dry_run": True}
     if dest.exists() and any(dest.iterdir()) and not overwrite:
         raise ValueError(f"{dest} is not empty; pass overwrite=True to restore into it")
     dest.mkdir(parents=True, exist_ok=True)
