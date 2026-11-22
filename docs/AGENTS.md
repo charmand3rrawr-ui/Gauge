@@ -29,7 +29,9 @@ correlation in `gauge readers`. This is the agent that closes the loop on "addic
 **Showrunner** (`showrunner`). A ledger of promises: every question, threat, goal or setup the
 story opens, when it was planted, when the reader expects it paid. It tells the planner which
 debts must be paid in the next stretch, tells the drafter what to advance, and penalises chapters
-that stall or ignore overdue promises. `gauge ledger PROJECT`.
+that stall or ignore overdue promises. `gauge ledger PROJECT`, and `gauge ledger PROJECT --heatmap` for a
+serial-wide view of what was planted, advanced and paid each chapter, the open and overdue counts, and a
+gantt of the threads still open.
 
 **Archivist** (`archivist`). A canon ledger of checkable facts (names, ages, eye colour, who
 knows what, where things are) extracted from every chapter. Contradictions are found

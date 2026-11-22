@@ -1102,12 +1102,16 @@ def canon(c: Ctx, project: str, question: Optional[str], subject: Optional[str])
 
 @main.command()
 @click.argument("project")
+@click.option("--heatmap", is_flag=True, help="Show the promise/payoff heatmap over the whole serial.")
 @click.pass_obj
-def ledger(c: Ctx, project: str) -> None:
-    """The Showrunner's ledger of promises and payoffs."""
+def ledger(c: Ctx, project: str, heatmap: bool) -> None:
+    """The Showrunner's ledger of promises and payoffs (--heatmap for the serial-wide view)."""
     _, _, council = _council(c, project)
     ag = council.get("showrunner")
-    console.print(ag.report() if ag else "[yellow]showrunner is disabled[/]")
+    if not ag:
+        console.print("[yellow]showrunner is disabled[/]")
+        return
+    console.print(ag.heatmap() if heatmap else ag.report())
 
 
 @main.command()

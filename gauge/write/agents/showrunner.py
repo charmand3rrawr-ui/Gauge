@@ -1,6 +1,7 @@
 """The Showrunner: a ledger of promises and payoffs, so the serial keeps rewarding the reader."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -27,6 +28,55 @@ class LedgerState(BaseModel):
     next_id: int = 1
     last_payoff_chapter: int = 0
     max_gap: int = 4  # chapters without a payoff before the ledger starts complaining
+
+
+# ---------------------------------------------------------------------------- promise/payoff heatmap (roadmap 31)
+
+@dataclass
+class HeatCell:
+    chapter: int
+    planted: int        # promises opened this chapter
+    advanced: int       # promises visibly moved this chapter
+    paid: int           # promises paid off this chapter
+    open_after: int     # promises still open at the end of this chapter
+    overdue_after: int  # open promises already past their due date by this chapter
+
+
+def promise_heatmap(promises: list[Promise], upto: int) -> list[HeatCell]:
+    """A per-chapter view of the whole serial's promise economy — what was planted, advanced, paid, and
+    how many debts are open and overdue at each point. Measured; no model calls."""
+    cells: list[HeatCell] = []
+    for c in range(1, max(0, upto) + 1):
+        planted = sum(1 for p in promises if p.planted == c)
+        advanced = sum(1 for p in promises if c in p.advanced)
+        paid = sum(1 for p in promises if p.paid == c)
+        open_after = sum(1 for p in promises if p.planted <= c and (p.paid is None or p.paid > c))
+        overdue_after = sum(1 for p in promises if p.planted <= c and p.due <= c and (p.paid is None or p.paid > c))
+        cells.append(HeatCell(c, planted, advanced, paid, open_after, overdue_after))
+    return cells
+
+
+def heatmap_text(promises: list[Promise], upto: int, width: int = 60) -> str:
+    """Render the heatmap as compact text: one row per chapter with plant(+)/advance(.)/payoff(*) markers
+    and the running open/overdue counts, then a short gantt of the promises still open or overdue."""
+    cells = promise_heatmap(promises, upto)
+    if not cells:
+        return "(no promises tracked yet)"
+    lines = ["ch  plant/adv/paid   open  overdue"]
+    for cell in cells[-width:]:
+        marks = ("+" * cell.planted + "." * cell.advanced + "*" * cell.paid) or "·"
+        flag = f"  <-- {cell.overdue_after} overdue" if cell.overdue_after else ""
+        lines.append(f"{cell.chapter:>3}  {marks:<14}  {cell.open_after:>4}  {cell.overdue_after:>5}{flag}")
+    # Gantt for promises that are still open (most overdue first).
+    open_now = [p for p in promises if p.paid is None]
+    if open_now:
+        open_now.sort(key=lambda p: (p.due, p.planted))
+        lines.append("")
+        lines.append("open threads (planted -> due):")
+        for p in open_now[:12]:
+            od = " OVERDUE" if p.due <= upto else ""
+            lines.append(f"  #{p.id} [{p.kind}] {p.text[:48]}  (ch {p.planted} -> {p.due}{od})")
+    return "\n".join(lines)
 
 
 class Showrunner(StoryAgent):
@@ -137,6 +187,11 @@ CHAPTER:
             elif any(key in x.lower() or x.lower()[:30] in p.text.lower() for x in advanced):
                 p.advanced.append(ctx.number)
         self.state.promises = self.state.promises[-120:]
+
+    def heatmap(self, width: int = 60) -> str:
+        upto = max((p.paid or p.due for p in self.state.promises), default=0)
+        upto = max(upto, max((p.planted for p in self.state.promises), default=0))
+        return heatmap_text(self.state.promises, upto, width)
 
     def report(self) -> str:
         lines = [f"open {len(self.open())}, paid {sum(1 for p in self.state.promises if p.paid)}, last payoff ch {self.state.last_payoff_chapter}"]
