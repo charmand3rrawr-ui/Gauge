@@ -42,14 +42,14 @@ tested batches — not a promise that all 100 exist yet.
 29. [done] World rules as assertions the critic can check each chapter ('never:' / 'always: … when …'). **M**
 30. Grounding dossier caching and reuse per recurring location *(needs Scout)*. **S**
 
-## D. Plot and structure  — partial (gauge.write.structure + Structure Editor): 32/33/36/38 done
+## D. Plot and structure  — mostly done (structure + Structure Editor + Thread Keeper): 32-38 done; 31/39/40 open
 31. Promise/payoff heatmap over the whole serial (extends Showrunner's ledger). **M**
 32. [done] Try-fail cycle detector: flag protagonists who succeed too easily. **M**
 33. [done] Scene-goal/conflict/outcome tagging; flag scenes with no conflict. **M**
-34. Subplot tracker: weave and resolve B-plots; flag dropped threads. **M**
-35. Chapter-shape planner: schedule action/quiet/reveal shapes across an arc (extends Pacing). **S**
+34. [done] Subplot tracker: weave and resolve B-plots; flag dropped threads (Thread Keeper). **M**
+35. [done] Chapter-shape planner: a planned action/quiet/reveal arc rhythm (Pacing.arc_schedule). **S**
 36. [done] Midpoint/climax placement guidance from arc position. **S**
-37. Foreshadow planting and payoff linker. **M**
+37. [done] Foreshadow planting and payoff linker (Thread Keeper). **M**
 38. [done] Cliffhanger variety: avoid the same cliff type repeating. **S**
 39. Outline revision from reader drop-off data *(needs reader feedback)*. **M**
 40. Multi-book series bible that carries arcs across books. **L**

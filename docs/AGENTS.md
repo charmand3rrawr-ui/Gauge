@@ -75,9 +75,16 @@ instant travel between declared places. Author-declared world rules are checked 
 `agents.world_rules`, one per line, `never: <phrase>` or `always: <phrase> when <trigger>`; name places in
 `agents.known_places` to sharpen the travel check. `gauge world audit PROJECT`. In the lean profile.
 
+**Thread Keeper** (`thread_keeper`). No model calls. Tracks the weave the Showrunner's big promises miss:
+author-declared **subplots** (`agents.subplots`, `label: keyword, keyword`) and **foreshadow**
+(`agents.foreshadow`, `plant -> payoff`). It flags a subplot gone quiet too long (`agents.subplot_gap`, a
+dropped thread), a payoff that lands with no earlier setup (unearned), and reminds the planner which
+plants are still waiting to pay off. `gauge threads PROJECT`. In the lean profile.
+
 **Pacing Director** (`pacing`). No model calls. Classifies each chapter's shape from its
 features (action, quiet, reveal, progression, dialogue), recommends the next shape so the serial
-breathes, and complains about a third identical shape in a row.
+breathes, complains about a third identical shape in a row, and plans a deliberate shape rhythm for the
+next stretch (`arc_schedule`, shown in `gauge agents show pacing`).
 
 **Research Librarian** (`librarian`). Indexes `premise.md` and everything in the project's
 `research/` folder (`.md`, `.txt`) with embeddings; briefs the drafter with the notes relevant

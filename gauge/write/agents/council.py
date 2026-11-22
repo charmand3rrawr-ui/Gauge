@@ -29,6 +29,7 @@ from .showrunner import Showrunner
 from .structure_editor import StructureEditor
 from .suitability import SuitabilityChecker
 from .theme import ThemeKeeper
+from .thread_keeper import ThreadKeeper
 from .thriller_craft import ThrillerCraft
 from .voice_coach import VoiceCoach
 from .world_auditor import WorldAuditor
@@ -41,9 +42,9 @@ ALL_AGENTS: dict[str, type[StoryAgent]] = {
     PacingDirector.name: PacingDirector, Librarian.name: Librarian, Comedian.name: Comedian, ScoutAgent.name: ScoutAgent,
     VoiceCoach.name: VoiceCoach, ReadabilityCoach.name: ReadabilityCoach, SuitabilityChecker.name: SuitabilityChecker,
     ArcKeeper.name: ArcKeeper, SensoryEditor.name: SensoryEditor, ContinuityAuditor.name: ContinuityAuditor, CraftEditor.name: CraftEditor, CastTracker.name: CastTracker, StructureEditor.name: StructureEditor,
-    WorldAuditor.name: WorldAuditor, ThrillerCraft.name: ThrillerCraft,
+    WorldAuditor.name: WorldAuditor, ThrillerCraft.name: ThrillerCraft, ThreadKeeper.name: ThreadKeeper,
 }
-LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability", "arc_keeper", "sensory", "continuity", "world_auditor"}
+LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability", "arc_keeper", "sensory", "continuity", "world_auditor", "thread_keeper"}
 
 
 def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCouncil:
@@ -80,6 +81,8 @@ def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCou
             opts = {"clues": a.thriller_clues, "red_herrings": a.thriller_red_herrings,
                     "reveal_chapter": a.thriller_reveal_chapter, "domains": a.thriller_domains,
                     "signature": a.thriller_signature, "secrets": a.thriller_secrets, "covers": a.thriller_covers}
+        if name == "thread_keeper":
+            opts = {"subplots": a.subplots, "foreshadow": a.foreshadow, "subplot_gap": a.subplot_gap}
         try:
             if name == "librarian":
                 agent = cls(llm, project.dir, opts, embedder=embedder)

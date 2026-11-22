@@ -222,6 +222,10 @@ class AgentsConfig(BaseModel):
     thriller_signature: list[str] = Field(default_factory=list)  # the antagonist's signature/MO lexicon, to keep consistent
     thriller_secrets: list[str] = Field(default_factory=list)  # secrets to hold back, 'phrase @ CHAPTER' (a mole's name, a blown cover, the twist)
     thriller_covers: list[str] = Field(default_factory=list)  # cover identities, 'RealName = Alias'; flags an accidental shared alias
+    thread_keeper: bool = True  # tracks subplots (dropped threads) and foreshadow->payoff across the serial
+    subplots: list[str] = Field(default_factory=list)  # B-plots, 'label: keyword, keyword'; flagged when dormant too long
+    subplot_gap: int = 5  # chapters a subplot may be absent before it reads as dropped
+    foreshadow: list[str] = Field(default_factory=list)  # setups, 'plant text -> payoff text'; payoff must follow a plant
     sensitivity_rules: str = ""  # your platform's content rules, pasted
     sensitivity_categories: list[str] = Field(default_factory=list)
     block_on_sensitivity: bool = False  # severe flags force a revision instead of a warning

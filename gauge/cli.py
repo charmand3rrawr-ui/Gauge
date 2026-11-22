@@ -1120,6 +1120,16 @@ def thriller(c: Ctx, project: str) -> None:
     console.print(ag.report() if ag else "[yellow]thriller craft is off (enable it, or the genre is not a dark one)[/]")
 
 
+@main.command()
+@click.argument("project")
+@click.pass_obj
+def threads(c: Ctx, project: str) -> None:
+    """The Thread Keeper: subplots and when each was last seen, and foreshadow still waiting to pay off."""
+    _, _, council = _council(c, project)
+    ag = council.get("thread_keeper")
+    console.print(ag.report() if ag else "[yellow]thread keeper is disabled[/]")
+
+
 @main.command(name="craft-palette")
 @click.argument("domain", required=False)
 def craft_palette(domain: Optional[str]) -> None:

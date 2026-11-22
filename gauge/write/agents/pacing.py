@@ -36,6 +36,27 @@ class PacingDirector(StoryAgent):
     weight = 0.5
     state_model = PacingState
 
+    def arc_schedule(self, length: int = 6, start: int = 1) -> list[str]:
+        """A planned shape rhythm for the next `length` chapters (roadmap 35). A deliberate sequence that
+        breathes — alternating intensity, placing a reveal around the two-thirds mark and action at the
+        climax — rather than only reacting one chapter at a time. `start` is the chapter number the run
+        begins at, so the pattern lands reveals/climax consistently."""
+        length = max(1, min(length, 60))
+        base = ["action", "quiet", "progression", "dialogue", "quiet", "progression"]  # reveal placed deliberately
+        out: list[str] = []
+        two_thirds = max(1, round(length * 2 / 3)) if length >= 3 else 0
+        for i in range(length):
+            if i == two_thirds - 1:
+                shape = "reveal"
+            elif i == length - 1 and length >= 2:
+                shape = "action"            # end an arc on a high
+            else:
+                shape = base[(start - 1 + i) % len(base)]
+            if out and out[-1] == shape:    # never two of a kind back to back
+                shape = "quiet" if shape != "quiet" else "dialogue"
+            out.append(shape)
+        return out
+
     def recommend(self) -> str:
         recent = self.state.shapes[-3:]
         if not recent:
@@ -86,4 +107,7 @@ class PacingDirector(StoryAgent):
         self.state.recommended = ""
 
     def report(self) -> str:
-        return "Shapes: " + " -> ".join(self.state.shapes[-12:]) + f"\nNext: {self.recommend()}"
+        nxt = len(self.state.shapes) + 1
+        plan = " -> ".join(self.arc_schedule(6, start=nxt))
+        return ("Shapes: " + " -> ".join(self.state.shapes[-12:]) + f"\nNext: {self.recommend()}"
+                + f"\nPlanned arc (next 6): {plan}")

@@ -233,12 +233,12 @@ def test_comedian_only_for_comic_genres(tmp_path):
 def test_council_merges_scores_and_respects_config(cfg, tmp_path):
     p = Project.create(tmp_path / "pp", "Comic Tale", "idea", ["Comedy"], 300)
     council = build_council(cfg, FakeLLM(), p, embedder=HashingEmbedder(32))
-    assert set(council.names()) == set(ALL_AGENTS) - {"scout", "thriller_craft"}  # comedy attaches the comedian; scout needs a Scout instance; thriller attaches only for dark genres
+    assert set(council.names()) == set(ALL_AGENTS) - {"scout", "thriller_craft"}  # comedy attaches the comedian; scout needs a Scout instance; thriller attaches only for dark genres (thread_keeper runs with no threads declared)
     p2 = Project.create(tmp_path / "pp2", "Grim Tale", "idea", ["Horror"], 300)
     assert "comedian" not in build_council(cfg, FakeLLM(), p2).names()
     cfg.agents.profile = "lean"
     lean = build_council(cfg, FakeLLM(), p)
-    assert set(lean.names()) == {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability", "arc_keeper", "sensory", "continuity", "world_auditor"}
+    assert set(lean.names()) == {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability", "arc_keeper", "sensory", "continuity", "world_auditor", "thread_keeper"}
     cfg.agents.profile = "full"
     cfg.agents.schemer = False
     assert "schemer" not in build_council(cfg, FakeLLM(), p).names()
