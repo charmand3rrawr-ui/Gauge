@@ -38,6 +38,11 @@ knows what, where things are) extracted from every chapter. Contradictions are f
 deterministically: same subject and attribute, different value. It briefs the drafter with the
 canon relevant to the scene and flags contradictions in drafts.
 `gauge canon PROJECT "what colour are Rin's eyes?"` and `gauge canon PROJECT --subject Rin`.
+It also keeps a measured **name index** (no model call): every proper name the serial has used and how
+often. A new name one slip away from an established one ("Katharine" after fourteen "Katherine"s) is
+flagged as spelling drift. It is conservative on purpose: names on the cast list are never reported,
+short names only match on a doubled or swapped letter (Mara and Maya are different people), and two
+spellings each used several times in one chapter are treated as two people. `gauge canon PROJECT --names`.
 
 **Schemer** (`schemer`). The opposition as a planner with hidden information: goal, resources,
 what it knows about the protagonist, a multi-step scheme, and how much of it the protagonist has

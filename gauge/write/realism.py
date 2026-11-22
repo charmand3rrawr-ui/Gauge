@@ -124,3 +124,73 @@ def logistics_check(text: str) -> LogisticsCheck:
     if len(seasons) >= 2:
         issues.append(f"more than one season is referenced ({', '.join(seasons)}); keep the season consistent")
     return LogisticsCheck(tod, seasons, issues)
+
+
+# ---------------------------------------------------------------------------- explicit clock times (roadmap 27)
+
+_CLOCK_12 = re.compile(r"\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*([ap])\.?\s?m\b\.?", re.I)
+_CLOCK_24 = re.compile(r"\b(?:at|by|around|until|till|past|before|after|nearly|almost|was|read|said)\s+([01]?\d|2[0-3]):([0-5]\d)\b(?!\s*[ap]\.?\s?m\b)", re.I)
+_CLOCK_WORD = re.compile(r"\b(noon|midday|midnight)\b", re.I)
+_QUOTED = re.compile(r"[\"\u201c][^\"\u201c\u201d]{0,600}[\"\u201d]")
+# Words that explain a clock running backwards: time passed into another day, or the text looked back.
+_CLOCK_EXCUSE = re.compile(
+    r"\b(next\s+(day|morning|evening|night)|the\s+following|tomorrow|days?\s+later|weeks?\s+later|hours?\s+later|"
+    r"later\s+that|by\s+the\s+time|the\s+day\s+before|yesterday|earlier|ago|had\s+been|remembered|that\s+morning|"
+    r"last\s+night|the\s+night\s+before|overnight|slept|woke|dawn\s+came|until\s+morning)\b", re.I)
+_SUN_CUES = {"sunlight", "sunny", "sunshine", "daylight", "sunlit"}
+_MOON_CUES = {"moonlight", "moonlit", "starlight", "stars"}
+
+
+@dataclass
+class ClockCheck:
+    times: list[tuple[int, str]]        # (minutes after midnight, the phrase), in narrative order
+    issues: list[str] = field(default_factory=list)
+
+
+def _fmt(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _say(phrase: str, minutes: int) -> str:
+    return phrase if phrase == _fmt(minutes) else f"{phrase} ({_fmt(minutes)})"
+
+
+def clock_times(text: str) -> list[tuple[int, str, int]]:
+    """Explicit clock times in narration, in order: (minutes after midnight, phrase, position). Times
+    spoken in dialogue are skipped, since a character naming a time is not the scene's clock."""
+    narration = _QUOTED.sub(lambda m: " " * len(m.group(0)), text)   # keep positions stable
+    found: list[tuple[int, str, int]] = []
+    for m in _CLOCK_12.finditer(narration):
+        h, mins, half = int(m.group(1)) % 12, int(m.group(2) or 0), m.group(3).lower()
+        found.append(((h + (12 if half == "p" else 0)) * 60 + mins, m.group(0).strip(), m.start()))
+    for m in _CLOCK_24.finditer(narration):
+        found.append((int(m.group(1)) * 60 + int(m.group(2)), f"{m.group(1)}:{m.group(2)}", m.start(1)))
+    for m in _CLOCK_WORD.finditer(narration):
+        found.append((0 if m.group(1).lower() == "midnight" else 12 * 60, m.group(1).lower(), m.start()))
+    found.sort(key=lambda t: t[2])
+    return found
+
+
+def clock_check(text: str) -> ClockCheck:
+    """Flag a clock that runs backwards with nothing to explain it, and a stated time that contradicts the
+    light in its own sentence (sunlight at 2 a.m., moonlight at noon)."""
+    found = clock_times(text)
+    issues: list[str] = []
+    for (t1, p1, pos1), (t2, p2, pos2) in zip(found, found[1:]):
+        if t2 >= t1:
+            continue
+        if (t2 + 1440 - t1) <= 180:                 # 11:50 p.m. then 12:10 a.m. is just midnight passing
+            continue
+        if _CLOCK_EXCUSE.search(text[pos1:pos2]):
+            continue
+        issues.append(f"the clock runs backwards: {_say(p1, t1)} and then {_say(p2, t2)} with no day change or look back between them")
+    for t, phrase, pos in found:
+        start = max(text.rfind(".", 0, pos), text.rfind("!", 0, pos), text.rfind("?", 0, pos)) + 1
+        after = pos + len(phrase)                    # past the dots inside "a.m."
+        ends = [e for e in (text.find(c, after) for c in ".!?") if e != -1]
+        sentence = set(_tokens(text[start:min(ends) if ends else len(text)]))
+        if (t >= 23 * 60 or t < 4 * 60) and sentence & _SUN_CUES:
+            issues.append(f"{_say(phrase, t)} but the same sentence has {', '.join(sorted(sentence & _SUN_CUES))}; the light contradicts the hour")
+        elif 10 * 60 <= t <= 15 * 60 and sentence & _MOON_CUES:
+            issues.append(f"{_say(phrase, t)} but the same sentence has {', '.join(sorted(sentence & _MOON_CUES))}; the light contradicts the hour")
+    return ClockCheck([(t, p) for t, p, _ in found], issues[:4])

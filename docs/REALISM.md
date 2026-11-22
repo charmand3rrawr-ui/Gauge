@@ -13,6 +13,11 @@ arm's length, time of day that contradicts itself — and feed concrete fixes to
 - **Continuity Auditor** (`agents.continuity`). Guards logistics the way the Archivist guards facts: it
   flags a chapter whose time of day contradicts itself with no passage of time, and a season or time of
   day that flips between consecutive chapters. `gauge.write.realism.logistics_check`.
+  It also reads **explicit clock times** in narration ("3 p.m.", "at 14:30", "midnight") and flags a clock
+  that runs backwards with nothing to explain it, and a stated hour that contradicts the light in its own
+  sentence (sunlight at 2 a.m.). Midnight passing, a next-day jump and a look back ("earlier", "the night
+  before") are all read as legitimate, and times spoken in dialogue are skipped, since a character naming
+  a time is not the scene's clock. `gauge.write.realism.clock_check`.
 
 ## Grounding from research
 

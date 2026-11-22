@@ -1108,14 +1108,18 @@ def agents_setup(c: Ctx, project: str) -> None:
 @click.argument("project")
 @click.argument("question", required=False)
 @click.option("--subject", default=None, help="List facts about a subject instead of asking.")
+@click.option("--names", "show_names", is_flag=True, help="List the name index (every proper name used, with counts).")
 @click.pass_obj
-def canon(c: Ctx, project: str, question: Optional[str], subject: Optional[str]) -> None:
+def canon(c: Ctx, project: str, question: Optional[str], subject: Optional[str], show_names: bool) -> None:
     """Ask the Archivist what is true in the story, or list canon facts."""
     _, _, council = _council(c, project)
     ag = council.get("archivist")
     if ag is None:
         console.print("[yellow]archivist is disabled[/]")
         sys.exit(1)
+    if show_names:
+        console.print(ag.name_index(), markup=False, highlight=False)
+        return
     if subject:
         for f in ag.lookup(subject):
             console.print(f"ch {f.chapter}: {f.subject} / {f.attribute} = {f.value}")
