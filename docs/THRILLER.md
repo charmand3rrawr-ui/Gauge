@@ -48,6 +48,12 @@ themselves across the book.
 shown to the reader *before* the reveal, and every red herring must be dispelled. Near the reveal it nudges
 the planner and drafter to plant any clue still missing.
 
+**Secrets and covers** (the spy-thriller mirror of fair play). A clue must *appear* before its reveal; a
+**secret** must *not* leak before its. Declare the things that have to stay hidden — a mole's identity, a
+blown cover, the twist — and the agent flags any chapter that reveals one too early, and reminds the
+drafter in the brief what to hold back. Declare **covers** (a character's cover identity / legend) and it
+keeps a ledger of which aliases are in play and warns if two characters accidentally share one alias.
+
 ## Declaring the mystery
 
 In `config.json` under `agents`:
@@ -59,7 +65,9 @@ In `config.json` under `agents`:
     "thriller_clues": ["the muddy boot print", "the torn ticket stub", "the stopped clock"],
     "thriller_red_herrings": ["the jealous brother", "the missing cash"],
     "thriller_reveal_chapter": 18,
-    "thriller_signature": ["the staged tableau", "the removed left shoe", "the folded note"]
+    "thriller_signature": ["the staged tableau", "the removed left shoe", "the folded note"],
+    "thriller_secrets": ["Dolan is the mole @ 14", "Lena is really Mara Vane @ 9"],
+    "thriller_covers": ["Mara Vane = Lena Koss", "Jun Park = Sam Bright"]
   }
 }
 ```
@@ -73,6 +81,10 @@ In `config.json` under `agents`:
   `["tradecraft", "special_ops", "firearms"]`; a serial-killer procedural `["forensic", "criminology",
   "psychology"]`.
 - **thriller_signature** — the antagonist's MO lexicon, kept consistent.
+- **thriller_secrets** — things that must stay hidden, `phrase @ CHAPTER`. Flagged if they surface before
+  that chapter.
+- **thriller_covers** — cover identities, `RealName = Alias`. Tracked, and an accidental shared alias is
+  flagged.
 
 ## Inspecting it
 

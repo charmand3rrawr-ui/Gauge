@@ -131,3 +131,45 @@ def test_agent_skips_short_text(tmp_path):
     p = _proj(tmp_path)
     ag = ThrillerCraft(FakeLLM(), p.dir, {})
     assert ag.review("A short line.", _ctx(p, 1)) is None
+
+
+# ------------------------------------------------------------------ secrets & covers
+def test_secrets_parse_and_leak_detection():
+    from gauge.write.thriller import leaked_secrets, parse_secrets
+    secrets = parse_secrets(["Dolan is the mole @ 14", "a plain note", "Lena is really Mara @ 9"])
+    assert [(s.phrase, s.chapter) for s in secrets] == [("Dolan is the mole", 14), ("a plain note", 0), ("Lena is really Mara", 9)]
+    assert leaked_secrets("By now everyone knew Dolan is the mole.", secrets, 5) == ["Dolan is the mole"]
+    assert leaked_secrets("Dolan is the mole, revealed at last.", secrets, 14) == []  # on/after the reveal chapter is fine
+
+
+def test_cover_parse_and_collision():
+    from gauge.write.thriller import cover_collisions, covers_present, parse_covers
+    covers = parse_covers(["Mara Vane = Lena Koss", "Dolan Reyes = Lena Koss", "Jun Park = Sam Bright", "junk"])
+    assert len(covers) == 3 and cover_collisions(covers) == ["lena koss"]
+    assert covers_present("Lena Koss nodded to Sam Bright across the platform.", covers) == {"Lena Koss", "Sam Bright"}
+
+
+def test_agent_flags_early_secret_leak(tmp_path):
+    p = _proj(tmp_path)
+    ag = ThrillerCraft(FakeLLM(), p.dir, {"secrets": ["Dolan is the mole @ 14"]})
+    leak = TENSE * 3 + "\n\nAnd in that moment she understood: Dolan is the mole, and always had been. " + CLIFF
+    r = ag.review(leak, _ctx(p, 6))
+    assert any("leaked early" in i and "Dolan is the mole" in i for i in r.issues)
+    # From the reveal chapter on, the same line is fine.
+    assert not any("leaked early" in i for i in (ag.review(leak, _ctx(p, 14)).issues))
+
+
+def test_agent_brief_warns_what_to_hold_back(tmp_path):
+    p = _proj(tmp_path)
+    ag = ThrillerCraft(FakeLLM(), p.dir, {"secrets": ["Lena is really Mara @ 9"]})
+    assert "do not reveal yet" in ag.brief(_ctx(p, 3)) and "Lena is really Mara" in ag.brief(_ctx(p, 3))
+
+
+def test_agent_warns_cover_collision_once(tmp_path):
+    p = _proj(tmp_path)
+    ag = ThrillerCraft(FakeLLM(), p.dir, {"covers": ["Mara Vane = Lena Koss", "Dolan Reyes = Lena Koss"]})
+    ch1 = TENSE * 3 + "\n\nLena Koss stepped off the train into the grey evening crowd. " + CLIFF
+    r1 = ag.review(ch1, _ctx(p, 1))
+    assert any("share the cover alias" in i for i in r1.issues)
+    r2 = ag.review(ch1, _ctx(p, 2))  # only warns at chapter 1
+    assert not any("share the cover alias" in i for i in r2.issues)

@@ -19,7 +19,12 @@ from pydantic import BaseModel, Field
 
 from ..thriller import (
     clues_present,
+    cover_collisions,
+    covers_present,
     fair_play,
+    leaked_secrets,
+    parse_covers,
+    parse_secrets,
     register_profile,
     signature_terms,
     suspense_profile,
@@ -32,6 +37,7 @@ class ThrillerState(BaseModel):
     seen_clues: list[str] = Field(default_factory=list)       # declared clues shown to the reader so far
     resolved_herrings: list[str] = Field(default_factory=list)
     signature: list[str] = Field(default_factory=list)        # antagonist MO terms established
+    aliases_seen: list[str] = Field(default_factory=list)     # cover identities that have appeared
     suspense_history: list[float] = Field(default_factory=list)
     chapters: int = 0
 
@@ -61,6 +67,12 @@ class ThrillerCraft(StoryAgent):
     def _sig_lexicon(self) -> set[str]:
         return {s.strip() for s in self.options.get("signature", []) if str(s).strip()}
 
+    def _secrets(self):
+        return parse_secrets(self.options.get("secrets", []))
+
+    def _covers(self):
+        return parse_covers(self.options.get("covers", []))
+
     # -- brief ---------------------------------------------------------------
     def brief(self, ctx: SceneContext) -> str:
         lines = ["- end the chapter on a hook (a question, a reveal, or a turn)",
@@ -75,6 +87,10 @@ class ThrillerCraft(StoryAgent):
                              + "; ".join(unseen[:4]))
         if self.state.signature:
             lines.append("- keep the antagonist's signature consistent: " + ", ".join(self.state.signature[:6]))
+        # What must stay hidden this chapter (a mole's name, a blown cover, the twist).
+        keep_hidden = [s.phrase for s in self._secrets() if s.chapter > ctx.number]
+        if keep_hidden:
+            lines.append("- do not reveal yet (hold until their chapter): " + "; ".join(keep_hidden[:5]))
         # Genre tropes for the declared domains — how to dramatise them, not how to perform them.
         from ..thriller import TROPES
         for dom in (self._domains() or []):
@@ -125,11 +141,24 @@ class ThrillerCraft(StoryAgent):
             for h in fp.unresolved_herrings[:2]:
                 issues.append(f"red herring '{h}' is never dispelled; resolve it so the misdirection reads as fair")
 
+        # Secrets that leak before their reveal chapter (a mole named too early, a cover blown ahead of time).
+        leaks = leaked_secrets(text, self._secrets(), ctx.number)
+        for p in leaks[:2]:
+            issues.append(f"secret leaked early: '{p}' surfaces before its reveal chapter; hold it back to keep the turn")
+
+        # Cover/legend ledger + accidental alias clash (two characters under one cover name).
+        covers = self._covers()
+        self._aliases_now = sorted(covers_present(text, covers))
+        if ctx.number == 1:  # warn once, at the first chapter
+            for alias in cover_collisions(covers):
+                issues.append(f"two characters share the cover alias '{alias}'; confirm that is intended, or the legends will blur")
+
         self._sig_now = sorted(sig_now)
         score = round(0.6 * sc + 0.4 * (1.0 if not issues else max(0.4, 1.0 - 0.15 * len(issues))), 3)
         return AgentReview(agent=self.name, score=score, issues=issues[:3],
                            data={"suspense": sc, "ends_on_hook": sp.ends_on_hook, "ticking_clock": sp.ticking_clock,
-                                 "register": {k: v for k, v in rp.hits.items() if v}, "clues_shown": sorted(seen_now)})
+                                 "register": {k: v for k, v in rp.hits.items() if v}, "clues_shown": sorted(seen_now),
+                                 "aliases": self._aliases_now})
 
     # -- remember ------------------------------------------------------------
     def remember(self, text: str, ctx: SceneContext) -> None:
@@ -143,6 +172,9 @@ class ThrillerCraft(StoryAgent):
             if s not in self.state.signature:
                 self.state.signature.append(s)
         self.state.signature = self.state.signature[-40:]
+        for a in getattr(self, "_aliases_now", []):
+            if a not in self.state.aliases_seen:
+                self.state.aliases_seen.append(a)
         sc = None
         last = getattr(self, "_seen_now", None)
         if last is not None:  # review ran
@@ -168,4 +200,11 @@ class ThrillerCraft(StoryAgent):
                 bits.append("still unplanted: " + "; ".join(unseen[:5]))
         if self.state.signature:
             bits.append("antagonist signature: " + ", ".join(self.state.signature[:8]))
+        if self.state.aliases_seen:
+            bits.append("covers in play: " + ", ".join(self.state.aliases_seen[:8]))
+        secrets = self._secrets()
+        if secrets:
+            pending = [f"{s.phrase} (ch {s.chapter})" for s in secrets if s.chapter > self.state.chapters]
+            if pending:
+                bits.append("still to reveal: " + "; ".join(pending[:5]))
         return "; ".join(bits) or "(tracking)"

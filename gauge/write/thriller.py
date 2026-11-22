@@ -230,3 +230,74 @@ def clues_present(text: str, declared: list[str]) -> set[str]:
     """Which declared clues (substring, case-insensitive) appear in this chapter."""
     low = text.lower()
     return {c for c in declared if c and c.lower() in low}
+
+
+# ---------------------------------------------------------------------------- secrets (the mirror of clues)
+
+@dataclass
+class Secret:
+    phrase: str
+    chapter: int                    # the chapter the secret may first surface; before it, a leak
+
+
+def parse_secrets(raw: list[str]) -> list[Secret]:
+    """Secrets that must stay hidden until a chapter — a mole's name, a cover blown, the twist. One per
+    entry, 'phrase @ 12' (reveal in chapter 12). Entries without '@' are treated as reveal at chapter 0
+    (always allowed) and ignored by the leak check."""
+    out: list[Secret] = []
+    for item in raw or []:
+        s = str(item).strip()
+        if not s:
+            continue
+        if "@" in s:
+            phrase, _, ch = s.rpartition("@")
+            try:
+                out.append(Secret(phrase.strip(), int(ch.strip())))
+            except ValueError:
+                out.append(Secret(s, 0))
+        else:
+            out.append(Secret(s, 0))
+    return out
+
+
+def leaked_secrets(text: str, secrets: list[Secret], current_chapter: int) -> list[str]:
+    """Declared secrets that surface in this chapter before the chapter they are meant to be revealed."""
+    low = text.lower()
+    return [s.phrase for s in secrets if s.chapter > current_chapter and s.phrase and s.phrase.lower() in low]
+
+
+# ---------------------------------------------------------------------------- covers / legends
+
+@dataclass
+class Cover:
+    character: str                  # the real identity
+    alias: str                      # the cover name / legend they operate under
+
+
+def parse_covers(raw: list[str]) -> list[Cover]:
+    """A character's cover identity, one per entry: 'RealName = Alias' (e.g. 'Mara Vane = Lena Koss')."""
+    out: list[Cover] = []
+    for item in raw or []:
+        s = str(item).strip()
+        if "=" not in s:
+            continue
+        real, _, alias = s.partition("=")
+        real, alias = real.strip(), alias.strip()
+        if real and alias:
+            out.append(Cover(real, alias))
+    return out
+
+
+def cover_collisions(covers: list[Cover]) -> list[str]:
+    """Aliases that two different characters both operate under — usually an accidental clash, not a
+    deliberate shared legend; worth one warning so the author confirms it is intended."""
+    by_alias: dict[str, set[str]] = {}
+    for c in covers:
+        by_alias.setdefault(c.alias.lower(), set()).add(c.character)
+    return [alias for alias, chars in by_alias.items() if len(chars) > 1]
+
+
+def covers_present(text: str, covers: list[Cover]) -> set[str]:
+    """Which declared aliases appear in this chapter (for the cover ledger)."""
+    low = text.lower()
+    return {c.alias for c in covers if c.alias and c.alias.lower() in low}

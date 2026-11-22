@@ -79,7 +79,7 @@ def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCou
         if name == "thriller_craft":
             opts = {"clues": a.thriller_clues, "red_herrings": a.thriller_red_herrings,
                     "reveal_chapter": a.thriller_reveal_chapter, "domains": a.thriller_domains,
-                    "signature": a.thriller_signature}
+                    "signature": a.thriller_signature, "secrets": a.thriller_secrets, "covers": a.thriller_covers}
         try:
             if name == "librarian":
                 agent = cls(llm, project.dir, opts, embedder=embedder)

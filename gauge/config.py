@@ -218,8 +218,10 @@ class AgentsConfig(BaseModel):
     thriller_clues: list[str] = Field(default_factory=list)  # the key clues the solution rests on (fair-play)
     thriller_red_herrings: list[str] = Field(default_factory=list)  # misdirections that must be dispelled
     thriller_reveal_chapter: int = 0  # chapter the truth is revealed; 0 = unset (fair-play checked there)
-    thriller_domains: list[str] = Field(default_factory=list)  # register to carry: forensic, criminology, psychology, deception, engineering
+    thriller_domains: list[str] = Field(default_factory=list)  # register to carry: forensic, criminology, psychology, deception, engineering, tradecraft, special_ops, firearms, close_quarters
     thriller_signature: list[str] = Field(default_factory=list)  # the antagonist's signature/MO lexicon, to keep consistent
+    thriller_secrets: list[str] = Field(default_factory=list)  # secrets to hold back, 'phrase @ CHAPTER' (a mole's name, a blown cover, the twist)
+    thriller_covers: list[str] = Field(default_factory=list)  # cover identities, 'RealName = Alias'; flags an accidental shared alias
     sensitivity_rules: str = ""  # your platform's content rules, pasted
     sensitivity_categories: list[str] = Field(default_factory=list)
     block_on_sensitivity: bool = False  # severe flags force a revision instead of a warning
