@@ -153,14 +153,15 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge new NAME [--idea] [--premise-file F] [--continue-from PATH]` | create a project from an idea, a canon premise document, and/or an existing manuscript |
 | `gauge start PREMISE [--chapters N]` | premise (text or file) straight to written chapters |
 | `gauge absorb [--chapters N]` | extract craft technique cards from the strongest unread chapters |
-| `gauge world show/build/set/chat/extras/promote` | the World agent; see [docs/WORLD.md](docs/WORLD.md) |
+| `gauge world show/build/set/chat/extras/promote/audit` | the World agent and the World Auditor's cross-chapter continuity; see [docs/WORLD.md](docs/WORLD.md) |
+| `gauge thriller PROJECT` | crime/thriller craft: suspense, fair-play clues, antagonist signature; see [docs/THRILLER.md](docs/THRILLER.md) |
 | `gauge agents list/show/enable/disable/setup` | the writing room; see [docs/AGENTS.md](docs/AGENTS.md) |
 | `gauge canon`, `gauge ledger`, `gauge readers`, `gauge feedback`, `gauge package`, `gauge research` | ask the Archivist, read the Showrunner's ledger, see Reader Panel predictions, record real reader numbers, get blurb and tags, search your notes |
 | `gauge scout ask/dossier/gutenberg/log` | open-source research; import public-domain books; see [docs/RESEARCH.md](docs/RESEARCH.md) |
 | `gauge feedback`, `gauge bandit`, `gauge lessons`, `gauge sync-edits`, `gauge finetune` | learn from your own serial: real numbers, prompt tuning, lessons, edit pairs, LoRA plan |
 | `gauge persona build/show/blend` | the author persona learned from your chapters |
 | `gauge character arc` | planned personality drift |
-| `gauge corpus stats/build` | compile the training library from text you may train on, licence-tracked; see [docs/CORPUS.md](docs/CORPUS.md) |
+| `gauge corpus stats/build/fetch` | compile the training library from text you may train on, licence-tracked; see [docs/CORPUS.md](docs/CORPUS.md) |
 | `gauge native presets/bench/train/distill/eval/continue/status/sample/tokenizer` | GaugeLM, the built-in model; see [docs/NATIVE.md](docs/NATIVE.md) |
 | `gauge compute scan/watch/token/discover/add/list/remove`, `gauge worker` | sense GPUs; pool the machines you own; see [docs/COMPUTE.md](docs/COMPUTE.md) |
 | `gauge bot new/list/run/test/schedule/remove` | bots: standalone programs written and tested by the Engineer; see [docs/BOTS.md](docs/BOTS.md) |

@@ -214,6 +214,12 @@ class AgentsConfig(BaseModel):
     world_auditor: bool = True  # tracks timeline, season/weather, injuries, props and travel across the serial
     world_rules: str = ""  # your world's rules, one per line: 'never: <phrase>' / 'always: <phrase> when <trigger>'
     known_places: list[str] = Field(default_factory=list)  # named places, to sharpen the travel-time check
+    thriller_craft: bool = True  # crime/thriller/mystery craft: suspense, fair-play clues, menace, expert register (attaches for dark genres)
+    thriller_clues: list[str] = Field(default_factory=list)  # the key clues the solution rests on (fair-play)
+    thriller_red_herrings: list[str] = Field(default_factory=list)  # misdirections that must be dispelled
+    thriller_reveal_chapter: int = 0  # chapter the truth is revealed; 0 = unset (fair-play checked there)
+    thriller_domains: list[str] = Field(default_factory=list)  # register to carry: forensic, criminology, psychology, deception, engineering
+    thriller_signature: list[str] = Field(default_factory=list)  # the antagonist's signature/MO lexicon, to keep consistent
     sensitivity_rules: str = ""  # your platform's content rules, pasted
     sensitivity_categories: list[str] = Field(default_factory=list)
     block_on_sensitivity: bool = False  # severe flags force a revision instead of a warning

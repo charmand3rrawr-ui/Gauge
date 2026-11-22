@@ -57,6 +57,17 @@ platform's rules (`agents.sensitivity_rules`). Flags are written into each chapt
 as `content_flags`. Warns by default; `agents.block_on_sensitivity` makes severe flags force a
 revision.
 
+**Thriller Craft** (`thriller_craft`). No model calls. Attaches only for dark genres (crime, thriller,
+mystery, noir, horror, psychological). It raises the craft of this fiction: it scores suspense (dread,
+ticking clock, stakes, an end-of-chapter hook, and lulls), checks that the prose carries an authentic
+forensic/criminological/psychological/engineering *register* instead of hand-waving ("did some
+forensics"), keeps a serial antagonist's signature consistent, and — when you declare the mystery's
+scaffolding — enforces **fair play**: every key clue the solution rests on must be shown to the reader
+before the reveal, and every red herring must be dispelled. Declare it in config under `agents.thriller_*`
+(`clues`, `red_herrings`, `reveal_chapter`, `domains`, `signature`). `gauge thriller PROJECT`. See
+THRILLER.md. It improves storytelling only — it never supplies real-world criminal, deception or weapon
+methods.
+
 **World Auditor** (`world_auditor`). No model calls. Guards the slow physical state of the world across
 the whole serial: an absolute timeline built from time markers, season-vs-weather consistency, who is hurt
 (and whether they are back in hard action too soon), props that were destroyed yet reappear, and

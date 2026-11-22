@@ -1113,6 +1113,16 @@ def ledger(c: Ctx, project: str) -> None:
 @main.command()
 @click.argument("project")
 @click.pass_obj
+def thriller(c: Ctx, project: str) -> None:
+    """Thriller Craft state: suspense trend, fair-play clues shown vs. still unplanted, antagonist signature."""
+    _, _, council = _council(c, project)
+    ag = council.get("thriller_craft")
+    console.print(ag.report() if ag else "[yellow]thriller craft is off (enable it, or the genre is not a dark one)[/]")
+
+
+@main.command()
+@click.argument("project")
+@click.pass_obj
 def readers(c: Ctx, project: str) -> None:
     """What the Reader Panel predicted for recent chapters, and how calibrated it is."""
     _, _, council = _council(c, project)

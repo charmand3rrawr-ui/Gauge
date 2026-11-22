@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from ...llm.client import LLM
 from ...llm.parallel import run_parallel
+from ..thriller import wants_thriller
 from .arc_keeper import ArcKeeper
 from .archivist import Archivist
 from .base import AgentReview, SceneContext, StoryAgent
@@ -28,6 +29,7 @@ from .showrunner import Showrunner
 from .structure_editor import StructureEditor
 from .suitability import SuitabilityChecker
 from .theme import ThemeKeeper
+from .thriller_craft import ThrillerCraft
 from .voice_coach import VoiceCoach
 from .world_auditor import WorldAuditor
 
@@ -39,7 +41,7 @@ ALL_AGENTS: dict[str, type[StoryAgent]] = {
     PacingDirector.name: PacingDirector, Librarian.name: Librarian, Comedian.name: Comedian, ScoutAgent.name: ScoutAgent,
     VoiceCoach.name: VoiceCoach, ReadabilityCoach.name: ReadabilityCoach, SuitabilityChecker.name: SuitabilityChecker,
     ArcKeeper.name: ArcKeeper, SensoryEditor.name: SensoryEditor, ContinuityAuditor.name: ContinuityAuditor, CraftEditor.name: CraftEditor, CastTracker.name: CastTracker, StructureEditor.name: StructureEditor,
-    WorldAuditor.name: WorldAuditor,
+    WorldAuditor.name: WorldAuditor, ThrillerCraft.name: ThrillerCraft,
 }
 LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability", "arc_keeper", "sensory", "continuity", "world_auditor"}
 
@@ -54,6 +56,8 @@ def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCou
         enabled &= LEAN
     if "comedian" in enabled and not wants_comedy(project.state.genres, project.state.bible.tone):
         enabled.discard("comedian")
+    if "thriller_craft" in enabled and not wants_thriller(project.state.genres, project.state.bible.tone):
+        enabled.discard("thriller_craft")
     agents: list[StoryAgent] = []
     for name in ALL_AGENTS:
         if name not in enabled:
@@ -72,6 +76,10 @@ def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCou
             opts = {"max_queries": cfg.research.max_queries_per_chapter, "fact_check": cfg.research.fact_check}
         if name == "world_auditor":
             opts = {"world_rules": a.world_rules, "known_places": a.known_places}
+        if name == "thriller_craft":
+            opts = {"clues": a.thriller_clues, "red_herrings": a.thriller_red_herrings,
+                    "reveal_chapter": a.thriller_reveal_chapter, "domains": a.thriller_domains,
+                    "signature": a.thriller_signature}
         try:
             if name == "librarian":
                 agent = cls(llm, project.dir, opts, embedder=embedder)
