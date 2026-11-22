@@ -29,6 +29,7 @@ from .structure_editor import StructureEditor
 from .suitability import SuitabilityChecker
 from .theme import ThemeKeeper
 from .voice_coach import VoiceCoach
+from .world_auditor import WorldAuditor
 
 log = logging.getLogger(__name__)
 
@@ -38,8 +39,9 @@ ALL_AGENTS: dict[str, type[StoryAgent]] = {
     PacingDirector.name: PacingDirector, Librarian.name: Librarian, Comedian.name: Comedian, ScoutAgent.name: ScoutAgent,
     VoiceCoach.name: VoiceCoach, ReadabilityCoach.name: ReadabilityCoach, SuitabilityChecker.name: SuitabilityChecker,
     ArcKeeper.name: ArcKeeper, SensoryEditor.name: SensoryEditor, ContinuityAuditor.name: ContinuityAuditor, CraftEditor.name: CraftEditor, CastTracker.name: CastTracker, StructureEditor.name: StructureEditor,
+    WorldAuditor.name: WorldAuditor,
 }
-LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability", "arc_keeper", "sensory", "continuity"}
+LEAN = {"archivist", "showrunner", "line_editor", "pacing", "librarian", "packager", "voice_coach", "readability", "suitability", "arc_keeper", "sensory", "continuity", "world_auditor"}
 
 
 def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCouncil:
@@ -68,6 +70,8 @@ def build_council(cfg, llm: LLM, project, embedder=None, scout=None) -> AgentCou
             if scout is None or not cfg.research.enabled:
                 continue
             opts = {"max_queries": cfg.research.max_queries_per_chapter, "fact_check": cfg.research.fact_check}
+        if name == "world_auditor":
+            opts = {"world_rules": a.world_rules, "known_places": a.known_places}
         try:
             if name == "librarian":
                 agent = cls(llm, project.dir, opts, embedder=embedder)

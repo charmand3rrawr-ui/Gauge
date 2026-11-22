@@ -30,16 +30,16 @@ tested batches — not a promise that all 100 exist yet.
 19. Antagonist competence meter (extends Schemer): flag a villain who only reacts. **M**
 20. [done] Character voice embeddings: cluster dialogue to catch two characters converging in style. **M**
 
-## C. World and continuity
-21. Map/geography memory: a place graph with distances; flag impossible travel times. **M**
-22. Object/prop ledger: track items; flag a prop that vanishes or reappears. **M**
-23. Timeline builder: absolute chapter timeline; flag events out of order or overlapping. **M**
-24. Weather/season model: a simple climate so weather follows the calendar. **S**
+## C. World and continuity  — measured core done (gauge.write.world_state + World Auditor); 25/27/28/30 deferred
+21. [done] Map/geography memory: flag instant travel between declared places (distance-aware when set). **M**
+22. [done] Object/prop ledger: track destroyed/lost items; flag one that reappears in use. **M**
+23. [done] Timeline builder: absolute day offset from time markers; flag contradictory jumps. **M**
+24. [done] Weather/season model: flag weather that contradicts the established season. **S**
 25. Economy/resource tracking for the world (money, supplies) with consequences. **M**
-26. Injury/healing model: wounds persist and heal at plausible rates. **S**
+26. [done] Injury/healing model: remember who was hurt; flag vigorous action with no recovery shown. **S**
 27. Day-night/clock within a chapter (extends the Continuity Auditor to explicit times). **M**
 28. Named-entity canon index with fuzzy matching to catch spelling drift (extends Archivist). **M**
-29. World rules as assertions the critic can check each chapter. **M**
+29. [done] World rules as assertions the critic can check each chapter ('never:' / 'always: … when …'). **M**
 30. Grounding dossier caching and reuse per recurring location *(needs Scout)*. **S**
 
 ## D. Plot and structure  — partial (gauge.write.structure + Structure Editor): 32/33/36/38 done

@@ -884,6 +884,16 @@ def world_show(c: Ctx, project: str) -> None:
     console.print(w.markdown())
 
 
+@world.command("audit")
+@click.argument("project")
+@click.pass_obj
+def world_audit(c: Ctx, project: str) -> None:
+    """The World Auditor's cross-chapter state: timeline, season, open injuries and watched props."""
+    _, _, council = _council(c, project)
+    ag = council.get("world_auditor")
+    console.print(ag.report() if ag else "[yellow]world auditor is disabled[/]")
+
+
 @world.command("build")
 @click.argument("project")
 @click.pass_obj

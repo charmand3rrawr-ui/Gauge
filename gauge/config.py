@@ -211,6 +211,9 @@ class AgentsConfig(BaseModel):
     craft_editor: bool = True  # line-craft: clichés, weak verb+adverb, on-the-nose dialogue, tense drift, anachronisms
     cast_tracker: bool = True  # keeps the ensemble alive: flags absent cast, flat wants/needs, frozen relationships
     structure: bool = True  # try-fail cost, conflict, cliffhanger variety and structural beat placement
+    world_auditor: bool = True  # tracks timeline, season/weather, injuries, props and travel across the serial
+    world_rules: str = ""  # your world's rules, one per line: 'never: <phrase>' / 'always: <phrase> when <trigger>'
+    known_places: list[str] = Field(default_factory=list)  # named places, to sharpen the travel-time check
     sensitivity_rules: str = ""  # your platform's content rules, pasted
     sensitivity_categories: list[str] = Field(default_factory=list)
     block_on_sensitivity: bool = False  # severe flags force a revision instead of a warning

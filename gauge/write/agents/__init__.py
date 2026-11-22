@@ -22,6 +22,7 @@ from .structure_editor import StructureEditor
 from .suitability import SuitabilityChecker
 from .theme import ThemeKeeper
 from .voice_coach import VoiceCoach
+from .world_auditor import WorldAuditor
 
 __all__ = ["Archivist", "AgentReview", "SceneContext", "StoryAgent", "Comedian", "ALL_AGENTS", "AgentCouncil", "build_council",
-           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper", "VoiceCoach", "ReadabilityCoach", "SuitabilityChecker", "ArcKeeper", "SensoryEditor", "ContinuityAuditor", "CraftEditor", "CastTracker", "StructureEditor"]
+           "LineEditor", "Librarian", "Packager", "PacingDirector", "ReaderPanel", "Schemer", "ScoutAgent", "SensitivityReader", "Showrunner", "ThemeKeeper", "VoiceCoach", "ReadabilityCoach", "SuitabilityChecker", "ArcKeeper", "SensoryEditor", "ContinuityAuditor", "CraftEditor", "CastTracker", "StructureEditor", "WorldAuditor"]

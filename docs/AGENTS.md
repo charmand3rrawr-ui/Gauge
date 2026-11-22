@@ -57,6 +57,13 @@ platform's rules (`agents.sensitivity_rules`). Flags are written into each chapt
 as `content_flags`. Warns by default; `agents.block_on_sensitivity` makes severe flags force a
 revision.
 
+**World Auditor** (`world_auditor`). No model calls. Guards the slow physical state of the world across
+the whole serial: an absolute timeline built from time markers, season-vs-weather consistency, who is hurt
+(and whether they are back in hard action too soon), props that were destroyed yet reappear, and
+instant travel between declared places. Author-declared world rules are checked each chapter —
+`agents.world_rules`, one per line, `never: <phrase>` or `always: <phrase> when <trigger>`; name places in
+`agents.known_places` to sharpen the travel check. `gauge world audit PROJECT`. In the lean profile.
+
 **Pacing Director** (`pacing`). No model calls. Classifies each chapter's shape from its
 features (action, quiet, reveal, progression, dialogue), recommends the next shape so the serial
 breathes, and complains about a third identical shape in a row.
