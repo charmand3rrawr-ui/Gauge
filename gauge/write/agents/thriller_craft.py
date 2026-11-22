@@ -75,6 +75,11 @@ class ThrillerCraft(StoryAgent):
                              + "; ".join(unseen[:4]))
         if self.state.signature:
             lines.append("- keep the antagonist's signature consistent: " + ", ".join(self.state.signature[:6]))
+        # Genre tropes for the declared domains — how to dramatise them, not how to perform them.
+        from ..thriller import TROPES
+        for dom in (self._domains() or []):
+            for trope in TROPES.get(dom, [])[:2]:
+                lines.append(f"- {dom}: {trope}")
         return "\n".join(lines)
 
     # -- plan notes ----------------------------------------------------------

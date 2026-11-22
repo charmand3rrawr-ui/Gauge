@@ -113,6 +113,29 @@ REGISTER: dict[str, set[str]] = {
     "engineering": {"tolerance", "load-bearing", "shear", "torque", "circuit", "voltage", "current", "relay",
                     "actuator", "schematic", "pressure", "valve", "hydraulic", "failsafe", "fail-safe", "redundancy",
                     "calibrat", "mechanism", "gear", "bearing", "weld", "fatigue", "stress", "specification", "blueprint"},
+    # Espionage/spy-thriller texture — the words a le Carré or Clancy page uses. Plot-device terms only
+    # (honeypot, dead drop, legend); NOT how to actually run any of it against real people.
+    "tradecraft": {"tradecraft", "dead drop", "brush pass", "cutout", "legend", "cover", "cover identity",
+                   "safe house", "handler", "asset", "mole", "double agent", "sleeper", "exfil", "exfiltration",
+                   "extraction", "surveillance detection route", "sdr", "countersurveillance", "tail", "watchers",
+                   "burned", "blown", "flap", "defector", "walk-in", "cipher", "one-time pad", "cache", "signal site",
+                   "honeypot", "honey trap", "kompromat", "false flag", "non-official cover", "noc", "station chief",
+                   "exfil route", "chatter", "source", "tasking", "debrief", "pocket litter"},
+    # Special-operations / military texture — ground an operation, not a manual.
+    "special_ops": {"fireteam", "overwatch", "breach", "stack", "rules of engagement", "roe", "exfil", "callsign",
+                    "rally point", "lz", "hlz", "casevac", "medevac", "qrf", "sitrep", "frago", "oscar mike",
+                    "danger close", "cover and concealment", "suppressive fire", "fields of fire", "fire discipline",
+                    "overmatch", "hostiles", "friendlies", "comms", "exfil bird", "fast rope", "hard target",
+                    "soft target", "actionable", "op order", "no-go", "go code", "stand down", "weapons free"},
+    # Firearms texture — the sensory vocabulary of a gun scene (report, recoil, discipline), never ballistics
+    # for real use, zeroing instructions, or anything that improves real-world lethality.
+    "firearms": {"magazine", "chamber", "chambered", "slide", "bolt", "muzzle", "report", "recoil", "sling",
+                 "optic", "red dot", "iron sights", "safety", "trigger discipline", "muzzle discipline", "stance",
+                 "grip", "cycle", "misfire", "jam", "stovepipe", "reload", "spent casing", "suppressor", "crack", "burst", "controlled pair", "holster", "drawstroke"},
+    # Close-quarters texture — the feel of a fight, not instruction on how to hurt anyone.
+    "close_quarters": {"clinch", "grapple", "control", "leverage", "off-balance", "disarm", "takedown", "choke",
+                       "pivot", "footwork", "guard", "strike", "parry", "blade", "edge", "reversal", "pin",
+                       "distance", "angle", "close the gap", "break contact"},
 }
 
 
@@ -123,12 +146,36 @@ class RegisterProfile:
     issues: list[str] = field(default_factory=list)
 
 
-_VAGUE_EXPERT = re.compile(r"\b(did\s+(?:some|the)\s+(?:science|tests?|forensics?|calculations?)|"
-                           r"some\s+(?:kind\s+of\s+)?(?:technical|scientific|medical)\s+\w+|"
+# Storytelling guidance per domain: the tropes a chapter should *dramatise*, not methods to perform.
+# These shape scenes (show the cover being tested, the fight turning on one mistake), never real technique.
+TROPES: dict[str, list[str]] = {
+    "tradecraft": ["ground the operation in texture: a dead drop, a cover that gets tested, a handler who wants more than the asset will give",
+                   "show the cost of the double life, not just the gadgetry; loyalty, paranoia, who can be trusted",
+                   "a honeypot or kompromat is a plot device about leverage and betrayal — play the human stakes, not a how-to"],
+    "special_ops": ["let competence show through small procedure and restraint, then one thing goes wrong",
+                    "the team is characters first; give them a cost, a loss, a decision no training covers",
+                    "tension from the plan meeting reality, not from a gear list"],
+    "firearms": ["render a gun scene through the senses — the report, the recoil, the after-silence — and its consequence",
+                 "discipline and reluctance read as expertise more than marksmanship does"],
+    "close_quarters": ["a fight is drama: stakes, a turn, a cost — exhaustion and fear, not choreography",
+                       "let it turn on one mistake or one improvised choice, and end it fast"],
+    "psychology": ["show the interior logic that makes a monster coherent from the inside, without endorsing it"],
+}
+
+
+def register_palette(domain: str) -> list[str]:
+    """The vocabulary palette for a domain — a genre thesaurus for the author, sorted. Terms, not methods."""
+    return sorted(REGISTER.get(domain, set()))
+
+
+_VAGUE_EXPERT = re.compile(r"\b(did\s+(?:some|the)\s+(?:science|tests?|forensics?|calculations?|spy\s+stuff|"
+                           r"ninja\s+stuff|combat\s+stuff|tradecraft)|"
+                           r"some\s+(?:kind\s+of\s+)?(?:technical|scientific|medical|tactical|special-?ops)\s+\w+|"
+                           r"used\s+(?:his|her|their)\s+training|years\s+of\s+training\s+kicked\s+in|"
                            r"fiddled\s+with|messed\s+with|did\s+something\s+to|worked\s+his\s+magic|"
                            r"complicated\s+stuff|technical\s+stuff)\b", re.I)
 _CLAIMS_EXPERTISE = re.compile(r"\b(examined|analysed|analyzed|investigat|autops|diagnos|engineer|calculat|"
-                               r"forensic|dissect|profiled|interrogat)\w*\b", re.I)
+                               r"forensic|dissect|profiled|interrogat|infiltrat|exfiltrat|surveil)\w*\b", re.I)
 
 
 def register_profile(text: str, domains: list[str] | None = None) -> RegisterProfile:

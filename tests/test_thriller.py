@@ -42,6 +42,28 @@ def test_register_rewards_specifics_and_flags_handwaving():
     assert vague.vague >= 1 and any("hand-waved" in i for i in vague.issues)
 
 
+def test_spy_and_combat_register_domains():
+    from gauge.write.thriller import REGISTER, TROPES, register_palette
+    # The new verisimilitude domains exist and reward authentic genre vocabulary.
+    for dom in ("tradecraft", "special_ops", "firearms", "close_quarters"):
+        assert dom in REGISTER and register_palette(dom)
+    spy = register_profile("He walked the surveillance detection route, made the brush pass, and left the dead drop "
+                           "for his handler; the legend held and the honeypot had already burned the asset.", ["tradecraft"])
+    assert spy.hits["tradecraft"] >= 5 and spy.issues == []
+    # Hand-waved special-ops expertise is flagged, not rewarded.
+    vague = register_profile("His years of training kicked in and he did some tactical stuff, then exfiltrated.", ["special_ops"])
+    assert vague.vague >= 1 and any("hand-waved" in i for i in vague.issues)
+    # Tropes are storytelling guidance (drama), present for the genre domains.
+    assert TROPES["tradecraft"] and TROPES["close_quarters"]
+
+
+def test_agent_brief_includes_declared_domain_tropes(tmp_path):
+    p = _proj(tmp_path)
+    ag = ThrillerCraft(FakeLLM(), p.dir, {"domains": ["tradecraft"]})
+    brief = ag.brief(_ctx(p, 1))
+    assert "tradecraft:" in brief  # genre guidance surfaced to the drafter
+
+
 def test_fair_play_tracks_clues_and_herrings():
     fp = fair_play(["the muddy boot", "the torn ticket"], ["the jealous brother"], {"the muddy boot"}, set())
     assert fp.missing_clues == ["the torn ticket"] and fp.unresolved_herrings == ["the jealous brother"]

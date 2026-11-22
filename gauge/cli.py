@@ -1120,6 +1120,28 @@ def thriller(c: Ctx, project: str) -> None:
     console.print(ag.report() if ag else "[yellow]thriller craft is off (enable it, or the genre is not a dark one)[/]")
 
 
+@main.command(name="craft-palette")
+@click.argument("domain", required=False)
+def craft_palette(domain: Optional[str]) -> None:
+    """The verisimilitude vocabulary palette for a genre domain (a thesaurus for authentic prose).
+
+    Domains: forensic, criminology, psychology, deception, engineering, tradecraft, special_ops,
+    firearms, close_quarters. These are terms for writing convincing fiction, not real-world methods.
+    """
+    from .write.thriller import REGISTER, TROPES, register_palette
+    if not domain:
+        console.print("domains: " + ", ".join(sorted(REGISTER)))
+        return
+    terms = register_palette(domain)
+    if not terms:
+        console.print(f"[yellow]unknown domain '{domain}'[/]; try one of: " + ", ".join(sorted(REGISTER)))
+        return
+    console.print(f"[bold]{domain}[/] register ({len(terms)} terms):")
+    console.print(", ".join(terms))
+    for t in TROPES.get(domain, []):
+        console.print(f"  • {t}")
+
+
 @main.command()
 @click.argument("project")
 @click.pass_obj

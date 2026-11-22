@@ -155,6 +155,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge absorb [--chapters N]` | extract craft technique cards from the strongest unread chapters |
 | `gauge world show/build/set/chat/extras/promote/audit` | the World agent and the World Auditor's cross-chapter continuity; see [docs/WORLD.md](docs/WORLD.md) |
 | `gauge thriller PROJECT` | crime/thriller craft: suspense, fair-play clues, antagonist signature; see [docs/THRILLER.md](docs/THRILLER.md) |
+| `gauge craft-palette [DOMAIN]` | genre vocabulary palette for authentic prose (forensic, tradecraft, special_ops, firearms, …) |
 | `gauge agents list/show/enable/disable/setup` | the writing room; see [docs/AGENTS.md](docs/AGENTS.md) |
 | `gauge canon`, `gauge ledger`, `gauge readers`, `gauge feedback`, `gauge package`, `gauge research` | ask the Archivist, read the Showrunner's ledger, see Reader Panel predictions, record real reader numbers, get blurb and tags, search your notes |
 | `gauge scout ask/dossier/gutenberg/log` | open-source research; import public-domain books; see [docs/RESEARCH.md](docs/RESEARCH.md) |
