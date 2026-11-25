@@ -9,6 +9,11 @@ from gauge.db import Database
 from gauge.learn.corpus import compile_corpus, export_corpus, permitted_texts, training_permission
 from gauge.models import ChapterRecord, NovelRecord
 
+# A project chapter has to read as prose: a looped filler line is under the coherence floor and is left out.
+MINE = ("My own words here, set down the night the ferry stopped running. Nobody on the island said why. "
+        "The harbour master locked his office and walked home without his coat, and by morning the timetable "
+        "had been taken off the wall. I asked at the bakery. The woman there gave me bread and no answer.\n\n") * 3
+
 
 def _seed(tmp_path):
     cfg = GaugeConfig(data_dir=str(tmp_path / "data"))
@@ -22,7 +27,7 @@ def _seed(tmp_path):
                                     text="A scraped chapter. " * 50))
     from gauge.write.project import Project
     p = Project.create(cfg.projects_dir, "Mine", "idea", ["Sci-fi"], 300)
-    p.write_chapter(1, "T", "My own words here. " * 50, {"title": "T"})
+    p.write_chapter(1, "T", MINE, {"title": "T"})
     return cfg, db
 
 

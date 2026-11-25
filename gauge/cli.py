@@ -117,6 +117,16 @@ def doctor(c: Ctx) -> None:
     console.print(f"Embeddings : {emb.describe()}")
     console.print(f"Data dir   : {c.cfg.root.resolve()}")
     console.print(f"Corpus     : {corpus_summary(c.db)}")
+    from .write.project import Project
+    from .write.prose import check_chapters
+
+    floor = c.cfg.write.coherence_floor
+    for name in Project.list(c.cfg.projects_dir) if floor > 0 else []:
+        p = Project(c.cfg.projects_dir, name)
+        bad = [ch for ch in check_chapters(((n, p.chapter_prose(n) or "") for n in p.chapter_numbers()), floor) if not ch.readable]
+        if bad:
+            console.print(f"Chapters   : [yellow]{name}[/] has {len(bad)} saved chapter(s) that are not readable prose "
+                          f"(ch {', '.join(str(ch.number) for ch in bad)}); run: gauge chapters check \"{name}\"", highlight=False)
     try:
         import sklearn  # noqa: F401
 
@@ -549,6 +559,60 @@ def projects(c: Ctx, name: Optional[str]) -> None:
 
     pipe = WritePipeline(c.cfg, c.db)
     console.print_json(json.dumps(pipe.status(pipe.open_project(name)), default=str))
+
+
+# ---------------------------------------------------------------------------- saved chapters
+@main.group("chapters")
+def chapters_group() -> None:
+    """Look over the chapters already saved for a story."""
+
+
+@chapters_group.command("check")
+@click.argument("name")
+@click.option("--floor", type=float, default=None, help="Coherence to check against (default: write.coherence_floor).")
+@click.option("--all", "show_all", is_flag=True, help="List every chapter with its coherence, not only those under the floor.")
+@click.pass_obj
+def chapters_check(c: Ctx, name: str, floor: Optional[float], show_all: bool) -> None:
+    """List saved chapters that are not readable prose, with their measured coherence.
+
+    A chapter accepted before the coherence floor existed can be word salad that is still on disk. It is
+    already left out of the training text; this shows where it is so you can rewrite or delete it. Nothing
+    is changed or deleted. Exits 1 when a chapter (or a dataset row made from one) is under the floor."""
+    from .learn.finetune import unreadable_rows
+    from .write.project import Project
+    from .write.prose import COHERENCE_FLOOR, UNREADABLE, check_chapters
+
+    if not Project.exists(c.cfg.projects_dir, name):
+        console.print(f"[red]no project named {name!r}[/]")
+        sys.exit(1)
+    if floor is None:
+        floor = c.cfg.write.coherence_floor
+        if floor <= 0:
+            console.print(f"[yellow]the coherence floor is off[/] (write.coherence_floor = 0): nothing is refused or left out. "
+                          f"To measure anyway: gauge chapters check \"{name}\" --floor {COHERENCE_FLOOR}", highlight=False)
+            return
+    p = Project(c.cfg.projects_dir, name)
+    checks = check_chapters(((n, p.chapter_prose(n) or "") for n in p.chapter_numbers()), floor)
+    bad = [ch for ch in checks if not ch.readable]
+    for ch in checks if show_all else bad:
+        why = "; ".join(i for i in ch.coherence.issues if not i.startswith(UNREADABLE))
+        console.print(f"{'[red]unreadable[/]' if not ch.readable else '[green]readable[/]  '}  ch {ch.number:<3} {ch.words:>6} words  "
+                      f"coherence {ch.coherence.score:.2f}{'  ' + why if why else ''}", highlight=False, soft_wrap=True)
+        if not ch.readable:
+            console.print(f"            {p.chapter_path(ch.number)}", markup=False, highlight=False, soft_wrap=True)
+    rows = unreadable_rows(c.cfg.models_dir / "datasets", p.state.name, floor)
+    for r in rows:
+        console.print(f"[red]unreadable[/]  dataset row made from ch {r.chapter}: coherence {r.coherence:.2f}", highlight=False)
+        console.print(f"            {c.cfg.models_dir / 'datasets' / r.file} line {r.line}", markup=False, highlight=False, soft_wrap=True)
+    if not bad and not rows:
+        console.print(f"[green]all {len(checks)} saved chapter(s) read as prose[/] (coherence floor {floor:.2f})", highlight=False)
+        return
+    console.print(f"{len(bad)} of {len(checks)} saved chapter(s) and {len(rows)} dataset row(s) are under the coherence floor "
+                  f"{floor:.2f}.", highlight=False)
+    console.print("They are left out of GaugeLM's training text, the corpus and new SFT rows. A chapter file is still read back "
+                  "as the story so far when the next chapter is written, and a dataset row is still used by a LoRA fine-tune, "
+                  "until you rewrite or delete it. Nothing was changed.", highlight=False)
+    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------- characters
@@ -1959,7 +2023,7 @@ def build_sft(c: Ctx, project: str) -> None:
     if not Project.exists(c.cfg.projects_dir, project):
         console.print(f"[red]no project named {project!r}[/]")
         sys.exit(1)
-    n = build_sft_from_project(Project(c.cfg.projects_dir, project), c.cfg.models_dir / "datasets")
+    n = build_sft_from_project(Project(c.cfg.projects_dir, project), c.cfg.models_dir / "datasets", c.cfg.write.coherence_floor)
     console.print(f"[green]wrote {n}[/] SFT row(s) from accepted chapters -> datasets/sft.jsonl")
 
 
@@ -2180,6 +2244,14 @@ def corpus() -> None:
     """Compile the training library the AI learns from — only text you may train on, licence-tracked."""
 
 
+def _say_unreadable(rep) -> None:
+    if rep.unreadable:
+        names = sorted({d.title for d in rep.unreadable})
+        console.print(f"[yellow]left out[/] {len(rep.unreadable)} of your own chapter(s) that are not readable prose "
+                      f"({', '.join(d.doc_id.removeprefix('project:') for d in rep.unreadable[:8])}"
+                      f"{' ...' if len(rep.unreadable) > 8 else ''}); see `gauge chapters check \"{names[0]}\"`", highlight=False)
+
+
 @corpus.command("stats")
 @click.option("--include-third-party", is_flag=True, help="Also count scraped third-party fiction (copyrighted; off by default).")
 @click.pass_obj
@@ -2187,13 +2259,15 @@ def corpus_stats(c: Ctx, include_third_party: bool) -> None:
     """Show what the training library would contain, by source and licence, with excluded counts."""
     from .learn.corpus import compile_corpus
 
-    rep = compile_corpus(c.db, c.cfg.projects_dir, include_third_party=include_third_party)
+    rep = compile_corpus(c.db, c.cfg.projects_dir, include_third_party=include_third_party,
+                         coherence_floor=c.cfg.write.coherence_floor)
     console.print(f"[bold]Training library[/]: {len(rep.docs)} documents, ~{rep.est_tokens:,} tokens")
     for src, info in sorted(rep.by_source().items(), key=lambda kv: -kv[1]["chars"]):
         console.print(f"  {src:<12} {info['docs']:>4} docs  {info['chars'] // 1000:>6}k chars  [{info['permission']}]  {info['note']}")
     if rep.excluded:
         console.print(f"[yellow]excluded[/] {len(rep.excluded)} third-party docs from {', '.join(sorted({d.source for d in rep.excluded}))} "
                       "(copyrighted; use --include-third-party only for text you hold the rights to)")
+    _say_unreadable(rep)
 
 
 @corpus.command("fetch")
@@ -2239,7 +2313,8 @@ def corpus_build(c: Ctx, out: Optional[str], include_third_party: bool) -> None:
     """Compile and export the training library (corpus.jsonl + corpus.txt + a licence MANIFEST)."""
     from .learn.corpus import compile_corpus, export_corpus
 
-    rep = compile_corpus(c.db, c.cfg.projects_dir, include_third_party=include_third_party)
+    rep = compile_corpus(c.db, c.cfg.projects_dir, include_third_party=include_third_party,
+                         coherence_floor=c.cfg.write.coherence_floor)
     if not rep.docs:
         console.print("[yellow]nothing to compile[/]: import public-domain books (`gauge scout gutenberg`), your own "
                       "files (`gauge import`), or write chapters first.")
@@ -2248,6 +2323,7 @@ def corpus_build(c: Ctx, out: Optional[str], include_third_party: bool) -> None:
     manifest = export_corpus(rep, dest)
     console.print(f"[green]compiled[/] {manifest['documents']} documents (~{manifest['est_tokens']:,} tokens) -> {dest}")
     console.print(f"  sources: {', '.join(manifest['by_source'])}")
+    _say_unreadable(rep)
     if include_third_party:
         console.print("[yellow]note:[/] third-party copyrighted text was included at your request; ensure you hold the rights.")
 
@@ -2261,7 +2337,8 @@ def native() -> None:
 def _native_docs(c: Ctx, since: Optional[str] = None):
     from .native import gather_texts
 
-    return gather_texts(c.db, c.cfg.projects_dir, c.cfg.models_dir / "datasets", since=since)
+    return gather_texts(c.db, c.cfg.projects_dir, c.cfg.models_dir / "datasets", since=since,
+                        coherence_floor=c.cfg.write.coherence_floor)
 
 
 @native.command("train")

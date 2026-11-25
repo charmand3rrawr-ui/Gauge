@@ -7,11 +7,16 @@ from __future__ import annotations
 
 import builtins
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
+
+from .prose import COHERENCE_FLOOR, ChapterCheck, check_chapters
+
+log = logging.getLogger(__name__)
 
 
 class ChapterPlan(BaseModel):
@@ -82,9 +87,9 @@ class Project:
         """Prose of the most recent written chapters before ``upto`` (for novelty checks)."""
         out = []
         for n in range(max(1, upto - limit), upto):
-            t = self.read_chapter(n)
+            t = self.chapter_prose(n)
             if t:
-                out.append(re.sub(r"^#[^\n]*\n+", "", t))  # drop the "# Chapter N" heading
+                out.append(t)
         return out
 
     @classmethod
@@ -128,6 +133,30 @@ class Project:
             parts = text.split("---", 2)
             text = parts[2] if len(parts) == 3 else text
         return text.strip()
+
+    def chapter_prose(self, n: int) -> Optional[str]:
+        """Chapter ``n`` as prose only: no front-matter and no "# Chapter N" heading."""
+        t = self.read_chapter(n)
+        return re.sub(r"^#[^\n]*\n+", "", t) if t else None
+
+    def chapter_numbers(self) -> builtins.list[int]:
+        """Numbers of the chapter files on disk, in order (``written`` can lag behind hand-added files)."""
+        found = (re.fullmatch(r"chapter_(\d+)\.md", f.name) for f in self.chapters_dir.glob("chapter_*.md"))
+        return sorted(int(m.group(1)) for m in found if m)
+
+    def training_chapters(self, floor: float = COHERENCE_FLOOR,
+                          upto: Optional[int] = None) -> tuple[builtins.list[tuple[int, str]], builtins.list[ChapterCheck]]:
+        """The written chapters as training text: ``(number, prose)`` for each one that reads as prose, and
+        the checks of those under the coherence floor. A chapter saved before the floor existed can be
+        word salad; it stays on disk for the author to rewrite or delete (``gauge chapters check``), but a
+        model must not learn from it."""
+        chapters = [(n, t) for n in range(1, (self.state.written if upto is None else upto) + 1) if (t := self.chapter_prose(n))]
+        unreadable = [c for c in check_chapters(chapters, floor) if not c.readable]
+        if unreadable:
+            log.info("%s: chapter %s under the coherence floor (%.2f) left out of the training text; see `gauge chapters check`",
+                     self.name, ", ".join(str(c.number) for c in unreadable), floor)
+        skip = {c.number for c in unreadable}
+        return [(n, t) for n, t in chapters if n not in skip], unreadable
 
     def read_meta(self, n: int) -> dict[str, Any]:
         """Parse the front-matter a chapter was written with (score, rubric, cast, ...)."""

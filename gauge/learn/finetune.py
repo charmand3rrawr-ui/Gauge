@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -56,10 +57,15 @@ def save_accepted_copy(project: Project, chapter: int, text: str) -> Path:
     return p
 
 
-def build_sft_from_project(project: Project, datasets_dir: Path) -> int:
+def build_sft_from_project(project: Project, datasets_dir: Path, coherence_floor: Optional[float] = None) -> int:
     """Instruction-tuning data from a serial's own accepted chapters: each row pairs a short
     instruction (derived from the chapter's stored plan) with the chapter text as the completion.
-    This is how GaugeLM learns from what Gauge itself judged good. Returns rows written."""
+    This is how GaugeLM learns from what Gauge itself judged good. A chapter under ``coherence_floor``
+    (default prose.COHERENCE_FLOOR; 0 = keep everything) was accepted before the floor existed and is
+    not a lesson: no row is written for it. Returns rows written."""
+    from ..write.prose import COHERENCE_FLOOR
+
+    unreadable = {c.number for c in project.training_chapters(COHERENCE_FLOOR if coherence_floor is None else coherence_floor)[1]}
     path = datasets_dir / "sft.jsonl"
     existing = set()
     if path.exists():
@@ -72,7 +78,7 @@ def build_sft_from_project(project: Project, datasets_dir: Path) -> int:
     name = project.state.name
     written = 0
     for n in range(1, project.state.written + 1):
-        if (name, n) in existing:
+        if (name, n) in existing or n in unreadable:
             continue
         text = project.read_chapter(n)
         if not text or len(text.split()) < 50:
@@ -85,6 +91,40 @@ def build_sft_from_project(project: Project, datasets_dir: Path) -> int:
                        "score": meta.get("score")})
         written += 1
     return written
+
+
+@dataclass
+class DatasetRowCheck:
+    file: str  # dataset file name, e.g. "self_preference.jsonl"
+    line: int  # 1-based line of the row in that file
+    chapter: int
+    coherence: float
+
+
+def unreadable_rows(datasets_dir: Path, project: str, coherence_floor: Optional[float] = None) -> list[DatasetRowCheck]:
+    """Dataset rows made from ``project``'s chapters whose kept text (the SFT completion, or the chosen
+    side of a preference pair) is under the coherence floor: the same unreadable chapter, copied into the
+    fine-tuning data before the floor existed. Reads only; the author decides what to delete."""
+    from ..write.prose import COHERENCE_FLOOR, coherence
+
+    floor = COHERENCE_FLOOR if coherence_floor is None else coherence_floor
+    out: list[DatasetRowCheck] = []
+    for name in ("sft.jsonl", "self_preference.jsonl", "author_edits.jsonl"):
+        f = datasets_dir / name
+        if not f.exists():
+            continue
+        for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            text = r.get("completion") or r.get("chosen") if isinstance(r, dict) else None
+            if not text or r.get("project") != project or not isinstance(r.get("chapter"), int):
+                continue
+            score = coherence(str(text), floor).score
+            if score < floor:
+                out.append(DatasetRowCheck(name, i, r["chapter"], score))
+    return out
 
 
 def sync_author_edits(project: Project, datasets_dir: Path) -> list[dict[str, Any]]:

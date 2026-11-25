@@ -36,7 +36,7 @@ SWITCHES: list[Switch] = [
     Switch("write.ab_titles", "A/B chapter titles", "bool", "Generate several titles per chapter and keep the best-scoring one; choices are logged."),
     Switch("write.ab_hooks", "A/B opening hooks", "bool", "Generate several opening lines and offer the strongest in the draft brief."),
     Switch("write.min_acceptable_score", "Quality bar", "float", "Chapters below this score are revised (up to the revision limit).", minimum=0, maximum=1),
-    Switch("write.coherence_floor", "Reject unreadable text", "float", "Measured, no model: a draft that is not prose at all (word salad, markup debris, a stuck loop) is written again and never saved as a chapter. 0 = off.", minimum=0, maximum=1),
+    Switch("write.coherence_floor", "Reject unreadable text", "float", "Measured, no model: a draft that is not prose at all (word salad, markup debris, a stuck loop) is written again and never saved as a chapter. A chapter already saved under it is left out of training text (see `gauge chapters check`). 0 = off.", minimum=0, maximum=1),
     Switch("write.max_revisions", "Revision limit", "int", "How many rewrites a chapter may get before the best version is kept.", minimum=0, maximum=5),
     # ---- the room -------------------------------------------------------------------------
     Switch("write.characters_enabled", "Characters as agents", "bool", "Each character briefs, reviews and remembers as themselves.", "The room"),

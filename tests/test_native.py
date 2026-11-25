@@ -134,7 +134,7 @@ def test_gather_texts_from_db_projects_and_datasets(cfg, db, chapter_text, tmp_p
     db.upsert_novel(n)
     db.upsert_chapter(ChapterRecord(novel_key=n.key, index=1, text=chapter_text(True)))
     p = Project.create(cfg.projects_dir, "Own", "idea", ["Fantasy"], 300)
-    p.write_chapter(1, "One", "my own chapter " * 30, {})
+    p.write_chapter(1, "One", chapter_text(False), {})
     p.save()
     ds = cfg.models_dir / "datasets"
     ds.mkdir(parents=True)

@@ -24,8 +24,13 @@ gauge corpus build [--out DIR]        # export corpus.jsonl + corpus.txt + a lic
 | Wikisource (`gauge corpus fetch --source wikisource`) | public domain (verify the work) | yes |
 | Standard Ebooks / CC works (`gauge import --source-tag`) | public domain / Creative Commons | yes |
 | files you imported (`gauge import`) | yours to use | yes |
-| your own written chapters | yours | yes |
+| your own written chapters | yours | yes, unless unreadable (below) |
 | scraped sites (Royal Road, Scribble Hub, …) | someone else's copyright | **no** |
+
+One of your own chapters that is not readable prose (under `write.coherence_floor`: word salad a weak
+model wrote and an older version accepted) is left out, counted under `unreadable` in the MANIFEST, and
+reported by `stats` and `build`. `gauge chapters check PROJECT` shows the file so you can rewrite or
+delete it; the compiler never deletes it.
 
 Training a model on copyrighted fiction you scraped is a legal problem, so the compiler **excludes
 third-party sources by default** and tells you how many documents it left out and from where. You can

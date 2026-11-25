@@ -60,8 +60,14 @@ def preset_config(size: str, vocab_size: Optional[int] = None) -> ModelConfig:
 # Corpus
 # --------------------------------------------------------------------------------------
 def gather_texts(db: Database, projects_dir: Optional[Path] = None, datasets_dir: Optional[Path] = None,
-                 since: Optional[str] = None) -> list[tuple[str, str]]:
-    """(kind, text) documents. kind is 'prose' or 'chat:<prompt>' for instruction rows."""
+                 since: Optional[str] = None, coherence_floor: Optional[float] = None) -> list[tuple[str, str]]:
+    """(kind, text) documents. kind is 'prose' or 'chat:<prompt>' for instruction rows. Your own chapters
+    under ``coherence_floor`` (default: prose.COHERENCE_FLOOR; 0 = keep everything) are left out: a chapter
+    saved before the floor existed may be the noise an under-trained model wrote, and training on it
+    teaches the model its own noise."""
+    from ..write.prose import COHERENCE_FLOOR
+
+    floor = COHERENCE_FLOOR if coherence_floor is None else coherence_floor
     docs: list[tuple[str, str]] = []
     for novel in db.novels():
         for ch in db.chapters(novel.key):
@@ -72,24 +78,28 @@ def gather_texts(db: Database, projects_dir: Optional[Path] = None, datasets_dir
         from ..write.project import Project
 
         for name in Project.list(projects_dir):
-            p = Project(projects_dir, name)
-            for n in range(1, p.state.written + 1):
-                t = p.read_chapter(n)
-                if t:
-                    import re
-
-                    docs.append(("prose", re.sub(r"^#[^\n]*\n+", "", t)))
-    docs.extend(instruction_rows(datasets_dir))
+            readable, _ = Project(projects_dir, name).training_chapters(floor)
+            docs.extend(("prose", t) for _, t in readable)
+    docs.extend(instruction_rows(datasets_dir, floor))
     return dedup(docs)
 
 
-def instruction_rows(datasets_dir: Optional[Path]) -> list[tuple[str, str]]:
+def instruction_rows(datasets_dir: Optional[Path], coherence_floor: Optional[float] = None) -> list[tuple[str, str]]:
     """The rows that teach behaviour rather than prose: curated instruction data, the preferred side of
     draft-versus-accepted pairs, the author's edits, and the big model's answers to Gauge's own tasks
-    (distillation). Each is ('chat:<prompt>', answer). All of it was produced on this machine."""
+    (distillation). Each is ('chat:<prompt>', answer). All of it was produced on this machine.
+
+    A preferred side that is the text of one of your chapters (the row names its project and chapter) is
+    held to the same coherence floor as the chapter files, so an unreadable chapter accepted before the
+    floor existed is not learned from this way either. Other answers are short or structured, and the
+    measure does not apply to them."""
+    from ..write.prose import COHERENCE_FLOOR, coherence
+
+    floor = COHERENCE_FLOOR if coherence_floor is None else coherence_floor
     rows: list[tuple[str, str]] = []
     if not datasets_dir or not datasets_dir.exists():
         return rows
+    skipped = 0
     for name in ("sft.jsonl", "self_preference.jsonl", "author_edits.jsonl", "distill.jsonl"):
         f = datasets_dir / name
         if not f.exists():
@@ -102,9 +112,15 @@ def instruction_rows(datasets_dir: Optional[Path]) -> list[tuple[str, str]]:
             if "output" in r:
                 rows.append((f"chat:{r.get('instruction', '')}\n{r.get('input', '')}", r["output"]))
             elif "chosen" in r:
+                if floor > 0 and "project" in r and "chapter" in r and coherence(str(r["chosen"])).score < floor:
+                    skipped += 1
+                    continue
                 rows.append((f"chat:{r.get('prompt', '')}", r["chosen"]))
             elif "response" in r:
                 rows.append((f"chat:{r.get('prompt', '')}", r["response"]))
+    if skipped:
+        log.info("%d dataset row(s) of chapter text under the coherence floor (%.2f) left out of the training text; "
+                 "see `gauge chapters check`", skipped, floor)
     return rows
 
 

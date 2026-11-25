@@ -60,6 +60,9 @@ cli.py           click commands
      tail, the plan, and retrieved opening/ending exemplars.
    - `Critic.critique()` first measures coherence (`prose.coherence()`, no model): text that is not
      prose at all (word salad, markup debris, a stuck loop) scores 0 and no other judge is asked.
+     The same measure keeps chapters saved before the floor existed out of training text
+     (`Project.training_chapters()`, used by `gather_texts`, `compile_corpus` and
+     `build_sft_from_project`); `prose.check_chapters()` is what `gauge chapters check` prints.
      Otherwise it computes chapter features, projects them into novel-feature space and
      scores with the engagement model (or heuristic targets if no model), and asks the LLM for a
      1-10 rubric (hook, momentum, payoff, cliffhanger, clarity). Blended 50/50.

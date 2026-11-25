@@ -7,6 +7,7 @@ err toward quiet rather than nagging. The Craft Editor agent bundles them into o
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from ..text import paragraphs, sentences, words
@@ -278,3 +279,22 @@ def coherence(text: str, floor: float = COHERENCE_FLOOR) -> Coherence:
     if score < floor:
         issues.insert(0, f"{UNREADABLE}; write it again in plain, complete sentences")
     return Coherence(round(score, 3), round(word_share, 3), round(sentence_share, 3), round(markup, 3), round(loops, 3), issues)
+
+
+@dataclass
+class ChapterCheck:
+    number: int
+    words: int = 0
+    coherence: Coherence = field(default_factory=Coherence)
+    readable: bool = True  # False = under the floor: left out of training text, worth rewriting or deleting
+
+
+def check_chapters(chapters: Iterable[tuple[int, str]], floor: float = COHERENCE_FLOOR) -> list[ChapterCheck]:
+    """Measure saved chapters, given as (number, prose), against the coherence floor. A chapter accepted
+    before the floor existed can be word salad that is still on disk; this is how it is found again. Pure:
+    it reads and changes nothing. A floor of 0 measures but calls every chapter readable."""
+    out = []
+    for number, text in chapters:
+        co = coherence(text, floor)
+        out.append(ChapterCheck(number, len(text.split()), co, co.score >= floor))
+    return out

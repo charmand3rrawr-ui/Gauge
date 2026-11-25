@@ -53,7 +53,8 @@ class CorpusDoc:
 @dataclass
 class CorpusReport:
     docs: list[CorpusDoc] = field(default_factory=list)
-    excluded: list[CorpusDoc] = field(default_factory=list)
+    excluded: list[CorpusDoc] = field(default_factory=list)  # third-party text, not yours to train on
+    unreadable: list[CorpusDoc] = field(default_factory=list)  # your own chapters under the coherence floor
 
     @property
     def chars(self) -> int:
@@ -76,6 +77,7 @@ class CorpusReport:
                 "by_source": self.by_source(),
                 "excluded": {"documents": len(self.excluded),
                              "sources": sorted({d.source for d in self.excluded})},
+                "unreadable": {"documents": len(self.unreadable), "ids": [d.doc_id for d in self.unreadable]},
                 "note": "Only sources safe to train on are included; third-party copyrighted text is excluded unless opted in."}
 
 
@@ -92,20 +94,26 @@ def _dedup(docs: list[CorpusDoc]) -> list[CorpusDoc]:
     return out
 
 
-def compile_corpus(db: Any, projects_dir: Optional[Path] = None, include_third_party: bool = False) -> CorpusReport:
-    """Assemble the training library, filtered by licence. Your own chapters are always included; third-party
-    scraped fiction only when include_third_party is True (and always labelled)."""
+def compile_corpus(db: Any, projects_dir: Optional[Path] = None, include_third_party: bool = False,
+                   coherence_floor: Optional[float] = None) -> CorpusReport:
+    """Assemble the training library, filtered by licence. Your own chapters are included unless they are
+    unreadable (under ``coherence_floor``, default prose.COHERENCE_FLOOR; 0 = keep everything): those are
+    listed in ``unreadable`` and left on disk. Third-party scraped fiction only when include_third_party
+    is True (and always labelled)."""
     docs: list[CorpusDoc] = []
     excluded: list[CorpusDoc] = []
+    unreadable: list[CorpusDoc] = []
     for novel in db.novels():
         perm, ok, note = training_permission(novel.source)
         for i, ch in enumerate(db.chapters(novel.key)):
             d = CorpusDoc(f"{novel.key}#{i}", "prose", ch.text, novel.source, novel.title, perm, ok or include_third_party, note)
             (docs if (ok or include_third_party) else excluded).append(d)
     if projects_dir and Path(projects_dir).exists():
-        import re
-
         from ..write.project import Project
+        from ..write.prose import COHERENCE_FLOOR
+
+        floor = COHERENCE_FLOOR if coherence_floor is None else coherence_floor
+        perm, _, note = training_permission("project")
         for name in Project.list(Path(projects_dir)):
             p = Project(Path(projects_dir), name)
             upto = p.state.written
@@ -114,18 +122,19 @@ def compile_corpus(db: Any, projects_dir: Optional[Path] = None, include_third_p
                 while p.read_chapter(n) is not None and n < 10000:
                     upto = n
                     n += 1
-            for n in range(1, upto + 1):
-                t = p.read_chapter(n)
-                if t:
-                    perm, _, note = training_permission("project")
-                    docs.append(CorpusDoc(f"project:{name}#{n}", "prose", re.sub(r"^#[^\n]*\n+", "", t),
-                                          "project", name, perm, True, note))
-    return CorpusReport(_dedup(docs), excluded)
+            readable, noise = p.training_chapters(floor, upto)
+            docs.extend(CorpusDoc(f"project:{name}#{n}", "prose", t, "project", name, perm, True, note) for n, t in readable)
+            unreadable.extend(CorpusDoc(f"project:{name}#{c.number}", "prose", p.chapter_prose(c.number) or "", "project", name,
+                                        perm, False, f"unreadable: coherence {c.coherence.score:.2f} is under the floor {floor:.2f}")
+                              for c in noise)
+    return CorpusReport(_dedup(docs), excluded, unreadable)
 
 
-def permitted_texts(db: Any, projects_dir: Optional[Path] = None, include_third_party: bool = False) -> list[tuple[str, str]]:
-    """The corpus as (kind, text) tuples the native trainer consumes — licence-filtered."""
-    return [(d.kind, d.text) for d in compile_corpus(db, projects_dir, include_third_party).docs]
+def permitted_texts(db: Any, projects_dir: Optional[Path] = None, include_third_party: bool = False,
+                    coherence_floor: Optional[float] = None) -> list[tuple[str, str]]:
+    """The corpus as (kind, text) tuples the native trainer consumes: licence-filtered, and without your own
+    chapters that are under the coherence floor."""
+    return [(d.kind, d.text) for d in compile_corpus(db, projects_dir, include_third_party, coherence_floor).docs]
 
 
 def export_corpus(report: CorpusReport, out_dir: Path) -> dict[str, Any]:

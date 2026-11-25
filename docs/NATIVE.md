@@ -80,6 +80,8 @@ agent profile and short chapters.
 
 Nonsense is rejected rather than saved: a measured coherence floor (`write.coherence_floor`, no model call) scores a draft that is not readable prose 0, has it written again, and if every attempt fails refuses the chapter: the last attempt is kept in `drafts/rejected/`, and it is never remembered by the agents or used as training text. Train GaugeLM longer, then write the chapter again.
 
+A chapter saved before the floor existed can still be noise on disk. Such a chapter is skipped wherever your own chapters are collected as training text (`gauge native train`/`continue`, the daemon, Studio's training, `gauge corpus`, `gauge build-sft`), and so is a preference-pair row whose kept side is that chapter's text. `gauge chapters check PROJECT` lists them with their coherence and file path, and `gauge doctor` says when a project has any. Nothing is deleted for you: the file is still read back as the story so far until you rewrite or delete it. Ingested and imported books are not measured. Setting `write.coherence_floor` to 0 switches all of this off.
+
 ## Implementation
 
 - `tokenizer.py`: byte-level BPE, GPT-2 style pre-tokenization, special tokens, JSON on disk.

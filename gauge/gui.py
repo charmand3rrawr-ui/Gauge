@@ -139,7 +139,7 @@ class StudioController:
             preset_config,
         )
 
-        prose = permitted_texts(self.db, self.cfg.projects_dir)
+        prose = permitted_texts(self.db, self.cfg.projects_dir, coherence_floor=self.cfg.write.coherence_floor)
         if not prose:
             return {"trained": False, "step": 0, "lessons": 0,
                     "message": "There is nothing to train on yet. Add books or your own writing first."}
@@ -160,7 +160,7 @@ class StudioController:
                     lessons = int(distill(self.db, teacher, out, want, seed=have).get("rows", 0))
                 except Exception as e:  # a teacher that stumbles must not stop the training
                     log.warning("could not collect lessons from the downloaded model: %s", e)
-        docs = dedup(prose + instruction_rows(datasets))
+        docs = dedup(prose + instruction_rows(datasets, self.cfg.write.coherence_floor))
         examples = sum(1 for kind, _ in docs if kind.startswith("chat:"))
         n = self.cfg.native
         mcfg = preset_config(n.size) if n.size else ModelConfig(vocab_size=n.vocab_size, block_size=n.block_size, n_layer=n.n_layer,

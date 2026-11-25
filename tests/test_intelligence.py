@@ -39,12 +39,12 @@ def test_engineer_carries_dependency_scan_flag(tmp_path):
     assert worst(scan_imports("import reqeusts\nprint('hi')\n")) >= 3  # what the build path would block on
 
 
-def test_build_sft_from_accepted_chapters(tmp_path):
+def test_build_sft_from_accepted_chapters(tmp_path, chapter_text):
     from gauge.write.project import Project
 
     p = Project.create(tmp_path / "proj", "Ten Seconds", "a courier who can rewind", ["Sci-fi"], 300)
-    p.write_chapter(1, "The Seal", "x" * 0 + " ".join(["word"] * 80), {"title": "The Seal", "score": 0.7})
-    p.write_chapter(2, "The Chase", " ".join(["run"] * 80), {"title": "The Chase", "score": 0.8})
+    p.write_chapter(1, "The Seal", chapter_text(True), {"title": "The Seal", "score": 0.7})
+    p.write_chapter(2, "The Chase", chapter_text(False), {"title": "The Chase", "score": 0.8})
     from gauge.learn.finetune import build_sft_from_project
 
     ds = tmp_path / "datasets"
