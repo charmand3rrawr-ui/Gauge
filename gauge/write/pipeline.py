@@ -363,6 +363,20 @@ class WritePipeline:
     def _genres(project: Project) -> list[str]:
         return [str(x) for x in (project.state.genres or [])]
 
+    def direct_next(self, project: Project, text: str) -> int:
+        """The author says what should happen in the next chapter. The plans for chapters not yet written
+        are dropped so they are made again around the instruction. An empty text takes the instruction back.
+        Returns the number of the chapter it will apply to."""
+        n = project.next_chapter_number()
+        text = " ".join((text or "").split())[:1200]
+        changed = text != project.state.author_direction
+        project.state.author_direction = text
+        if changed:
+            project.state.outline = [c for c in project.state.outline if c.number < n]
+            project.clear_checkpoint(n)
+        project.save()
+        return n
+
     def sync_characters(self, project: Project) -> list[str]:
         """Create agents for every character named in the bible that has no sheet yet."""
         roster = self.roster(project)
@@ -514,6 +528,10 @@ class WritePipeline:
             ctx.cast_text, ctx.world_text = cast_text, world_text
             t0 = time.monotonic()
             council_text = council.brief(ctx) if council.agents else ""
+            asked = project.state.author_direction.strip()
+            if asked:
+                council_text = (f"THE AUTHOR ASKED FOR THIS IN THIS CHAPTER (do it; it outranks the plan and every other note): "
+                                f"{asked}\n{council_text}").strip()
             timings["council"] = time.monotonic() - t0
             t0 = time.monotonic()
             text = self.drafter.draft(project, plan, prev, words, cast=cast_text, world=world_text,
@@ -594,12 +612,14 @@ class WritePipeline:
             "world_consistency": round(best_wrev.consistency, 3) if best_wrev else None,
             "novelty": round(best_nov.score, 3) if best_nov else None,
             "direction": project.state.current_direction[:120],
+            "author_direction": project.state.author_direction[:400],
             "agents": AgentCouncil.summary(best_agents),
             "content_flags": next((r.data.get("flags", []) for r in best_agents if r.agent == "sensitivity"), []),
             "resumed": resumed, "seconds": round(time.monotonic() - t_all, 1),
         }
         path = project.write_chapter(n, plan.title, best_text, meta)
         project.clear_checkpoint(n)
+        project.state.author_direction = ""  # it was for this chapter; the next one starts clean
         project.save()
         self.db.record_generated(project.name, n, best.score, best.features)
         # Learning from this chapter: what the room complained about, a preference pair if revising

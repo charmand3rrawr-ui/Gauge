@@ -59,6 +59,10 @@ class Planner:
             except Exception as e:  # the muse is optional; outlining must not depend on it
                 log.warning("direction provider failed: %s", e)
                 direction = ""
+        asked = project.state.author_direction.strip()
+        if asked:  # what the author asked for outranks the muse and the writing room
+            direction = (f"THE AUTHOR'S INSTRUCTION for chapter {start} (follow it; it outranks everything else): {asked}"
+                         + (f"\n{direction}" if direction else ""))
         if direction:
             project.state.current_direction = direction
         prompt = prompts.OUTLINE_PROMPT.format(

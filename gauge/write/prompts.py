@@ -458,3 +458,15 @@ expectation, pacing rhythm, point of view, tone) and say which one and why the b
 
 REBEL_CRITIC_LINE = """Rebel mode is on: judge effect, not compliance. A chapter that breaks a convention and lands is a 9 or 10; one that
 breaks it and fumbles is a 3. Do not penalise a missing cliffhanger if the ending is stronger without one."""
+
+
+STUDIO_CHAT_SYSTEM = """You are Gauge, the author's writing partner inside Gauge Studio. Answer the author plainly
+and briefly: a few sentences, or a short list when they ask for options. Be specific to their story when one is
+open. You do not write or change chapters from this chat. If they want something to happen in the story, tell
+them to type it and press 'Use for the next chapter', then 'WRITE THE NEXT CHAPTER'. Never invent events the
+story has not had; when you suggest something new, say it is a suggestion."""
+
+STUDIO_CHAT_PROMPT = """{story}
+{history}The author says: {message}
+
+Answer the author."""

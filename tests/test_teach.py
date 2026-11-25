@@ -140,6 +140,14 @@ class _Widget:
         return lambda *a, **k: None
 
 
+class _Entry(_Widget):
+    made: list = []
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        _Entry.made.append(self)
+
+
 class _Listbox(_Widget):
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
@@ -155,6 +163,8 @@ def _fake_tkinter(picked_folder):
     ttk = types.ModuleType("tkinter.ttk")
     for name in ("Frame", "Label", "Button", "Progressbar", "Style", "Scrollbar", "Checkbutton", "Scale", "Combobox", "Entry"):
         setattr(ttk, name, _Widget)
+    ttk.Entry = _Entry
+    _Entry.made = []
     scrolled = types.ModuleType("tkinter.scrolledtext")
     scrolled.ScrolledText = _Widget
     shown: list = []

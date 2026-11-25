@@ -50,6 +50,7 @@ class ProjectState(BaseModel):
     premise_doc: str = ""  # the author's own premise document, canon for the bible
     past_directions: list[str] = Field(default_factory=list)  # pitches the muse already took
     current_direction: str = ""
+    author_direction: str = ""  # what the author asked for in the next chapter (Studio chat prompt); cleared once written
     continued_from: str = ""  # path of an imported manuscript this project continues
 
 

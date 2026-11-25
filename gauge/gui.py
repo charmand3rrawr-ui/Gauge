@@ -27,6 +27,8 @@ TEACH_INTRO = ("Give Gauge books or your own writing to learn from. It keeps the
                "is one book; a folder of books is a library.\n"
                "Use only writing that is yours or that you have the right to use. This teaches Gauge what to aim for; it "
                "does not rebuild the downloaded AI model itself.")
+CHAT_HINT = ("Type below and press Ask Gauge to talk about your story: ideas, what a character would do, what is "
+             "still unresolved. Or type what should happen and press 'Use for the next chapter'.\n")
 CHARACTER_INTRO = ("Teach Gauge how to build a character by showing it finished ones. Read the breakdown to see everything "
                    "a new character needs. Save a blank sheet, fill it in with any text editor, then add it here. Gauge checks "
                    "each sheet against the breakdown and tells you what is still missing. The examples you add are shown to "
@@ -51,6 +53,7 @@ class StudioController:
         self._pipe = None
         self._pause = threading.Event()          # set by pause_training(); the trainer checks it after each step
         self._training: dict[str, Any] = {"running": False, "step": 0, "loss": None}
+        self._chat: dict[str, list[tuple[str, str]]] = {}   # the conversation with Gauge, per story
 
     def status(self) -> dict[str, Any]:
         from .llm import make_llm
@@ -352,6 +355,90 @@ class StudioController:
             return f"I don't know anyone called {character}."
         return CharacterAgent(pipe.fast_llm, c).chat(question)
 
+    # ---- the chat prompt: ask Gauge, or say what should happen next ------------------
+    def ask(self, message: str, name: Optional[str] = None) -> dict[str, Any]:
+        """Ask Gauge something. With a story open it answers knowing the bible, the story so far, the cast
+        and how the last chapter ended. It talks; it does not change the story."""
+        from .llm.tokens import estimate_tokens, truncate_to_tokens
+        from .write import prompts
+        from .write.project import Project
+
+        message = " ".join((message or "").split())
+        if not message:
+            return {"answer": "", "message": "Type a question first."}
+        self._require_engine()
+        pipe = self.pipeline()
+        llm = pipe.llm
+        max_out = 500
+        room = max(200, llm.context_window() - max_out - estimate_tokens(prompts.STUDIO_CHAT_SYSTEM)
+                   - estimate_tokens(message) - 200)
+        story = ""
+        key = name or ""
+        if name and Project.exists(self.cfg.projects_dir, name):
+            p = pipe.open_project(name)
+            st = p.state
+            last = p.read_chapter(st.written) if st.written else None
+            parts = [f"STORY: {st.name}", truncate_to_tokens(p.bible_markdown(), max(100, room // 3)),
+                     f"CHAPTERS WRITTEN: {st.written}",
+                     "WHAT HAS HAPPENED SO FAR: " + (st.running_summary or "(nothing yet)")]
+            if st.open_threads:
+                parts.append("STILL UNRESOLVED: " + "; ".join(st.open_threads[:8]))
+            cast = self.characters(name)
+            if cast:
+                parts.append("CAST: " + ", ".join(cast[:12]))
+            if last:
+                parts.append("THE LAST CHAPTER ENDED WITH: " + " ".join(last.split()[-180:]))
+            if st.author_direction:
+                parts.append("THE AUTHOR ALREADY ASKED FOR THIS IN THE NEXT CHAPTER: " + st.author_direction)
+            story = truncate_to_tokens("\n".join(parts), max(150, room * 3 // 4)) + "\n\n"
+        turns = self._chat.setdefault(key, [])
+        history, left = "", room - estimate_tokens(story)
+        for q, a in reversed(turns[-6:]):               # the most recent turns first, while they fit
+            block = f"The author said: {q}\nYou answered: {a}\n"
+            if estimate_tokens(block) > left:
+                break
+            history, left = block + history, left - estimate_tokens(block)
+        prompt = prompts.STUDIO_CHAT_PROMPT.format(story=story, history=(history + "\n") if history else "", message=message)
+        answer = llm.generate(prompt, system=prompts.STUDIO_CHAT_SYSTEM, temperature=0.7, max_tokens=max_out,
+                              purpose="studio:chat").strip()
+        answer = answer or "I have nothing to say to that. Try asking it another way."
+        turns.append((message, answer))
+        del turns[:-20]
+        return {"answer": answer, "message": answer}
+
+    def clear_chat(self, name: Optional[str] = None) -> None:
+        self._chat.pop(name or "", None)
+
+    def direction(self, name: Optional[str]) -> str:
+        """What the author has asked for in the next chapter, if anything."""
+        from .write.project import Project
+
+        if not name or not Project.exists(self.cfg.projects_dir, name):
+            return ""
+        return Project(self.cfg.projects_dir, name).state.author_direction
+
+    def direct_next(self, name: Optional[str], text: str) -> dict[str, Any]:
+        """Say what should happen in the next chapter. It is followed once, by the next chapter written,
+        and then forgotten. An empty text takes back an instruction that has not been used yet."""
+        from .write.project import Project
+
+        text = " ".join((text or "").split())
+        if not name or not Project.exists(self.cfg.projects_dir, name):
+            return {"set": False, "chapter": 0, "direction": "", "message": "Start or open a story first."}
+        if not text and not self.direction(name):
+            return {"set": False, "chapter": 0, "direction": "",
+                    "message": "Type what should happen in the next chapter, then press 'Use for the next chapter'."}
+        pipe = self.pipeline()
+        p = pipe.open_project(name)
+        n = pipe.direct_next(p, text)
+        kept = p.state.author_direction
+        if not kept:
+            return {"set": False, "chapter": n, "direction": "",
+                    "message": f"Taken back. Chapter {n} will be written the way Gauge planned it."}
+        return {"set": True, "chapter": n, "direction": kept,
+                "message": f"Chapter {n} will follow this: \"{kept}\"  Press WRITE THE NEXT CHAPTER when you are ready. "
+                           "To take it back, press 'Use for the next chapter' with the box empty."}
+
     # ---- switches ------------------------------------------------------------------
     def switches(self) -> list[dict[str, Any]]:
         from . import settings as st
@@ -639,14 +726,37 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     chapters_box = tk.Listbox(left, font=big, height=4)
     chapters_box.pack(fill="both", expand=True, pady=4)
 
+    # ---- right side, bottom: the chat prompt. Packed BEFORE the reader so it always keeps its space.
+    chat = ttk.Frame(right)
+    chat.pack(side="bottom", fill="x", pady=(8, 0))
+    ttk.Label(chat, text="Ask Gauge, or say what should happen next", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+    chat_log = scrolledtext.ScrolledText(chat, height=6, font=mid, wrap="word", padx=8, pady=6)
+    chat_log.pack(fill="x", pady=(2, 4))
+    chat_log.insert("end", CHAT_HINT)
+    chat_log.configure(state="disabled")
+    chat_row = ttk.Frame(chat)
+    chat_row.pack(fill="x")
+    chat_var = tk.StringVar(value="")
+    chat_entry = ttk.Entry(chat_row, textvariable=chat_var, font=big)
+    chat_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+    ask_btn = ttk.Button(chat_row, text="Ask Gauge", style="Mid.TButton", command=lambda: on_ask())
+    ask_btn.pack(side="left", padx=(0, 6))
+    use_btn = ttk.Button(chat_row, text="Use for the next chapter", style="Mid.TButton", command=lambda: on_direct())
+    use_btn.pack(side="left")
+    direction_line = tk.StringVar(value="")
+    ttk.Label(chat, textvariable=direction_line, wraplength=640, font=small).pack(anchor="w", pady=(3, 0))
+    chat_entry.bind("<Return>", lambda _evt: on_ask())
+
     reader = scrolledtext.ScrolledText(right, font=("Georgia", 14), wrap="word", padx=16, pady=16)
     reader.pack(fill="both", expand=True)
     reader.insert("1.0", "Your chapters will appear here.\n\n1. Type your idea on the left.\n2. Press START MY STORY.\n"
                          "3. Press WRITE THE NEXT CHAPTER whenever you want more.\n4. Click a chapter to read it.\n\n"
                          "Teach Gauge: give it books or your own writing to learn from.\n"
                          "Change the AI: choose which model writes, and train Gauge's own.\n"
-                         "Both are also in the menu at the top of this window.")
-    buttons: list[Any] = []
+                         "Both are also in the menu at the top of this window.\n\n"
+                         "Ask Gauge: type in the box at the bottom to talk about your story, or to say what "
+                         "should happen in the next chapter.")
+    buttons: list[Any] = [ask_btn, use_btn]
 
     def set_busy(flag: bool, msg: str = "") -> None:
         state["busy"] = flag
@@ -695,6 +805,40 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         reader.delete("1.0", "end")
         reader.insert("1.0", ctl.read(state["project"], n))
 
+    def say(who: str, text: str) -> None:
+        """Add a line to the conversation and keep the newest in view."""
+        chat_log.configure(state="normal")
+        chat_log.insert("end", f"\n{who}: {text}\n")
+        chat_log.see("end")
+        chat_log.configure(state="disabled")
+
+    def show_direction() -> None:
+        asked = ctl.direction(state["project"])
+        direction_line.set(f"The next chapter will follow: \"{asked}\"" if asked else "")
+
+    def on_ask() -> None:
+        text = chat_var.get().strip()
+        if not text:
+            return
+        if state["busy"]:
+            status_var.set("Gauge is busy. Wait for the current job to finish, then ask again.")
+            return
+        chat_var.set("")
+        say("You", text)
+        run_bg(lambda: ctl.ask(text, state["project"]), lambda res: say("Gauge", res["answer"]), "Gauge is thinking...")
+
+    def on_direct() -> None:
+        if not state["project"]:
+            messagebox.showinfo("Gauge", "Start a story first!")
+            return
+        text = chat_var.get().strip()
+        res = ctl.direct_next(state["project"], text)
+        chat_var.set("")
+        if text:
+            say("You", text)
+        say("Gauge", res["message"])
+        show_direction()
+
     def on_start() -> None:
         text = idea.get("1.0", "end").strip()
 
@@ -702,6 +846,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             state["project"] = name
             proj_var.set(f"Story: {name}")
             refresh_chapters()
+            show_direction()
             reader.delete("1.0", "end")
             reader.insert("1.0", f"'{name}' is ready!\n\nPress WRITE THE NEXT CHAPTER to begin.")
 
@@ -715,6 +860,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         def done(info: dict[str, Any]) -> None:
             refresh_chapters()
             show_chapter(info["number"])
+            show_direction()                    # the instruction was for that chapter; it is used up now
             status_var.set(f"Chapter {info['number']} done in {info['seconds']}s (score {info['score']}). {info.get('gaugelm', '')}".strip())
 
         run_bg(lambda: ctl.write_next(state["project"]), done, "Writing the next chapter... this takes a few minutes.")
@@ -734,6 +880,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             state["project"] = pick
             proj_var.set(f"Story: {pick}")
             refresh_chapters()
+            show_direction()
             if ctl.chapters(pick):
                 show_chapter(len(ctl.chapters(pick)))
 
@@ -1068,6 +1215,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     menubar = tk.Menu(root)
     for title, entries in (
         ("Story", [("Start my story", on_start), ("Write the next chapter", on_write), ("Open another story...", on_open),
+                   ("Ask Gauge...", lambda: chat_entry.focus_set()),
                    ("Talk to a character...", on_chat), ("Save story as one file", on_export)]),
         ("Teach", [("Add books or your own writing...", on_teach), ("Teach character building...", on_characters),
                    ("Change the AI that writes...", on_engine),

@@ -75,6 +75,19 @@ Every button is also in the menu bar at the top of the window (**Story**, **Teac
 shrinks, never a button. The top of the window says which AI is writing and how much of the computer
 Gauge may use; the title bar shows the installed version.
 
+## Asking Gauge, and saying what happens next
+
+At the bottom of the right-hand side there is a box to type in, with two buttons.
+
+- **Ask Gauge** (or press Enter) talks to the AI about your story. With a story open it knows the
+  world and characters, what has happened so far, what is still unresolved and how the last chapter
+  ended. Ask for ideas, what a character would do, or what a reader is waiting for. Asking never
+  changes the story.
+- **Use for the next chapter** takes what you typed as an instruction, for example *"Jun finds the bag
+  and opens it before Rin can stop her"*. The next chapter is planned and written around it, and it
+  outranks everything else Gauge had in mind. It is used once, for that chapter only. The line under
+  the box shows what is waiting; press the button with the box empty to take it back.
+
 ## Teaching Gauge with your own material
 
 Press **Teach Gauge** to give it books or your own writing to learn from.
