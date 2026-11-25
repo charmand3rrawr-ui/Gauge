@@ -100,6 +100,24 @@ than duplicating it.
 The same thing from the command line: `gauge.bat import "C:\path\to\folder"`, then `gauge.bat train`
 and `gauge.bat absorb`.
 
+## Teaching Gauge how to build characters
+
+In the **Teach Gauge** window press **Characters...** (or use the **Teach** menu, **Teach character
+building...**).
+
+1. Press **What a character needs** to read the breakdown: nine sections covering who the character
+   is, how they look and move, their past, what drives them, their temperament, their voice, what
+   they can do, where they stand when the story starts, and how they connect and change.
+2. Press **Save a blank sheet...**, open the file in Notepad, and fill it in. Every line has a note
+   saying what belongs there and the test a good answer passes.
+3. Press **Add character sheets...** and choose your filled-in sheets. Gauge checks each one and tells
+   you what is still missing; a complete sheet is kept as an example.
+4. Or press **Learn from this story's characters** to keep the main characters of the open story.
+
+From then on, every time Gauge creates a character it is shown your closest examples and the
+checklist, and it fills in anything it left out. GaugeLM also studies the examples when it trains.
+More in [docs/CHARACTER-SCHOOL.md](../docs/CHARACTER-SCHOOL.md).
+
 ## Which AI writes: the downloaded model or GaugeLM
 
 Gauge can write with either of two models, and the Studio's top line always says which one is in use

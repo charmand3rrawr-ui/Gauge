@@ -112,6 +112,12 @@ class SheetOut(BaseModel):
     concept: str = ""
     appearance: str = ""
     backstory: str = ""
+    habits: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    contradiction: str = ""
+    lie: str = ""
+    stakes: str = ""
+    arc: str = ""
     matrix: MatrixOut = Field(default_factory=MatrixOut)
     voice: VoiceOut = Field(default_factory=VoiceOut)
     state: StateOut = Field(default_factory=StateOut)

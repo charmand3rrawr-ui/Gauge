@@ -198,6 +198,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge write NAME [--chapters N] [--fresh] [--seed S]` | draft, score, revise, save; resumes checkpointed drafts; `--seed` makes it reproducible |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
 | `gauge projects [NAME]` | list projects / status |
+| `gauge character blueprint/sheet/teach/promote/study/school/check/add` | everything a new character needs, and teaching Gauge to build one from finished examples; see [docs/CHARACTER-SCHOOL.md](docs/CHARACTER-SCHOOL.md) |
 | `gauge character new/roll/sync/list/show/set/brief/chat/remove` | characters as independent agents with personality matrices; see [docs/CHARACTERS.md](docs/CHARACTERS.md) |
 | `gauge daemon [--once] [--write] [--project P] [--every MIN]` | continuous loop |
 

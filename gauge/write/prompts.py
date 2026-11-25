@@ -175,10 +175,13 @@ SERIES BIBLE:
 {bible}
 
 {seed}
-
+{guidance}
 Respond with ONLY a JSON object:
 {{"name": str, "aliases": [str], "role": str, "concept": "one vivid line",
  "appearance": "two concrete sentences", "backstory": "one paragraph with one secret",
+ "habits": [2-3 physical tells or rituals], "skills": [2-3 things they are good at, with a limit],
+ "contradiction": "one line: the thing about them that does not fit", "lie": "the false belief they live by",
+ "stakes": "what they lose if they fail", "arc": "where they start, what presses on them, where it could take them",
  "matrix": {{"openness": 0-1, "conscientiousness": 0-1, "extraversion": 0-1, "agreeableness": 0-1,
    "neuroticism": 0-1, "dominance": 0-1, "warmth": 0-1, "impulsivity": 0-1, "honesty": 0-1,
    "courage": 0-1, "humor": 0-1, "ambition": 0-1, "loyalty": 0-1, "curiosity": 0-1, "cynicism": 0-1,
@@ -189,6 +192,45 @@ Respond with ONLY a JSON object:
  "state": {{"mood": str, "goal": str, "knows": [str], "secrets": [str]}},
  "relationships": {{"<other character name>": {{"trust": 0-1, "affection": 0-1, "respect": 0-1, "fear": 0-1,
    "stance": "one line"}}}}}}"""
+
+CHARACTER_REPAIR_PROMPT = """Complete this character sheet for a serial web novel. It was checked against the
+blueprint for a {role} and some parts are missing or too thin.
+
+THE SHEET SO FAR:
+{sheet}
+
+Other characters in the cast: {others}
+
+WRITE THESE PARTS. Each must fit the sheet above (same person, same wound, same voice) and pass its test:
+{wanted}
+
+Respond with ONLY a JSON object holding just these keys: {keys}"""
+
+CHARACTER_STUDY_PROMPT = """Study this character from a book and write them up as a character sheet, so that a
+writer can learn how a finished character is built. Use only what the passages show or clearly imply.
+
+Character: {name}
+Role: {role}
+Book: {title}
+
+PASSAGES WHERE THEY APPEAR:
+{passages}
+
+WHAT A FINISHED {role} NEEDS, and the test each part must pass:
+{checklist}
+
+Respond with ONLY a JSON object:
+{{"name": str, "aliases": [str], "role": str, "concept": "one vivid line",
+ "appearance": "two concrete sentences", "backstory": "one paragraph",
+ "habits": [str], "skills": [str], "contradiction": str, "lie": str, "stakes": str, "arc": str,
+ "matrix": {{"openness": 0-1, "conscientiousness": 0-1, "extraversion": 0-1, "agreeableness": 0-1,
+   "neuroticism": 0-1, "dominance": 0-1, "warmth": 0-1, "impulsivity": 0-1, "honesty": 0-1,
+   "courage": 0-1, "humor": 0-1, "ambition": 0-1, "loyalty": 0-1, "curiosity": 0-1, "cynicism": 0-1,
+   "values": [str], "fears": [str], "wants": str, "needs": str, "wound": str, "flaw": str, "lines_wont_cross": [str]}},
+ "voice": {{"register": str, "sentence_length": "short|medium|long", "vocabulary": str, "tics": [str],
+   "catchphrases": [str], "swears": bool, "humor_style": str, "avoids_talking_about": [str]}},
+ "state": {{"mood": str, "goal": str, "knows": [str], "secrets": [str]}},
+ "relationships": {{"<other character name>": {{"stance": "one line"}}}}}}"""
 
 SCENE_BRIEF_PROMPT = """The author is about to write chapter {number} ("{title}") and you are in it.
 

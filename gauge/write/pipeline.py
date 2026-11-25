@@ -349,10 +349,24 @@ class WritePipeline:
         except Exception as e:
             log.warning("could not carry character memory for %s: %s", c.name, e)
 
+    def character_creator(self) -> CharacterCreator:
+        """The creator, taught by the character school. GaugeLM's context is too small for examples, so
+        with it the school teaches through training instead of through the prompt."""
+        from ..learn.character_school import CharacterSchool
+
+        small = self.cfg.llm.provider == "native"
+        return CharacterCreator(self.llm, CharacterSchool(self.cfg.models_dir),
+                                examples=0 if small else self.cfg.write.character_examples,
+                                checklist=not small, repair=self.cfg.write.character_repair and not small)
+
+    @staticmethod
+    def _genres(project: Project) -> list[str]:
+        return [str(x) for x in (project.state.genres or [])]
+
     def sync_characters(self, project: Project) -> list[str]:
         """Create agents for every character named in the bible that has no sheet yet."""
         roster = self.roster(project)
-        creator = CharacterCreator(self.llm)
+        creator = self.character_creator()
         b = project.state.bible
         wanted: list[tuple[str, str, str]] = []
         if b.protagonist:
@@ -366,7 +380,8 @@ class WritePipeline:
         for name, role, concept in wanted:
             if not name or roster.get(name):
                 continue
-            c = creator.from_concept(name, concept, role, project.bible_markdown(), roster.names())
+            c = creator.from_concept(name, concept, role, project.bible_markdown(), roster.names(),
+                                     genres=self._genres(project))
             c.created_chapter = project.state.written
             self._carry_character(c)
             roster.add(c)
@@ -379,7 +394,8 @@ class WritePipeline:
                          seed: Optional[int] = None) -> Character:
         roster = self.roster(project)
         seed_matrix = PersonalityMatrix.random(seed) if seed is not None else None
-        c = CharacterCreator(self.llm).from_concept(name, concept, role, project.bible_markdown(), roster.names(), seed_matrix)
+        c = self.character_creator().from_concept(name, concept, role, project.bible_markdown(), roster.names(), seed_matrix,
+                                                  genres=self._genres(project))
         c.created_chapter = project.state.written
         self._carry_character(c)
         roster.add(c)

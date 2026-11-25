@@ -144,6 +144,8 @@ class WriteConfig(BaseModel):
     character_review: bool = True
     character_weight: float = 0.2  # share of the chapter score that comes from in-character consistency
     carry_characters: bool = False  # seed new characters from the cross-book memory (scars, habits, grudges)
+    character_examples: int = 2  # finished sheets from the character school shown when a character is created
+    character_repair: bool = True  # check a new character against the blueprint and fill the gaps once
     min_mentions_for_review: int = 2  # characters named fewer times than this skip review/memory (protagonist never skips)
     checkpoint_drafts: bool = True  # save raw drafts so a crash never loses a generation
     # The World agent: physics, weather, crowds and consequences, present in every scene.

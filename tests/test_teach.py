@@ -166,6 +166,7 @@ def _fake_tkinter(picked_folder):
     files = types.ModuleType("tkinter.filedialog")
     files.askdirectory = lambda **k: str(picked_folder)
     files.askopenfilenames = lambda **k: ()
+    files.asksaveasfilename = lambda **k: str(picked_folder.parent / "my-character.txt")
     mods = {"tkinter": tk, "tkinter.ttk": ttk, "tkinter.scrolledtext": scrolled, "tkinter.messagebox": box,
             "tkinter.simpledialog": dialog, "tkinter.filedialog": files}
     for name, mod in mods.items():
@@ -215,6 +216,42 @@ def test_the_window_code_runs_the_teach_flow(cfg, db, tmp_path, monkeypatch):
     assert not [s for s in shown if s[0] == "error"], shown   # no error box was raised anywhere in the flow
 
     _Widget.buttons["Switches"]()                             # the neighbouring button still opens its window
+
+
+def test_the_window_code_runs_the_character_teaching_flow(cfg, db, tmp_path, monkeypatch):
+    from gauge import gui
+    from gauge.write import blueprint as bp
+
+    folder = _novel_folder(tmp_path)
+    mods, shown = _fake_tkinter(folder)
+    for name, mod in mods.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+    _Widget.buttons, _Widget.listboxes, _Widget.menu = {}, [], {}
+    gui.run_studio(cfg, db)
+    _wait_for_jobs()
+    assert "Teach character building..." in _Widget.menu
+    _Widget.buttons["Teach Gauge"]()
+    _Widget.buttons["Characters..."]()                        # opens from the Teach Gauge window
+    assert {"What a character needs", "Save a blank sheet...", "Add character sheets...",
+            "Learn from this story's characters"} <= set(_Widget.buttons)
+    box = _Widget.listboxes[-1]
+    assert "none yet" in box.get()
+    _Widget.buttons["What a character needs"]()               # the breakdown window
+    _Widget.buttons["Save a blank sheet..."]()                # the save dialog stand-in names a file
+    blank = tmp_path / "my-character.txt"
+    assert blank.read_text(encoding="utf-8").startswith(bp.SHEET_HEADER)
+    _Widget.buttons["Add character sheets..."]()              # nothing picked: nothing happens
+    _Widget.buttons["Learn from this story's characters"]()   # no story open yet: a sentence, not an error
+
+    # With a filled sheet picked, it lands in the list.
+    from tests.test_character_school import FILLED
+    sheet = tmp_path / "marina.txt"
+    sheet.write_text(FILLED, encoding="utf-8")
+    mods["tkinter.filedialog"].askopenfilenames = lambda **k: (str(sheet),)
+    _Widget.buttons["Add character sheets..."]()
+    _wait_for_jobs()
+    assert "Marina Vale" in box.get() and "none yet" not in box.get()
+    assert not [s for s in shown if s[0] == "error"], shown
 
 
 # ------------------------------------------------------------------ which AI writes, and training GaugeLM

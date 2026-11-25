@@ -885,6 +885,190 @@ def character_arc(c: Ctx, project: str, name: str, traits: tuple, by_chapter: in
     console.print(f"[green]arc set[/] for {ch.name}: " + "; ".join(f"{k} -> {v['target']} by ch {v['by']}" for k, v in ch.state.arc_plan.items()))
 
 
+# ---- the character school: what a new character needs, and teaching Gauge to build one
+def _school(c: Ctx):
+    from .learn.character_school import CharacterSchool
+
+    return CharacterSchool(c.cfg.models_dir)
+
+
+def _print_audit(a) -> None:
+    marks = {"ok": "[green]ok[/]     ", "thin": "[yellow]thin[/]   ", "missing": "[red]missing[/]"}
+    console.print(f"[bold]{a.summary()}[/]")
+    for f in a.findings:
+        if f.status != "ok":
+            console.print(f"  {marks[f.status]} {f.label}" + (f": {f.note}" if f.note else ""))
+
+
+@character.command("blueprint")
+@click.option("--role", type=click.Choice(["protagonist", "antagonist", "supporting", "minor"]), default=None,
+              help="Only the checklist for this role.")
+def character_blueprint(role: Optional[str]) -> None:
+    """Everything a newly built character needs: nine sections, and the test each part must pass."""
+    from .write import blueprint as bp
+
+    click.echo(bp.checklist(role) if role else bp.breakdown_markdown())
+
+
+@character.command("sheet")
+@click.option("--name", default="", help="Put this name on the sheet.")
+@click.option("--role", type=click.Choice(["protagonist", "antagonist", "supporting", "minor"]), default="supporting")
+@click.option("--from", "source", nargs=2, default=None, metavar="PROJECT NAME",
+              help="Write out an existing character as a filled sheet instead of a blank one.")
+@click.option("--out", "out", type=click.Path(dir_okay=False), default=None, help="Save to this file instead of printing.")
+@click.pass_obj
+def character_sheet(c: Ctx, name: str, role: str, source: Optional[tuple], out: Optional[str]) -> None:
+    """A fill-in character sheet. Complete it, then `gauge character teach FILE` or `gauge character add PROJECT FILE`."""
+    from .write import blueprint as bp
+
+    if source:
+        _, roster = _roster(c, source[0])
+        ch = roster.get(source[1])
+        if ch is None:
+            console.print(f"[red]no character {source[1]!r}[/]; have: {', '.join(roster.names())}")
+            sys.exit(1)
+        text = bp.sheet_text(ch, notes=True)
+    else:
+        text = bp.blank_sheet(name, role)
+    if out:
+        Path(out).write_text(text, encoding="utf-8")
+        console.print(f"[green]Saved[/] {out}")
+    else:
+        click.echo(text)
+
+
+@character.command("teach")
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option("--genre", "genres", multiple=True, help="A genre these characters belong to (repeatable).")
+@click.option("--force", is_flag=True, help="Admit a sheet even if it is too incomplete to be a good example.")
+@click.pass_obj
+def character_teach(c: Ctx, paths: tuple, genres: tuple, force: bool) -> None:
+    """Teach Gauge with finished character sheets (files, or folders of them)."""
+    school = _school(c)
+    added = 0
+    for raw in paths:
+        for res in school.add_path(Path(raw), genres=list(genres), force=force):
+            added += 1 if res["added"] else 0
+            console.print(("[green]+[/] " if res["added"] else "[yellow]-[/] ") + res["message"])
+    st = school.stats()
+    console.print(f"{added} added. The school holds {st['examples']} example(s) and {st['rows']} training rows.")
+
+
+@character.command("promote")
+@click.argument("project")
+@click.argument("names", nargs=-1)
+@click.option("--force", is_flag=True)
+@click.pass_obj
+def character_promote(c: Ctx, project: str, names: tuple, force: bool) -> None:
+    """Learn from the characters of one of your own stories (all major ones, or the ones named)."""
+    p, roster = _roster(c, project)
+    results = _school(c).promote(roster, project, list(names), list(p.state.genres), force)
+    if not results:
+        console.print("No characters to learn from yet.")
+    for res in results:
+        console.print(("[green]+[/] " if res["added"] else "[yellow]-[/] ") + res["message"])
+
+
+@character.command("study")
+@click.argument("book")
+@click.argument("name")
+@click.option("--role", type=click.Choice(["protagonist", "antagonist", "supporting", "minor"]), default="supporting")
+@click.option("--genre", "genres", multiple=True)
+@click.option("--force", is_flag=True)
+@click.pass_obj
+def character_study(c: Ctx, book: str, name: str, role: str, genres: tuple, force: bool) -> None:
+    """Read a character out of a book in the library and keep them as an example.
+
+    Only books that may be trained on: public domain, openly licensed, or imported by you."""
+    from .llm import make_llm
+
+    llm = make_llm(c.cfg.llm, "main")
+    if not llm.available():
+        console.print(f"[red]LLM not reachable[/] ({llm.describe()}). Run `gauge doctor`.")
+        sys.exit(1)
+    res = _school(c).study(c.db, llm, book, name, role, list(genres), force)
+    console.print(("[green]+[/] " if res["added"] else "[yellow]-[/] ") + res["message"])
+    if not res["added"]:
+        sys.exit(1)
+
+
+@character.command("school")
+@click.option("--remove", default=None, help="Remove an example by name or id.")
+@click.option("--export", "do_export", is_flag=True, help="Rewrite the training rows for GaugeLM.")
+@click.pass_obj
+def character_school(c: Ctx, remove: Optional[str], do_export: bool) -> None:
+    """The examples Gauge learns character building from."""
+    school = _school(c)
+    if remove:
+        console.print(f"[green]Removed[/] {remove}" if school.remove(remove) else f"[red]no example {remove!r}[/]")
+    if do_export:
+        res = school.export_training()
+        console.print(f"Wrote {res['rows']} training rows to {res['path']}")
+    ex = school.examples()
+    if not ex:
+        console.print("(no examples yet; `gauge character sheet --out my-character.txt`, fill it in, then `gauge character teach my-character.txt`)")
+        return
+    table = Table(title=f"character school: {len(ex)} example(s)")
+    for col in ("id", "name", "role", "from", "complete", "genres"):
+        table.add_column(col)
+    for e in ex:
+        table.add_row(e.id, e.name, e.role, e.source, f"{e.score:.0%}", ", ".join(e.genres))
+    console.print(table)
+
+
+@character.command("check")
+@click.argument("project")
+@click.argument("name", required=False)
+@click.option("--fix", is_flag=True, help="Ask the story engine to fill what is missing or thin.")
+@click.pass_obj
+def character_check(c: Ctx, project: str, name: Optional[str], fix: bool) -> None:
+    """Check a story's characters against the blueprint: what each one still lacks."""
+    from .write import blueprint as bp
+
+    _, roster = _roster(c, project)
+    cast = [roster.get(name)] if name else list(roster.ordered())
+    if name and cast[0] is None:
+        console.print(f"[red]no character {name!r}[/]; have: {', '.join(roster.names())}")
+        sys.exit(1)
+    creator = _pipeline_or_exit(c).character_creator() if fix else None
+    for ch in cast:
+        others = [n for n in roster.names() if n != ch.name]
+        if creator is not None:
+            filled = creator.complete(ch, others)
+            if filled:
+                console.print(f"[green]filled[/] {ch.name}: {', '.join(bp.ITEMS[k].label for k in filled)}")
+        _print_audit(bp.audit(ch, len(others)))
+    if creator is not None:
+        roster.save()
+
+
+@character.command("add")
+@click.argument("project")
+@click.argument("sheet", type=click.Path(exists=True, dir_okay=False))
+@click.option("--replace", is_flag=True, help="Replace a character of the same name.")
+@click.pass_obj
+def character_add(c: Ctx, project: str, sheet: str, replace: bool) -> None:
+    """Put a character you built by hand (a filled-in sheet) into a story's cast."""
+    from .write import blueprint as bp
+
+    p, roster = _roster(c, project)
+    try:
+        ch = bp.character_from_text(Path(sheet).read_text(encoding="utf-8-sig"))
+    except Exception as e:
+        console.print(f"[red]could not read the sheet[/]: {e}")
+        sys.exit(1)
+    if roster.get(ch.name) and not replace:
+        console.print(f"[red]{ch.name} is already in {project}[/]; use --replace to overwrite.")
+        sys.exit(1)
+    if roster.get(ch.name):
+        roster.remove(ch.name)
+    ch.created_chapter = p.state.written
+    roster.add(ch)
+    roster.save()
+    _print_audit(bp.audit(ch, len(roster.names()) - 1))
+    console.print(f"[green]Added[/] {ch.name} to {project}")
+
+
 # ---------------------------------------------------------------------------- world
 @main.group()
 def world() -> None:

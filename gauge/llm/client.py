@@ -427,13 +427,38 @@ class FakeLLM:
                 return json.dumps({"summary": "Rin, a courier, discovered she can rewind ten seconds. The last chapter ended with her name on a wall.",
                                    "open_threads": ["Who wrote her name?"], "characters": {"Rin": "the courier", "Jun": "her sister"},
                                    "premise": "A courier who can rewind ten seconds at the cost of a memory.", "world_notes": ["rewinds cost memories"]})
-            if "create a character sheet" in low:
-                m = re.search(r"(?im)^name: (.+)$", prompt)
+            if "complete this character sheet" in low:
+                m = re.search(r"(?im)holding just these keys: (.+)$", prompt)
+                keys = [k.strip() for k in (m.group(1) if m else "").split(",") if k.strip()]
+                canned: dict[str, Any] = {
+                    "aliases": ["Rin"], "habits": ["counts the exits of every room", "rubs the scar on her palm when she lies"],
+                    "skills": ["knows every back route in the city, but only on foot"], "fears": ["being left"],
+                    "values": ["family", "paying debts"], "lines": ["abandon Jun"], "tics": ["says 'okay' twice when scared"],
+                    "catchphrases": ["One more time."], "avoids": ["her mother"], "knows": ["the seal was broken"],
+                    "secrets": ["she can rewind"], "relationships": {"Jun": "little sister, her whole reason"},
+                    "traits": {"impulsivity": 0.9, "loyalty": 0.95, "conscientiousness": 0.15},
+                    "appearance": "Rain-soaked jacket two sizes too big. A scar runs straight across the left palm.",
+                    "backstory": "Grew up running packages for people who never gave their names, and still owes one of them.",
+                    "wound": "her mother left without a word", "want": "clear the debt for good", "need": "to let someone help her",
+                    "lie": "a debt is the only thing that keeps people from leaving", "flaw": "runs before she thinks",
+                    "stakes": "Jun pays what she cannot", "contradiction": "trusts no one with the bag and anyone with her life",
+                    "register": "clipped", "sentence_length": "short", "vocabulary": "courier slang, no abstractions",
+                    "humor_style": "deflecting", "mood": "wired", "goal": "deliver the bag tonight",
+                    "concept": "a courier who owes the wrong people",
+                    "arc": "from carrying everything alone, through a debt she cannot outrun, toward letting someone carry part of it"}
+                return json.dumps({k: canned[k] for k in keys if k in canned})
+            if "create a character sheet" in low or "study this character from a book" in low:
+                m = re.search(r"(?im)^(?:name|character): (.+)$", prompt)
                 name = m.group(1).strip() if m else "Someone"
                 return json.dumps({
                     "name": name, "aliases": [name.split()[0]] if " " in name and name.split()[0].lower() != "the" else [], "concept": "a courier who owes the wrong people",
                     "appearance": "Rain-soaked jacket. Scar across the left palm.",
                     "backstory": "Grew up running packages; owes the Broker a debt she cannot name.",
+                    "habits": ["counts the exits of every room", "rubs the scar on her palm when she lies"],
+                    "skills": ["knows every back route in the city, but only on foot", "reads a seal for tampering"],
+                    "contradiction": "trusts no one with the bag and anyone with her life",
+                    "lie": "a debt is the only thing that keeps people from leaving",
+                    "stakes": "Jun pays what she cannot", "arc": "from carrying everything alone, through a debt she cannot outrun, toward letting someone carry part of it",
                     "matrix": {"openness": 0.6, "conscientiousness": 0.3, "extraversion": 0.4, "agreeableness": 0.35,
                                "neuroticism": 0.7, "dominance": 0.3, "warmth": 0.8, "impulsivity": 0.85, "honesty": 0.8,
                                "courage": 0.75, "humor": 0.75, "ambition": 0.4, "loyalty": 0.9, "curiosity": 0.8, "cynicism": 0.3,

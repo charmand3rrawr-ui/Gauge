@@ -40,6 +40,8 @@ SWITCHES: list[Switch] = [
     # ---- the room -------------------------------------------------------------------------
     Switch("write.characters_enabled", "Characters as agents", "bool", "Each character briefs, reviews and remembers as themselves.", "The room"),
     Switch("write.carry_characters", "Carry characters between books", "bool", "Seed a new character from the cross-book memory: scars, habits and grudges survive from earlier serials.", "The room"),
+    Switch("write.character_examples", "Example characters shown when building one", "int", "How many finished sheets from the character school go into the request when a new character is created.", "The room", 0, 4),
+    Switch("write.character_repair", "Fill gaps in new characters", "bool", "Check each new character against the blueprint and ask once more for whatever is missing or thin.", "The room"),
     Switch("write.character_weight", "Characters' say in the score", "float", "Share of the score from in-character consistency.", "The room", 0, 0.5),
     Switch("write.improv_enabled", "Scene improv before drafting", "bool", "Present characters play the scene out first; the transcript feeds the draft.", "The room"),
     Switch("write.world_enabled", "World agent", "bool", "Physics, weather, crowds and consequences act in every scene.", "The room"),

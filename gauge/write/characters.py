@@ -250,6 +250,13 @@ class Character(BaseModel):
     concept: str = ""  # one line
     appearance: str = ""
     backstory: str = ""
+    # The depth a finished character needs beyond the matrix (see gauge.write.blueprint).
+    habits: list[str] = Field(default_factory=list)   # what the body does: tells, rituals, how they occupy a room
+    skills: list[str] = Field(default_factory=list)   # what they are good at, and where that competence ends
+    contradiction: str = ""  # the thing about them that does not fit, and is true anyway
+    lie: str = ""            # the false belief they live by; the wound taught it, the flaw protects it
+    stakes: str = ""         # what they lose if they fail, in terms they would use
+    arc: str = ""            # where they start, what presses on them, where it could take them
     matrix: PersonalityMatrix = Field(default_factory=PersonalityMatrix)
     voice: Voice = Field(default_factory=Voice)
     state: CharacterState = Field(default_factory=CharacterState)
@@ -285,7 +292,10 @@ class Character(BaseModel):
             mood += ". Right now you " + "; ".join(directives)
         return prompts.CHARACTER_SYSTEM.format(
             name=self.name, role=self.role, concept=self.concept or "(no concept)",
-            backstory=self.backstory or "(unknown)", appearance=self.appearance or "(unspecified)",
+            backstory=(self.backstory or "(unknown)") + (f" What you believe, without ever saying it: {self.lie}" if self.lie else "")
+            + (f" What you stand to lose: {self.stakes}" if self.stakes else "")
+            + (f" What you are good at: {'; '.join(self.skills)}." if self.skills else ""),
+            appearance=(self.appearance or "(unspecified)") + (f" Habits: {'; '.join(self.habits)}." if self.habits else ""),
             matrix=self.matrix.describe(), voice=self.voice.describe(),
             mood=mood, goal=self.state.goal or "(none stated)", location=self.state.location or "(unknown)",
             knows="; ".join(self.state.knows) or "(nothing recorded)",
@@ -303,7 +313,10 @@ class Character(BaseModel):
         m = self.matrix
         lines = [f"## {self.name}" + (f" ({', '.join(self.aliases)})" if self.aliases else ""),
                  f"*{self.role}* - {self.concept}", "",
-                 f"**Appearance:** {self.appearance}", f"**Backstory:** {self.backstory}", "",
+                 f"**Appearance:** {self.appearance}", f"**Habits and tells:** {'; '.join(self.habits)}",
+                 f"**Backstory:** {self.backstory}", f"**Skills:** {'; '.join(self.skills)}",
+                 f"**Contradiction:** {self.contradiction}", f"**The lie they believe:** {self.lie}",
+                 f"**Stakes:** {self.stakes}", f"**Arc:** {self.arc}", "",
                  "**Matrix:** " + ", ".join(f"{k} {v:.2f}" for k, v in m.axes().items()), "",
                  f"**Wants:** {m.wants}  \n**Needs:** {m.needs}  \n**Wound:** {m.wound}  \n**Flaw:** {m.flaw}",
                  "**Values:** " + "; ".join(m.values), "**Fears:** " + "; ".join(m.fears),
@@ -647,6 +660,9 @@ def character_from_sheet(name: str, d: dict[str, Any], role: str = "supporting",
         name=full_name, aliases=aliases,
         role=str(d.get("role") or role), concept=str(d.get("concept") or concept),
         appearance=str(d.get("appearance", "") or ""), backstory=str(d.get("backstory", "") or ""),
+        habits=_as_list(d.get("habits"), 5), skills=_as_list(d.get("skills"), 5),
+        contradiction=str(d.get("contradiction", "") or ""), lie=str(d.get("lie", "") or ""),
+        stakes=str(d.get("stakes", "") or ""), arc=str(d.get("arc", "") or ""),
         matrix=PersonalityMatrix.from_dict(matrix_d), voice=voice,
         state=CharacterState(mood=str(state_d.get("mood", "steady") or "steady"), goal=str(state_d.get("goal", "") or ""),
                              knows=_as_list(state_d.get("knows"), 8), secrets=_as_list(state_d.get("secrets"), 4)),
@@ -665,19 +681,41 @@ def character_from_sheet(name: str, d: dict[str, Any], role: str = "supporting",
 
 
 class CharacterCreator:
-    def __init__(self, llm: LLM):
+    """Builds a character from a concept. With a school (`gauge.learn.character_school`) the request
+    carries the blueprint checklist for the role and the author's closest finished examples, and the
+    result is checked against the blueprint: parts that came back missing or thin get one more pass."""
+
+    def __init__(self, llm: LLM, school: Any = None, examples: int = 2, checklist: bool = True, repair: bool = True):
         self.llm = llm
+        self.school = school
+        self.examples = examples
+        self.checklist = checklist
+        self.repair = repair
+
+    def _guidance(self, name: str, role: str, genres: Optional[list[str]]) -> str:
+        from . import blueprint as bp
+
+        try:
+            if self.school is not None:
+                return self.school.guidance(role, genres, self.examples, exclude=name, checklist=self.checklist)
+            if self.checklist:
+                return f"WHAT A FINISHED {role.upper()} NEEDS, and the test each part must pass:\n{bp.checklist(role)}\n"
+        except Exception as e:  # guidance is a help, never a reason to fail
+            log.warning("no character guidance for %s: %s", name, e)
+        return ""
 
     def from_concept(self, name: str, concept: str, role: str = "supporting", bible_md: str = "",
-                     others: Optional[list[str]] = None, seed_matrix: Optional[PersonalityMatrix] = None) -> Character:
+                     others: Optional[list[str]] = None, seed_matrix: Optional[PersonalityMatrix] = None,
+                     genres: Optional[list[str]] = None) -> Character:
         prompt = prompts.CHARACTER_CREATE_PROMPT.format(
             name=name, concept=concept, role=role, bible=bible_md or "(no bible yet)",
             others=", ".join(others or []) or "(none yet)",
             seed=("Start from these fixed trait values and do not change them: " + json.dumps(seed_matrix.axes()))
             if seed_matrix else "Choose trait values (0-1) that make this person specific, with at least three extremes.",
+            guidance=self._guidance(name, role, genres),
         )
         try:
-            d = generate_json(self.llm, prompt, schema=schema_of(SheetOut), temperature=0.9, max_tokens=1400,
+            d = generate_json(self.llm, prompt, schema=schema_of(SheetOut), temperature=0.9, max_tokens=1800,
                               purpose="character:create")
         except Exception as e:
             log.warning("character sheet generation failed for %s: %s; using a rolled matrix", name, e)
@@ -688,7 +726,34 @@ class CharacterCreator:
                 setattr(c.matrix, axis, v)
         elif not d:
             c.matrix = PersonalityMatrix.random()
+        if d and self.repair:
+            self.complete(c, others, keep_traits=seed_matrix is not None)
         return c
+
+    def complete(self, c: Character, others: Optional[list[str]] = None, keep_traits: bool = False) -> list[str]:
+        """Check a character against the blueprint and ask once for whatever is missing or thin.
+        Returns the items that were filled. Never renames, recasts or overwrites a part that passed."""
+        from . import blueprint as bp
+
+        cast = [o for o in (others or []) if o.lower() != c.name.lower()]
+        wanted = [(it, ask) for it, ask in bp.repair_request(bp.audit(c, len(cast)))
+                  if not (keep_traits and it.kind == "axes")]
+        if not wanted:
+            return []
+        props: dict[str, Any] = {}
+        for it, _ask in wanted:
+            props[it.key] = ({"type": "array", "items": {"type": "string"}} if it.kind == "list"
+                             else {"type": "object"} if it.kind in ("axes", "relationships") else {"type": "string"})
+        prompt = prompts.CHARACTER_REPAIR_PROMPT.format(
+            role=c.role, sheet=json.dumps(bp.sheet_json(c), ensure_ascii=False), others=", ".join(cast) or "(none yet)",
+            wanted="\n".join(f"- {ask}" for _it, ask in wanted), keys=", ".join(it.key for it, _ask in wanted))
+        try:
+            d = generate_json(self.llm, prompt, schema={"type": "object", "properties": props}, temperature=0.7,
+                              max_tokens=900, purpose="character:complete")
+        except Exception as e:
+            log.warning("could not complete the sheet for %s: %s", c.name, e)
+            return []
+        return [it.key for it, _ask in wanted if bp.apply_item(c, it.key, d.get(it.key))]
 
     def roll(self, name: str, role: str = "supporting", seed: Optional[int] = None, concept: str = "") -> Character:
         """A character with a random matrix and no LLM involved; flesh out later with `from_concept`."""

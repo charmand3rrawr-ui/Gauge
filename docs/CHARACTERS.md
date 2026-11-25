@@ -6,6 +6,9 @@ person. When a character appears in a planned scene, their agent is activated: t
 the scene for themselves, the drafter writes with their intentions in hand, they review the
 result for anything they would never say or do, and then they remember what happened.
 
+To see everything a new character needs, and to teach Gauge how to build one with finished
+examples of your own, see [CHARACTER-SCHOOL.md](CHARACTER-SCHOOL.md).
+
 Everything is stored as JSON under `data/projects/<slug>/characters/` and rendered to
 `characters.md`, so you can read and edit a character by hand between chapters.
 

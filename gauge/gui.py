@@ -27,6 +27,10 @@ TEACH_INTRO = ("Give Gauge books or your own writing to learn from. It keeps the
                "is one book; a folder of books is a library.\n"
                "Use only writing that is yours or that you have the right to use. This teaches Gauge what to aim for; it "
                "does not rebuild the downloaded AI model itself.")
+CHARACTER_INTRO = ("Teach Gauge how to build a character by showing it finished ones. Read the breakdown to see everything "
+                   "a new character needs. Save a blank sheet, fill it in with any text editor, then add it here. Gauge checks "
+                   "each sheet against the breakdown and tells you what is still missing. The examples you add are shown to "
+                   "the writer every time it creates a character, and GaugeLM studies them when it trains.")
 ENGINE_NOTE = ("GaugeLM is Gauge's own small model. It has to be trained before it can write, and it writes far more "
                "roughly than the downloaded model. It learns from your library, from every chapter written for your "
                "stories, and from the downloaded model, which teaches it worked examples each time training starts. "
@@ -209,6 +213,10 @@ class StudioController:
                         lessons += got
                 except Exception as e:  # a teacher that stumbles must not stop the training
                     log.warning("could not collect lessons from the downloaded model: %s", e)
+        try:  # the character school's lessons are part of every session, even before any example is added
+            self.school().export_training()
+        except Exception as e:
+            log.warning("could not write the character lessons: %s", e)
         docs = dedup(prose + instruction_rows(datasets))
         examples = sum(1 for kind, _ in docs if kind.startswith("chat:"))
         n = self.cfg.native
@@ -357,6 +365,67 @@ class StudioController:
         self._pipe = None  # the next job picks up the new settings
         return v
 
+    # ---- teaching character building -------------------------------------------------
+    def school(self):
+        from .learn.character_school import CharacterSchool
+
+        return CharacterSchool(self.cfg.models_dir)
+
+    def character_breakdown(self) -> str:
+        """Everything a newly built character needs, as plain text to read."""
+        from .write import blueprint as bp
+
+        return bp.breakdown_markdown().replace("**", "").replace("*Test:*", "Test:").replace("## ", "").replace("# ", "")
+
+    def save_blank_sheet(self, path: str, name: str = "", role: str = "supporting") -> dict[str, Any]:
+        from .write import blueprint as bp
+
+        out = Path(path)
+        if not out.suffix:
+            out = out.with_suffix(".txt")
+        out.write_text(bp.blank_sheet(name, role), encoding="utf-8")
+        return {"path": str(out), "message": f"Saved a blank character sheet to {out}. Open it in Notepad, fill it in, "
+                                             "then press 'Add character sheets'."}
+
+    def character_examples(self) -> list[str]:
+        return [e.line() for e in self.school().examples()]
+
+    def teach_characters(self, paths: list[str]) -> dict[str, Any]:
+        """Add filled-in character sheets (files, or folders of them) as examples to learn from."""
+        school = self.school()
+        results: list[dict[str, Any]] = []
+        for raw in paths:
+            results.extend(school.add_path(Path(raw)))
+        return self._school_report(results, "Nothing was added. Choose a filled-in character sheet.")
+
+    def learn_from_cast(self, name: str) -> dict[str, Any]:
+        """Learn from the characters of one of your own stories."""
+        from .write.characters import Roster
+        from .write.project import Project
+
+        if not name or not Project.exists(self.cfg.projects_dir, name):
+            return {"added": 0, "refused": 0, "message": "Open or start a story first."}
+        p = Project(self.cfg.projects_dir, name)
+        results = self.school().promote(Roster.load(p.dir), name, genres=list(p.state.genres))
+        return self._school_report(results, f"{name} has no characters to learn from yet. Write a chapter first.")
+
+    def _school_report(self, results: list[dict[str, Any]], nothing: str) -> dict[str, Any]:
+        added = [r for r in results if r["added"]]
+        refused = [r for r in results if not r["added"]]
+        if not results:
+            msg = nothing
+        else:
+            msg = f"Added {len(added)} character{'' if len(added) == 1 else 's'} for Gauge to learn from." if added else ""
+            if refused:
+                msg += ("  " if msg else "") + "  ".join(r["message"] for r in refused[:3])
+                if len(refused) > 3:
+                    msg += f"  ...and {len(refused) - 3} more."
+            st = self.school().stats()
+            msg += f"  The school now holds {st['examples']} example{'' if st['examples'] == 1 else 's'}."
+        self._pipe = None
+        return {"added": len(added), "refused": len(refused), "message": msg.strip(),
+                "names": [r["name"] for r in added]}
+
     # ---- teaching: add material, then learn from it ----------------------------------
     def library(self) -> list[dict[str, Any]]:
         """Every book Gauge has to learn from: title, where it came from, chapters, your star rating."""
@@ -377,6 +446,7 @@ class StudioController:
         .html), a folder of chapter files (one book), or a folder of books. One bad file never stops
         the rest. `stars` is your own 1-5 verdict on this material; it teaches Gauge your taste."""
         from .ingest import IngestRunner
+        from .learn.character_school import looks_like_sheet
 
         if stars is not None and not 1 <= float(stars) <= 5:
             raise ValueError("Stars go from 1 to 5.")
@@ -384,10 +454,14 @@ class StudioController:
         runner = IngestRunner(self.cfg, self.db)
         added: list[dict[str, Any]] = []
         problems: list[str] = []
+        sheets: list[dict[str, Any]] = []
         for raw in paths:
             path = Path(raw)
             if not path.exists():
                 problems.append(f"{path.name}: not found")
+                continue
+            if looks_like_sheet(path):      # a character sheet is a lesson in building people, not a book
+                sheets.extend(self.school().add_path(path))
                 continue
             if path.is_file() and path.suffix.lower() not in MATERIAL_EXTS:
                 problems.append(f"{path.name}: not a kind of file Gauge can read ({', '.join(sorted(MATERIAL_EXTS))})")
@@ -406,12 +480,16 @@ class StudioController:
         if added:
             msg = (f"Added {len(added)} book{'' if len(added) == 1 else 's'} ({chapters} chapters, {new} new or changed). "
                    "Press 'Learn from the library now' so Gauge studies them.")
-        else:
+        elif not sheets:
             msg = "Nothing was added."
+        else:
+            msg = ""
+        if sheets:
+            msg = (msg + "  " if msg else "") + self._school_report(sheets, "")["message"]
         if problems:
             msg += "  Could not read: " + "; ".join(problems[:4]) + ("; ..." if len(problems) > 4 else "")
         return {"books": len(added), "chapters": chapters, "new": new, "problems": problems, "message": msg,
-                "titles": [str(r["title"]) for r in added]}
+                "titles": [str(r["title"]) for r in added], "characters": sum(1 for r in sheets if r["added"])}
 
     def learn(self) -> dict[str, Any]:
         """Study the library and keep what it teaches, so the next chapter is written with it.
@@ -767,9 +845,72 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         def on_learn() -> None:
             start(ctl.learn, "Studying your library... this can take several minutes.", refresh_library)
 
-        for text, cmd in (("Add files...", on_files), ("Add a folder...", on_folder), ("Learn from the library now", on_learn)):
+        for text, cmd in (("Add files...", on_files), ("Add a folder...", on_folder), ("Learn from the library now", on_learn),
+                          ("Characters...", on_characters)):
             ttk.Button(teach_buttons, text=text, style="Mid.TButton", command=cmd).pack(side="left", padx=(0, 8))
         refresh_library()
+
+    def on_characters() -> None:
+        """Teach Gauge how to build a character: the breakdown, a blank sheet, and finished examples."""
+        from tkinter import filedialog
+
+        win, frame, alive, note, start = dialog("Teach character building", 760, 560)
+        ttk.Label(frame, text="Teach character building", font=huge).pack(anchor="w")
+        ttk.Label(frame, text=CHARACTER_INTRO, wraplength=700, font=small).pack(anchor="w", pady=(2, 8))
+        row_a = ttk.Frame(frame)
+        row_a.pack(fill="x", pady=(0, 4))
+        row_b = ttk.Frame(frame)
+        row_b.pack(fill="x", pady=(0, 4))
+        ttk.Label(frame, textvariable=note, wraplength=700, font=mid).pack(side="bottom", anchor="w", pady=(4, 0))
+        ttk.Label(frame, text="Characters Gauge is learning from", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(6, 0))
+        box = tk.Listbox(frame, font=mid, height=5)
+        box.pack(fill="both", expand=True, pady=4)
+
+        def refresh() -> None:
+            if not alive():
+                return
+            box.delete(0, "end")
+            lines = ctl.character_examples()
+            for line in lines:
+                box.insert("end", line)
+            if not lines:
+                box.insert("end", "(none yet: save a blank sheet, fill it in, and add it)")
+
+        def on_breakdown() -> None:
+            view = tk.Toplevel(win)
+            view.title("What a new character needs")
+            view.geometry(_fit(root, 820, 640))
+            text = scrolledtext.ScrolledText(view, wrap="word", font=mid, padx=12, pady=10)
+            text.pack(fill="both", expand=True)
+            text.insert("1.0", ctl.character_breakdown())
+            text.configure(state="disabled")
+
+        def on_blank() -> None:
+            path = filedialog.asksaveasfilename(parent=win, title="Save a blank character sheet",
+                                                initialfile="my-character.txt", defaultextension=".txt",
+                                                filetypes=[("Text file", "*.txt")])
+            if path:
+                note.set(ctl.save_blank_sheet(path)["message"])
+
+        def on_add() -> None:
+            picked = [str(x) for x in (filedialog.askopenfilenames(
+                parent=win, title="Choose filled-in character sheets",
+                filetypes=[("Character sheets", "*.txt *.md *.json"), ("All files", "*.*")]) or []) if x]
+            if picked:
+                start(lambda: ctl.teach_characters(picked), "Checking the sheets...", refresh)
+
+        def on_cast() -> None:
+            name = state["project"]
+            if not name:
+                note.set("Open or start a story first.")
+                return
+            start(lambda: ctl.learn_from_cast(name), f"Learning from the characters of {name}...", refresh)
+
+        for parent, pairs_ in ((row_a, (("What a character needs", on_breakdown), ("Save a blank sheet...", on_blank))),
+                               (row_b, (("Add character sheets...", on_add), ("Learn from this story's characters", on_cast)))):
+            for text, cmd in pairs_:
+                ttk.Button(parent, text=text, style="Mid.TButton", command=cmd).pack(side="left", padx=(0, 8))
+        refresh()
 
     def start_training(note: Any, how_long: str, starter: Optional[Callable[..., None]] = None,
                        after: Optional[Callable[[], None]] = None) -> None:
@@ -928,7 +1069,8 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     for title, entries in (
         ("Story", [("Start my story", on_start), ("Write the next chapter", on_write), ("Open another story...", on_open),
                    ("Talk to a character...", on_chat), ("Save story as one file", on_export)]),
-        ("Teach", [("Add books or your own writing...", on_teach), ("Change the AI that writes...", on_engine),
+        ("Teach", [("Add books or your own writing...", on_teach), ("Teach character building...", on_characters),
+                   ("Change the AI that writes...", on_engine),
                    ("Start training GaugeLM", lambda: start_training(None, UNTIL_PAUSED)),
                    ("Pause training", on_pause_training)]),
         ("Settings", [("Switches...", on_switches)]),

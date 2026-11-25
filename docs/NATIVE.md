@@ -54,7 +54,8 @@ machine and prints how many hours 2,000 steps would take. Run it before committi
 
 The corpus is every ingested chapter (sites, local imports, Gutenberg), every project chapter,
 and the instruction rows under `data/models/datasets/` (SFT, the chosen side of self-preference
-and author-edit pairs, and the distilled teacher answers), de-duplicated, with instruction rows
+and author-edit pairs, the distilled teacher answers, and the character school's lessons in building
+a character; see [CHARACTER-SCHOOL.md](CHARACTER-SCHOOL.md)), de-duplicated, with instruction rows
 repeated `native.chat_weight` times and concentrated in the last third of training.
 
 ## From Gauge Studio

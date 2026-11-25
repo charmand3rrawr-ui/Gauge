@@ -85,12 +85,12 @@ def gather_texts(db: Database, projects_dir: Optional[Path] = None, datasets_dir
 
 def instruction_rows(datasets_dir: Optional[Path]) -> list[tuple[str, str]]:
     """The rows that teach behaviour rather than prose: curated instruction data, the preferred side of
-    draft-versus-accepted pairs, the author's edits, and the big model's answers to Gauge's own tasks
-    (distillation). Each is ('chat:<prompt>', answer). All of it was produced on this machine."""
+    draft-versus-accepted pairs, the author's edits, the big model's answers to Gauge's own tasks
+    (distillation), and the character school's lessons in building a character. Each is ('chat:<prompt>', answer). All of it was produced on this machine."""
     rows: list[tuple[str, str]] = []
     if not datasets_dir or not datasets_dir.exists():
         return rows
-    for name in ("sft.jsonl", "self_preference.jsonl", "author_edits.jsonl", "distill.jsonl"):
+    for name in ("sft.jsonl", "self_preference.jsonl", "author_edits.jsonl", "distill.jsonl", "characters.jsonl"):
         f = datasets_dir / name
         if not f.exists():
             continue
