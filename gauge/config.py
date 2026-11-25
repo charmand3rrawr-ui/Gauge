@@ -286,6 +286,18 @@ class DaemonConfig(BaseModel):
     max_backoff: int = 4  # when the budget is exhausted, sleep this many times longer between cycles
 
 
+class LibraryConfig(BaseModel):
+    """The book finder: Gauge looks online for out-of-copyright novels to add to its library."""
+
+    finder: bool = False  # look by itself: at the start of a training session and in the daemon, when it is due
+    finder_books: int = 3  # novels to add per run
+    finder_hours: float = 24.0  # how long to wait between runs it starts by itself
+    finder_max_mb: float = 300.0  # the most text the finder may add in total
+    finder_max_book_mb: float = 6.0  # a single book larger than this is passed over
+    finder_topics: list[str] = Field(default_factory=list)  # catalogue topics you want searched first, e.g. "sea stories"
+    finder_languages: list[str] = Field(default_factory=lambda: ["en"])
+
+
 class LogsConfig(BaseModel):
     structured: bool = True  # also write every log record as a JSON line to <data>/logs/gauge.jsonl
     max_mb: int = 5  # rotate the file at this size
@@ -314,6 +326,7 @@ class GaugeConfig(BaseModel):
     newsdesk: NewsdeskConfig = Field(default_factory=NewsdeskConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     logs: LogsConfig = Field(default_factory=LogsConfig)
+    library: LibraryConfig = Field(default_factory=LibraryConfig)
 
     @property
     def security_dir(self) -> Path:

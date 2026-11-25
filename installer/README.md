@@ -113,6 +113,19 @@ than duplicating it.
 The same thing from the command line: `gauge.bat import "C:\path\to\folder"`, then `gauge.bat train`
 and `gauge.bat absorb`.
 
+## Letting Gauge find novels by itself
+
+In **Teach Gauge**, press **Find novels online**. Gauge goes to Project Gutenberg, a library of books
+that are out of copyright, looks for novels in the genres of your stories, and adds a few it does not
+already have. They appear in the library list; press **Learn from the library now** to study them.
+
+- Tick **Keep finding novels by itself** and it does this about once a day, when a training session
+  starts.
+- It only ever talks to Project Gutenberg and its catalogue. It cannot visit other websites, and it
+  cannot fetch novels that are still in copyright.
+- Nothing about you or your writing is sent. A search is a word such as "adventure".
+- It adds three novels at a time and stops at 300 MB in total; both can be changed in **Switches**.
+
 ## Teaching Gauge how to build characters
 
 In the **Teach Gauge** window press **Characters...** (or use the **Teach** menu, **Teach character

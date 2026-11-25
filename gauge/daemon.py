@@ -99,6 +99,16 @@ class Daemon:
                     out["absorb"] = f"failed: {e}"
             else:
                 out["absorb"] = "skipped: LLM not reachable"
+        # The book finder: when switched on and due, look online for novels the library does not have.
+        if self.cfg.library.finder and automation_ok and not degraded:
+            try:
+                from .ingest.finder import BookFinder
+
+                found = BookFinder(self.cfg, self.db).run_if_due()
+                if found is not None:
+                    out["finder"] = {"added": [a["title"] for a in found["added"]], "message": found["message"]}
+            except Exception as e:
+                self._journal("finder", e)
         # Sense compute: switch GaugeLM to a GPU that appeared, and find workers that announced themselves.
         if self.cfg.compute.auto_device and not self.cfg.compute.devices:   # an explicit choice of devices is left alone
             try:

@@ -47,6 +47,10 @@ SETUP_GPU_ASK = ("Set up the graphics card for GaugeLM?\n\n"
                  "Gauge found an NVIDIA graphics card, but GaugeLM needs one more library before it can use it. This downloads "
                  "several hundred megabytes and can take several minutes. Your card's normal NVIDIA driver must be installed. "
                  "The downloaded model already uses the graphics card and is not affected.")
+FIND_ASK = ("Let Gauge go online and find novels?\n\n"
+            "It searches Project Gutenberg, a library of books that are out of copyright, for novels in the genres of your "
+            "stories, and adds a few it does not have. It only ever talks to that library; it cannot visit other sites. "
+            "Nothing about you or your writing is sent: a search is a word such as 'adventure'.")
 CHAT_HINT = ("Type below and press Ask Gauge to talk about your story: ideas, what a character would do, what is "
              "still unresolved. Or type what should happen and press 'Use for the next chapter'.\n")
 CHARACTER_INTRO = ("Teach Gauge how to build a character by showing it finished ones. Read the breakdown to see everything "
@@ -328,8 +332,12 @@ class StudioController:
         Only text that is safe to train on is used: what you added yourself, public-domain books, the
         chapters written for you and the examples made on this machine. Scraped third-party fiction is
         left out."""
+        from .ingest.finder import BookFinder
         from .learn.corpus import permitted_texts
 
+        found = BookFinder(self.cfg, self.db).run_if_due()     # only when switched on and a day has passed
+        if found and found["added"]:
+            log.info("the finder added %d novel(s) before training", len(found["added"]))
         prose = permitted_texts(self.db, self.cfg.projects_dir)
         if not prose:
             return {"trained": False, "step": 0, "lessons": 0, "paused": False,
@@ -648,6 +656,27 @@ class StudioController:
         v = st.set_value(self.cfg, key, value)
         self._pipe = None  # the next job picks up the new settings
         return v
+
+    # ---- finding novels online ---------------------------------------------------------
+    def find_novels(self, books: Optional[int] = None, progress: Optional[Callable[[dict[str, Any]], None]] = None) -> dict[str, Any]:
+        """Go online and add out-of-copyright novels that fit your stories. Project Gutenberg only."""
+        from .ingest.finder import BookFinder
+
+        res = BookFinder(self.cfg, self.db).run(books=books, progress=progress)
+        if res["added"]:
+            res["message"] += " Press 'Learn from the library now' to study them straight away."
+            self._pipe = None
+        return res
+
+    def finder_by_itself(self, on: Optional[bool] = None) -> dict[str, Any]:
+        """Whether Gauge looks for novels by itself, and (with `on`) switching that."""
+        if on is not None:
+            self.cfg.library.finder = bool(on)
+            self.cfg.save()
+        lib = self.cfg.library
+        return {"on": lib.finder,
+                "message": (f"Gauge looks for novels by itself: up to {lib.finder_books} about every {lib.finder_hours:g} hours, "
+                            "when a training session starts." if lib.finder else "Gauge only looks for novels when you press the button.")}
 
     # ---- teaching character building -------------------------------------------------
     def school(self):
@@ -1143,7 +1172,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         """Add books or your own writing to the library, then have Gauge learn from them."""
         from tkinter import filedialog
 
-        win, frame, alive, note, start = dialog("Teach Gauge", 760, 600)
+        win, frame, alive, note, start = dialog("Teach Gauge", 760, 640)
         ttk.Label(frame, text="Teach Gauge", font=huge).pack(anchor="w")
         ttk.Label(frame, text=TEACH_INTRO, wraplength=700, font=small).pack(anchor="w", pady=(2, 8))
         rate_row = ttk.Frame(frame)
@@ -1154,6 +1183,8 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
                      width=10).pack(side="left", padx=8)
         teach_buttons = ttk.Frame(frame)
         teach_buttons.pack(fill="x", pady=(8, 4))
+        find_row = ttk.Frame(frame)
+        find_row.pack(fill="x", pady=(0, 4))
         # The status line goes in before the list, at the bottom, so a short window never hides it.
         ttk.Label(frame, textvariable=note, wraplength=700, font=mid).pack(side="bottom", anchor="w", pady=(4, 0))
         ttk.Label(frame, text="In the library", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(6, 0))
@@ -1192,6 +1223,18 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         for text, cmd in (("Add files...", on_files), ("Add a folder...", on_folder), ("Learn from the library now", on_learn),
                           ("Characters...", on_characters)):
             ttk.Button(teach_buttons, text=text, style="Mid.TButton", command=cmd).pack(side="left", padx=(0, 8))
+
+        def on_find() -> None:
+            if messagebox.askyesno("Find novels online", FIND_ASK, parent=win):
+                start(ctl.find_novels, "Looking for novels online... each book takes a little while.", refresh_library)
+
+        def on_find_auto() -> None:
+            note.set(ctl.finder_by_itself(bool(auto_find.get()))["message"])
+
+        auto_find = tk.BooleanVar(value=ctl.finder_by_itself()["on"])
+        ttk.Button(find_row, text="Find novels online", style="Mid.TButton", command=on_find).pack(side="left", padx=(0, 8))
+        ttk.Checkbutton(find_row, text="Keep finding novels by itself (about once a day)", variable=auto_find,
+                        command=on_find_auto).pack(side="left")
         refresh_library()
 
     def on_characters() -> None:

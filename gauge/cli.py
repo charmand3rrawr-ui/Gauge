@@ -2410,6 +2410,47 @@ def corpus_fetch(c: Ctx, source: str, query: str, title: str, limit: int) -> Non
         console.print("run `gauge corpus build` to compile the library, then train with `gauge native train`.")
 
 
+@corpus.command("find")
+@click.option("--books", type=int, default=None, help="Novels to add (default library.finder_books).")
+@click.option("--topic", "topics", multiple=True, help="A catalogue topic to search, e.g. 'sea stories' (repeatable). Default: from your stories.")
+@click.option("--plan", "plan_only", is_flag=True, help="Say what would be searched and download nothing.")
+@click.option("--log", "show_log", is_flag=True, help="Show what the finder has added so far.")
+@click.option("--by-itself", type=click.Choice(["on", "off"]), default=None, help="Let Gauge do this by itself about once a day.")
+@click.pass_obj
+def corpus_find(c: Ctx, books: Optional[int], topics: tuple, plan_only: bool, show_log: bool, by_itself: Optional[str]) -> None:
+    """Go online and find out-of-copyright novels that fit your stories, and add them to the library.
+
+    It searches Project Gutenberg only. It cannot be pointed at any other site."""
+    from .ingest.finder import BookFinder
+
+    finder = BookFinder(c.cfg, c.db)
+    if by_itself:
+        c.cfg.library.finder = by_itself == "on"
+        c.cfg.save()
+        console.print("Gauge will look for novels by itself, about once every "
+                      f"{c.cfg.library.finder_hours:g} hours." if c.cfg.library.finder else "Gauge will only look when you ask.")
+        if not (books or topics or plan_only or show_log):
+            return
+    if show_log:
+        rows = finder.journal(200)
+        if not rows:
+            console.print("The finder has not added anything yet.")
+            return
+        table = Table(title=f"added by the finder: {len(rows)} book(s)")
+        for col in ("when", "title", "author", "topic", "chapters", "words"):
+            table.add_column(col)
+        for r in rows:
+            table.add_row(r["at"][:10], r["title"][:44], r["author"][:28], r["topic"], str(r["chapters"]), f"{r['words']:,}")
+        console.print(table)
+        return
+    console.print("Looking on Project Gutenberg for: " + ", ".join((list(topics) or finder.interests())[:4]) + " ...")
+    res = finder.run(books=books, topics=list(topics), plan_only=plan_only,
+                     progress=lambda r: console.print(f"  reading {r['reading']}"))
+    console.print(("[green]" if res["added"] else "") + res["message"] + ("[/]" if res["added"] else ""))
+    if res["added"]:
+        console.print("Next: gauge train   (and gauge native train --resume for GaugeLM)")
+
+
 @corpus.command("build")
 @click.option("--out", default=None, help="Output directory (default: data/models/corpus).")
 @click.option("--include-third-party", is_flag=True, help="Include scraped third-party fiction (copyrighted; your legal call).")
