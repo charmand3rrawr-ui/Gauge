@@ -234,7 +234,15 @@ Ok "Gauge installed"
 if ($Eng -eq "ollama") {
   Step "Downloading the AI models (the slow part; a few GB)"
   $wanted = @($Model, $FastModel, $EmbedModel) | Select-Object -Unique
+  # A model already on this computer is left alone: nothing is downloaded twice.
+  $present = @()
+  try { $present = @((Invoke-RestMethod -Uri "http://localhost:11434/api/tags" -TimeoutSec 5).models | ForEach-Object { [string]$_.name }) } catch {}
   foreach ($m in $wanted) {
+    if (($present -contains $m) -or ($present -contains ($m + ":latest"))) {
+      Ok "$m is already on this computer"
+      Check "Model $m" $true "already present"
+      continue
+    }
     Write-Host "    pulling $m ..."
     & $ollamaExe pull $m
     $pulled = ($LASTEXITCODE -eq 0)

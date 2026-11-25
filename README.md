@@ -87,7 +87,9 @@ for it to learn from. No git, no accounts, no keys; nothing leaves the computer.
 curl -fsSL https://raw.githubusercontent.com/charmand3rrawr-ui/Gauge/ccr-24dc418f-hsneyx/install.sh | bash
 ```
 
-Running either again later updates Gauge and keeps your stories and settings.
+To update later, use the updater: **Update Gauge.bat** on Windows, or `~/Gauge/install.sh --update`. It
+fetches only Gauge's own program, and only when there is a newer version; it never reinstalls Python or
+Ollama or downloads a model again, and it leaves your stories and settings alone.
 Details, options and troubleshooting: [installer/README.md](installer/README.md).
 
 ## Install on Windows (command line, 5 minutes)

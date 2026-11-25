@@ -61,6 +61,11 @@ try {
   Copy-Item -Path (Join-Path $src "*") -Destination $dir -Recurse -Force
   Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
   Write-Host "  Gauge is in $dir"
+  # Remember which version this is, so 'Update Gauge.bat' can tell when there is nothing new.
+  try {
+    $got = [string](Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/commits/$b" -TimeoutSec 20).sha
+    if ($got) { [IO.File]::WriteAllText((Join-Path $dir "installer\installed-version.txt"), "$b $got") }
+  } catch {}
   $boot = Join-Path $dir "installer\bootstrap.ps1"
   $opts = @{}
   if ($env:GAUGE_MODEL) { $opts.Model = $env:GAUGE_MODEL }

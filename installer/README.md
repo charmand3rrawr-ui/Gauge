@@ -42,9 +42,25 @@ Ollama through the system package manager; on macOS it uses Homebrew when someth
 7. **Asks the AI a real test question**, so you know it works rather than merely that it installed, and
    prints a checklist. Anything that failed is listed with the one command that fixes it.
 
-Running it again is safe: it updates Gauge and keeps your stories and your settings. Existing settings
-are only changed if you name a model or engine yourself. Everything it did on Windows is logged in
-`installer\install.log`.
+Running it again is safe: it keeps your stories and your settings, leaves alone any model that is
+already on the computer, and only changes existing settings if you name a model or engine yourself.
+Everything it did on Windows is logged in `installer\install.log`.
+
+## Updating
+
+To get a newer Gauge, use the updater, not the installer.
+
+- **Windows:** double-click **Update Gauge.bat** (in this folder; it also works from anywhere, such as
+  your Desktop).
+- **macOS and Linux:** `~/Gauge/install.sh --update`
+
+The updater first asks GitHub one small question: is there a newer version? If not, it says so and
+downloads nothing. If there is, it fetches only Gauge's own program (about 1 MB), puts it in place and
+lists what is new. Python packages are reinstalled only when the new version needs different ones.
+
+It never reinstalls Python or Ollama, never downloads an AI model, and never touches your stories, your
+library or your settings. It cannot: none of that machinery is in it. If Gauge Studio is open, close it
+and open it again afterwards. It refuses to run on a git checkout, where `git pull` is the right tool.
 
 ## Using Gauge Studio
 

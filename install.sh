@@ -20,6 +20,8 @@
 #   --fast-model NAME   the small helper model (default: llama3.2:3b)
 #   --engine native     no Ollama: use GaugeLM, the built-in model (you train it yourself)
 #   --skip-engine       do not install Ollama or download models (set Gauge up only)
+#   --update            only update an installed Gauge: fetch the new program when there is one, and
+#                       nothing else. Python, Ollama, the AI models, your stories and settings are untouched.
 #   --dir PATH          where to put Gauge when downloading it (default: ~/Gauge)
 #   --yes               do not ask before using sudo to install system packages
 set -euo pipefail
@@ -27,7 +29,7 @@ set -euo pipefail
 REPO="charmand3rrawr-ui/Gauge"
 BRANCH="${GAUGE_BRANCH:-ccr-24dc418f-hsneyx}"
 MODEL="" FAST_MODEL="llama3.2:3b" EMBED_MODEL="nomic-embed-text"
-ENGINE="ollama" SKIP_ENGINE=0 ASSUME_YES=0 EXPLICIT=0
+ENGINE="ollama" SKIP_ENGINE=0 ASSUME_YES=0 EXPLICIT=0 UPDATE_ONLY=0
 INSTALL_DIR="${GAUGE_DIR:-$HOME/Gauge}"
 
 while [ $# -gt 0 ]; do
@@ -38,7 +40,8 @@ while [ $# -gt 0 ]; do
     --skip-engine) SKIP_ENGINE=1; shift ;;
     --dir) INSTALL_DIR="$2"; shift 2 ;;
     --yes|-y) ASSUME_YES=1; shift ;;
-    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --update) UPDATE_ONLY=1; shift ;;
+    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -72,6 +75,89 @@ as_root() {
   fi
   sudo "$@"
 }
+
+# ---------------------------------------------------------------- Update only
+latest_sha() {  # the newest version of a branch, as GitHub reports it; empty when it cannot be asked
+  local sha
+  sha="$(curl -fsSL -m 20 -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/$REPO/commits/$1" 2>/dev/null || true)"
+  case "$sha" in *[!0-9a-f]*|"") echo "" ;; *) [ "${#sha}" -eq 40 ] && echo "$sha" || echo "" ;; esac
+}
+file_sum() { [ -f "$1" ] && cksum < "$1" || echo "none"; }
+
+update_only() {
+  local here="" root="" c marker current b sha top got="" branch="" before after removed=0 rel old_sha vpy
+  if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; fi
+  for c in "${GAUGE_DIR:-}" "$here" "$HOME/Gauge"; do
+    if [ -n "$c" ] && [ -f "$c/pyproject.toml" ] && [ -d "$c/gauge" ]; then root="$c"; break; fi
+  done
+  [ -n "$root" ] || die "Gauge is not installed on this computer yet. Run this without --update to install it."
+  [ -e "$root/.git" ] && die "The copy of Gauge in $root is a git checkout. Update it with 'git pull'; this updater would overwrite your changes."
+  step "Checking for a newer version of Gauge"
+  ok "Gauge is in $root"
+  have curl || die "'curl' is needed to check for updates."
+  marker="$root/installer/installed-version.txt"
+  current="$(cat "$marker" 2>/dev/null || true)"
+  UPDATE_TMP="$(mktemp -d)"; trap 'rm -rf "$UPDATE_TMP"' EXIT
+  for b in "$BRANCH" main; do
+    sha="$(latest_sha "$b")"
+    if [ -n "$sha" ] && [ "$current" = "$b $sha" ]; then
+      printf '\n%sGauge is already up to date (version %s). Nothing was downloaded.%s\n' "$C_OK" "${sha:0:7}" "$C_OFF"
+      exit 0
+    fi
+    echo "    downloading the new version of Gauge (about 1 MB) ..."
+    if curl -fsSL "https://github.com/$REPO/archive/refs/heads/$b.tar.gz" -o "$UPDATE_TMP/gauge.tar.gz" 2>/dev/null; then
+      mkdir -p "$UPDATE_TMP/x-$b"; tar -xzf "$UPDATE_TMP/gauge.tar.gz" -C "$UPDATE_TMP/x-$b"
+      top="$(find "$UPDATE_TMP/x-$b" -mindepth 1 -maxdepth 1 -type d | head -1)"
+      if [ -n "$top" ] && [ -f "$top/pyproject.toml" ] && [ -d "$top/gauge" ]; then got="$top"; branch="$b"; break; fi
+      warn "the '$b' copy has no program in it; trying the next one"
+    fi
+  done
+  [ -n "$got" ] || die "Could not download the update. Check your internet connection and run this again."
+
+  # Put the new program in place. Data, stories, settings and the Python environment are in folders the
+  # download does not contain, so they are not touched.
+  before="$(file_sum "$root/pyproject.toml")"
+  cp -R "$got"/. "$root"/
+  # Program files that no longer exist in the new version are removed, so an old module cannot linger.
+  while IFS= read -r rel; do
+    if [ ! -f "$got/gauge/$rel" ]; then rm -f "$root/gauge/$rel"; removed=$((removed + 1)); fi
+  done < <(cd "$root/gauge" && find . -name '*.py' -type f | sed 's|^\./||')
+  after="$(file_sum "$root/pyproject.toml")"
+
+  # Python packages: only when the list of packages Gauge needs has changed.
+  vpy="$root/.venv/bin/python"
+  if [ ! -x "$vpy" ]; then
+    warn "The Python environment is missing. Run this without --update to rebuild it."
+  elif [ "$before" != "$after" ]; then
+    echo "    this version needs different Python packages; installing them ..."
+    (cd "$root" && "$vpy" -m pip install -e ".[ml]" --quiet --disable-pip-version-check) \
+      || die "The new program is in place, but its Python packages could not be installed. Check your connection and run this again."
+  else
+    ok "Python packages are unchanged; nothing to install."
+  fi
+
+  mkdir -p "$root/installer"
+  [ -n "$sha" ] && printf '%s %s' "$branch" "$sha" > "$marker"
+  printf '\n%sGauge is updated%s%s\n' "$C_OK" "${sha:+ to version ${sha:0:7}}" ".$C_OFF"
+  [ "$removed" -gt 0 ] && echo "Removed $removed old program file(s) that the new version no longer uses."
+  old_sha="${current#* }"
+  if [ -n "$sha" ] && [ -n "$current" ] && [ "$old_sha" != "$current" ] && have python3; then
+    curl -fsSL -m 20 "https://api.github.com/repos/$REPO/compare/$old_sha...$sha" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    lines = [c["commit"]["message"].splitlines()[0] for c in json.load(sys.stdin).get("commits", [])]
+except Exception:
+    lines = []
+if lines:
+    print("\nWhat is new:")
+    for line in lines[-8:]:
+        print("  - " + line)' 2>/dev/null || true
+  fi
+  printf '\nNot touched: Python, Ollama, the AI models, your stories, your library and your settings.\n'
+  echo "If Gauge Studio is open, close it and open it again to use the new version."
+  exit 0
+}
+if [ "$UPDATE_ONLY" -eq 1 ]; then update_only; fi
 
 # ---------------------------------------------------------------- 1. This computer
 ram_gb() {
@@ -136,6 +222,9 @@ else
   # Copy the program over the install folder. Data, stories and the Python environment are in folders
   # the download does not contain, so they are left exactly as they were.
   cp -R "$GOT"/. "$INSTALL_DIR"/
+  # Remember which version this is, so `install.sh --update` can tell when there is nothing new.
+  GOT_SHA="$(latest_sha "$b")"
+  if [ -n "$GOT_SHA" ]; then mkdir -p "$INSTALL_DIR/installer"; printf '%s %s' "$b" "$GOT_SHA" > "$INSTALL_DIR/installer/installed-version.txt"; fi
   ROOT="$INSTALL_DIR"
 fi
 cd "$ROOT"
@@ -209,6 +298,9 @@ check "Disk space" 1 "${FREE} GB free"
 # ---------------------------------------------------------------- 4. Ollama
 ENGINE_UP=0
 ollama_up() { curl -fsS -m 3 http://localhost:11434/api/tags >/dev/null 2>&1; }
+have_model() {  # is this model already downloaded? (Ollama lists untagged names as name:latest)
+  curl -fsS -m 5 http://localhost:11434/api/tags 2>/dev/null | tr -d ' ' | grep -Eq "\"name\":\"$1(:latest)?\""
+}
 if [ "$ENGINE" = "ollama" ] && [ "$SKIP_ENGINE" -eq 0 ]; then
   step "Checking for Ollama (the local AI engine)"
   if ! have ollama; then
@@ -280,6 +372,7 @@ if [ "$ENGINE" = "ollama" ] && [ "$SKIP_ENGINE" -eq 0 ]; then
   for m in "$MODEL" "$FAST_MODEL" "$EMBED_MODEL"; do
     case " $DONE " in *" $m "*) continue ;; esac
     DONE="$DONE $m"
+    if have_model "$m"; then ok "$m is already on this computer"; check "Model $m" 1; continue; fi
     echo "    pulling $m ..."
     if ollama pull "$m"; then check "Model $m" 1; else warn "could not pull $m; later, run: ollama pull $m"; check "Model $m" 0 "ollama pull $m"; fi
   done
