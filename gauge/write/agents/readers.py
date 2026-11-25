@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from .base import AgentReview, SceneContext, StoryAgent, as_str_list, clamp01
+from .base import AgentReview, SceneContext, StoryAgent, as_str_list, clamp01, given01
 
 DEFAULT_PERSONAS = {
     "binge": "the binge reader: reads at 2am, forgives flaws, needs a reason to click Next every single chapter",
@@ -78,22 +78,25 @@ Respond with ONLY JSON: {{"readers": [{{"persona": "<key>", "click_next": 0-1 pr
 
 CHAPTER:
 {text}""", system=SYSTEM, temperature=0.4, max_tokens=900)
+        self._last = None
         readers = d.get("readers") if isinstance(d.get("readers"), list) else []
         if not readers:
-            return None
+            return self.no_answer()
         per: dict[str, float] = {}
         comments, stops = [], []
         for r in readers:
             if not isinstance(r, dict):
                 continue
             key = str(r.get("persona", "reader"))[:20]
-            per[key] = clamp01(r.get("click_next", 0.5))
+            p_next = given01(r.get("click_next"))
+            if p_next is not None:  # a persona that gave no probability comments but does not vote
+                per[key] = p_next
             if r.get("comment"):
                 comments.append(f"{key}: {str(r['comment'])[:160]}")
             if r.get("stop_at"):
                 stops.append(f"{key} would stop at \"{str(r['stop_at'])[:100]}\"")
         if not per:
-            return None
+            return self.no_answer()
         click = sum(per.values()) / len(per)
         adjusted = clamp01(click + self.state.bias)
         issues = stops[:3]

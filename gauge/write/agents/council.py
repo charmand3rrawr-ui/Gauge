@@ -102,6 +102,7 @@ class AgentCouncil:
         self.agents = agents
         self.parallel = parallel
         self.weight = weight
+        self.silent: list[str] = []  # agents whose model gave no usable answer in the last review()
 
     def get(self, name: str) -> Optional[StoryAgent]:
         return next((a for a in self.agents if a.name == name), None)
@@ -131,7 +132,10 @@ class AgentCouncil:
         return "\n\n".join(sections)
 
     def review(self, text: str, ctx: SceneContext) -> list[AgentReview]:
+        for a in self.agents:
+            a.silent = False
         outs = run_parallel(lambda a: a.review(text, ctx), self.agents, self.parallel, "agent review")
+        self.silent = [a.name for a in self.agents if a.silent]
         return [r for r in outs if r is not None]
 
     def remember(self, text: str, ctx: SceneContext) -> None:
@@ -140,6 +144,8 @@ class AgentCouncil:
 
     # ---- merging -----------------------------------------------------------
     def score(self, reviews: list[AgentReview]) -> Optional[float]:
+        """Weighted mean of the reviews that were given. An agent that returned no review (nothing to
+        say, or its model did not answer) is simply absent: it neither raises nor lowers the score."""
         weights = {a.name: a.weight for a in self.agents}
         pairs = [(r.score, weights.get(r.agent, 1.0)) for r in reviews if weights.get(r.agent, 1.0) > 0]
         blocking = [r for r in reviews if weights.get(r.agent, 1.0) == 0 and r.score == 0.0]

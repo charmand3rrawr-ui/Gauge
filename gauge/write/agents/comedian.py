@@ -5,6 +5,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from ...llm.client import given_number
 from .base import AgentReview, SceneContext, StoryAgent, as_str_list
 
 SYSTEM = """You are a comedy writer for serial fiction. You find the joke that comes from character and situation, never
@@ -43,10 +44,11 @@ Respond with ONLY JSON: {{"laughs": int, "flat": ["lines that tried and failed"]
 
 CHAPTER:
 {text}""", system=SYSTEM, temperature=0.3, max_tokens=300)
-        try:
-            laughs = int(d.get("laughs", 0))
-        except (TypeError, ValueError):
-            laughs = 0
+        self._last = None
+        counted = given_number(d.get("laughs"), 0, 1000)
+        if counted is None:  # no count is not "zero laughs": nothing is scored and nothing is remembered
+            return self.no_answer()
+        laughs = int(counted)
         self._last = (laughs, str(d.get("new_running_gag", "") or ""))
         issues = [f"flat joke: {f}" for f in as_str_list(d.get("flat"), 2)]
         if laughs == 0:
@@ -54,7 +56,10 @@ CHAPTER:
         return AgentReview(agent=self.name, score=min(1.0, 0.5 + 0.2 * laughs), issues=issues, notes=str(d.get("notes", ""))[:160], data={"laughs": laughs})
 
     def remember(self, text: str, ctx: SceneContext) -> None:
-        laughs, gag = getattr(self, "_last", (0, ""))
+        last = getattr(self, "_last", (0, ""))
+        if last is None:
+            return
+        laughs, gag = last
         self.state.laughs.append(laughs)
         if gag and gag not in self.state.callbacks:
             self.state.callbacks.append(gag[:120])

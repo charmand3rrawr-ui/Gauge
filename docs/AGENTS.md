@@ -16,6 +16,13 @@ runs them in parallel at four moments of the chapter loop and merges their verdi
 agent has a relative weight (Reader Panel 2.0, Showrunner and Archivist 1.5, down to 0.5 for
 Theme, Pacing and Comedian). Advisory agents (Packager, Librarian, Sensitivity) carry no weight.
 
+An agent only votes with a verdict it actually got. If its model call fails, or the answer lacks
+what was asked for, `review` returns nothing and the council leaves the agent out of the score;
+agents with a measured part (Line Editor, Theme, the Archivist's name check) fall back to that
+part alone. Nothing is recorded for a chapter nobody read: no "clean" from the Sensitivity
+Reader, no "zero laughs" from the Comedian. The agents that went unanswered are listed in the
+chapter's front matter under `silent_judges`.
+
 ## The agents
 
 **Reader Panel** (`reader_panel`). Five personas read every draft: the binge reader, the

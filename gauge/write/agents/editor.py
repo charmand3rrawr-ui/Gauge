@@ -87,6 +87,8 @@ Respond with ONLY JSON: {{"fixes": [{{"quote": "exact words", "problem": "what i
 
 CHAPTER:
 {text}""", system=SYSTEM, temperature=0.2, max_tokens=600)
+        if not any(k in j for k in ("fixes", "voice_ok", "notes")):
+            self.no_answer()  # the measured verdict above stands on its own
         for f in (j.get("fixes") or [])[:3] if isinstance(j.get("fixes"), list) else []:
             if isinstance(f, dict) and f.get("quote"):
                 issues.append(f"line: \"{str(f['quote'])[:80]}\" - {str(f.get('problem', ''))[:100]}. Try: {str(f.get('fix', ''))[:120]}")

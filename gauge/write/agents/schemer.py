@@ -89,8 +89,8 @@ Respond with ONLY JSON: {{"consistent": true/false, "antagonist_smart": true/fal
 
 CHAPTER:
 {text}""", system=SYSTEM, temperature=0.2)
-        if not d:
-            return None
+        if not isinstance(d.get("consistent"), bool) and not isinstance(d.get("antagonist_smart"), bool):
+            return self.no_answer()
         score = 1.0
         issues = []
         if d.get("consistent") is False:

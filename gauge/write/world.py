@@ -22,7 +22,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from .. import lexicon
-from ..llm.client import LLM, generate_json
+from ..llm.client import LLM, generate_json, given_number
 from ..text import words
 from . import prompts
 from .schemas import WorldBriefOut, WorldBuildOut, WorldMemoryOut, WorldReviewOut, schema_of
@@ -130,7 +130,8 @@ class WorldBrief(BaseModel):
 
 
 class WorldReview(BaseModel):
-    consistency: float = 1.0
+    consistency: float = 1.0  # 0..1; only a verdict when `answered`
+    answered: bool = True  # False = the model failed or gave no usable score: this review has no vote
     violations: list[dict[str, str]] = Field(default_factory=list)  # {quote, rule, fix}
 
 
@@ -224,15 +225,15 @@ class WorldAgent:
             d = generate_json(self.llm, prompt, system=self.system_prompt(), schema=schema_of(WorldReviewOut),
                               temperature=0.2, max_tokens=600, purpose="world:review")
         except Exception as e:
-            log.warning("world review failed: %s", e)
-            return WorldReview()
+            log.warning("world review failed: %s; it does not vote", e)
+            return WorldReview(answered=False)
         viols = [{"quote": str(v.get("quote", ""))[:200], "rule": str(v.get("rule", ""))[:200], "fix": str(v.get("fix", ""))[:200]}
                  for v in d.get("violations", []) if isinstance(v, dict)] if isinstance(d.get("violations"), list) else []
-        try:
-            score = max(0.0, min(10.0, float(d.get("consistency", 10)))) / 10.0
-        except (TypeError, ValueError):
-            score = 1.0
-        return WorldReview(consistency=score, violations=viols[:5])
+        score = given_number(d.get("consistency"), 0, 10)
+        if score is None:  # violations without a score still reach the reviser; they just carry no vote
+            log.warning("world review came back without a usable consistency score; it does not vote")
+            return WorldReview(violations=viols[:5], answered=False)
+        return WorldReview(consistency=score / 10.0, violations=viols[:5])
 
     def remember(self, chapter_text: str, number: int) -> None:
         prompt = prompts.WORLD_MEMORY_PROMPT.format(number=number, text=chapter_text)

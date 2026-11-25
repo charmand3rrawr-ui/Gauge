@@ -24,7 +24,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from ..llm.client import LLM, generate_json
+from ..llm.client import LLM, generate_json, given_number
 from ..text import tail
 from . import prompts
 from .emotion import Mood, apply_event, baseline, drift_step, speech_directives
@@ -475,7 +475,8 @@ class ReviewIssue(BaseModel):
 
 class CharacterReview(BaseModel):
     name: str
-    consistency: float = 1.0  # 0..1
+    consistency: float = 1.0  # 0..1; only a verdict when `answered`
+    answered: bool = True  # False = the model failed or gave no usable score: this review has no vote
     issues: list[ReviewIssue] = Field(default_factory=list)
 
 
@@ -525,15 +526,18 @@ class CharacterAgent:
             d = generate_json(self.llm, prompt, system=self.c.system_prompt(), schema=schema_of(ReviewOut),
                               temperature=0.2, max_tokens=700, purpose="character:review")
         except Exception as e:
-            log.warning("character review failed for %s: %s", self.c.name, e)
-            return CharacterReview(name=self.c.name)
+            log.warning("character review failed for %s: %s; it does not vote", self.c.name, e)
+            return CharacterReview(name=self.c.name, answered=False)
         issues = []
         for it in d.get("issues", []) if isinstance(d.get("issues"), list) else []:
             if isinstance(it, dict):
                 issues.append(ReviewIssue(quote=str(it.get("quote", ""))[:200], problem=str(it.get("problem", ""))[:300],
                                           fix=str(it.get("fix", ""))[:300]))
-        score = _clamp(d.get("consistency", 10), 0, 10, 10) / 10.0
-        return CharacterReview(name=self.c.name, consistency=score, issues=issues[:5])
+        score = given_number(d.get("consistency"), 0, 10)
+        if score is None:  # complaints without a score still reach the reviser; they just carry no vote
+            log.warning("character review for %s came back without a usable consistency score; it does not vote", self.c.name)
+            return CharacterReview(name=self.c.name, issues=issues[:5], answered=False)
+        return CharacterReview(name=self.c.name, consistency=score / 10.0, issues=issues[:5])
 
     def remember(self, chapter_text: str, number: int, roster: Optional[Roster] = None) -> None:
         prompt = prompts.CHARACTER_MEMORY_PROMPT.format(number=number, name=self.c.name, text=chapter_text,

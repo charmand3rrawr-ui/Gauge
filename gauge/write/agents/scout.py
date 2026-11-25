@@ -75,11 +75,14 @@ Respond with ONLY JSON: {{"claims": [{{"claim": "one sentence", "query": "2-5 wo
 
 CHAPTER:
 {text}""", system=SYSTEM, temperature=0.1, max_tokens=300)
-        claims = [c for c in (d.get("claims") or []) if isinstance(c, dict) and c.get("claim") and c.get("query")] if isinstance(d.get("claims"), list) else []
+        if not isinstance(d.get("claims"), list):
+            return self.no_answer("claims")
+        claims = [c for c in d["claims"] if isinstance(c, dict) and c.get("claim") and c.get("query")]
         if not claims:
             return AgentReview(agent=self.name, score=1.0, data={"claims": 0})
         issues = []
         unsupported = 0
+        checked = 0
         for c in claims[:3]:
             finding = self.scout.search(str(c["query"]), "wikipedia", k=2)
             evidence = "\n".join(s.card(120) for s in finding.snippets) or "(nothing found)"
@@ -88,12 +91,17 @@ Evidence:
 {evidence}
 
 Respond with ONLY JSON: {{"verdict": "supported|contradicted|unknown", "note": "one line"}}""", system=SYSTEM, temperature=0.1, max_tokens=120)
-            verdict = str(v.get("verdict", "unknown")).lower()
+            verdict = str(v.get("verdict") or "").strip().lower()
+            if verdict not in ("supported", "contradicted", "unknown"):
+                continue  # no verdict came back: this claim was not checked
+            checked += 1
             self.state.claims_checked += 1
             if verdict == "contradicted":
                 unsupported += 1
                 issues.append(f"real-world claim looks wrong: \"{str(c['claim'])[:100]}\" - {str(v.get('note', ''))[:120]}")
         self.state.claims_unsupported += unsupported
+        if not checked:
+            return self.no_answer("verify")
         return AgentReview(agent=self.name, score=max(0.0, 1.0 - 0.3 * unsupported), issues=issues,
                            data={"claims": len(claims), "contradicted": unsupported})
 

@@ -64,6 +64,8 @@ Does chapter {ctx.number} carry any motif or touch the question, without stating
 
 CHAPTER:
 {text}""", system=SYSTEM, temperature=0.2, max_tokens=300)
+        if not any(k in d for k in ("motifs_present", "theme_touched", "notes")):
+            self.no_answer()  # the motifs found in the text above stand on their own
         present = sorted(set(present) | set(as_str_list(d.get("motifs_present"), 6, 60)))
         score = 1.0 if present else 0.7
         issues = [] if present else [f"no motif appears; place one of {', '.join(self.state.motifs[:3])} in a detail"]

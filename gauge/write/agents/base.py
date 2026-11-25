@@ -10,6 +10,10 @@ in ``projects/<slug>/agents/<name>.json``, and up to four moments in the chapter
 
 Agents never see each other's prompts; the council merges their outputs. Any of them may be
 switched off in ``config.json`` under ``agents``.
+
+A review is a vote, so an agent whose model call failed or came back without what was asked for
+does not cast one: ``review`` calls ``no_answer()`` and returns ``None`` (or, if part of its verdict
+is measured from the text, returns that part alone). It never fills the gap with a default score.
 """
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from ...llm.client import LLM, generate_json
+from ...llm.client import LLM, generate_json, given_number
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +67,7 @@ class StoryAgent:
         self.dir = project_dir / "agents"
         self.path = self.dir / f"{self.name}.json"
         self.options = options or {}
+        self.silent = False  # the last review's model call gave nothing usable (set by no_answer, reset by the council)
         self.state = self.state_model()
         if self.path.exists():
             try:
@@ -96,6 +101,13 @@ class StoryAgent:
         return self.state.model_dump_json(indent=2)
 
     # ---- helpers -----------------------------------------------------------
+    def no_answer(self, op: str = "review") -> None:
+        """The model did not answer this agent's question. Record it and return ``None``: the review
+        either becomes ``return self.no_answer()`` (no vote) or carries on with its measured part."""
+        self.silent = True
+        log.warning("%s.%s: the model gave no usable answer, so nothing is scored on its behalf", self.name, op)
+        return None
+
     def marker(self, op: str) -> str:
         """First line of every prompt: lets the offline FakeLLM route, and makes logs greppable."""
         return f"[agent:{self.name}:{op}]"
@@ -124,6 +136,12 @@ def as_str_list(v: Any, limit: int = 8, maxlen: int = 300) -> list[str]:
     if isinstance(v, str) and v.strip():
         return [v.strip()[:maxlen]]
     return []
+
+
+def given01(v: Any) -> Optional[float]:
+    """A 0..1 value the model actually gave, else ``None`` (see ``given_number``). Use this for anything
+    that becomes a vote; ``clamp01`` / ``score10`` invent a value when the model gave none."""
+    return given_number(v, 0.0, 1.0)
 
 
 def clamp01(v: Any, default: float = 0.5) -> float:

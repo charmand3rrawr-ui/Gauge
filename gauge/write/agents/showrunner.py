@@ -134,6 +134,11 @@ Respond with ONLY JSON: {{"advanced": ["ledger items this chapter visibly moved"
 
 CHAPTER:
 {text}""", system=SYSTEM, temperature=0.2)
+        self._last = {}
+        if not any(k in d for k in ("advanced", "paid", "stalling")):
+            # Unread, not "nothing moved": scoring the ledger against an empty answer would blame the
+            # chapter for every overdue promise, or wave it through at full marks.
+            return self.no_answer()
         paid, advanced = as_str_list(d.get("paid"), 6), as_str_list(d.get("advanced"), 8)
         stalling = bool(d.get("stalling", False)) and not paid and not advanced
         gap = ctx.number - self.state.last_payoff_chapter if self.state.last_payoff_chapter else 0

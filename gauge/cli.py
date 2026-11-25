@@ -503,21 +503,24 @@ def write(c: Ctx, name: str, chapters: int, fresh: bool, seed: Optional[int]) ->
         sys.exit(1)
     p = pipe.open_project(name)
     for res in _write_or_refuse(pipe, p, chapters, fresh=fresh):
+        judged = f"judged {res.critique.judged:.2f}" if res.critique.judged is not None else "[yellow]judge did not answer[/]"
         console.print(f"[green]Chapter {res.number}[/] {res.title}  score={res.score:.2f} "
-                      f"(measured {res.critique.measured:.2f} / judged {res.critique.judged:.2f}) "
+                      f"(measured {res.critique.measured:.2f} / {judged}) "
                       f"revisions={res.revisions}{'  [resumed from checkpoint]' if res.resumed else ''}\n  -> {res.path}")
         steps = "  ".join(f"{k} {v:.0f}s" for k, v in res.timings.items() if k != "total")
         console.print(f"  timing: {steps}  | total {res.timings.get('total', 0):.0f}s, "
                       f"{res.llm_calls} LLM calls ({res.llm_seconds:.0f}s in model)")
+        if res.critique.silent:
+            console.print(f"  [yellow]no verdict from: {', '.join(res.critique.silent)}[/] (not counted in the score)")
         if res.cast:
-            console.print(f"  cast: {', '.join(res.cast)}  in-character consistency="
-                          f"{sum(r.consistency for r in res.character_reviews) / len(res.character_reviews):.2f}"
-                          if res.character_reviews else f"  cast: {', '.join(res.cast)}")
+            voted = [r.consistency for r in res.character_reviews if r.answered]
+            console.print(f"  cast: {', '.join(res.cast)}  in-character consistency={sum(voted) / len(voted):.2f}"
+                          if voted else f"  cast: {', '.join(res.cast)}")
         for r in res.character_reviews:
             for i in r.issues[:1]:
                 console.print(f"  {r.name}: \"{i.quote}\" - {i.problem}")
         extras = []
-        if res.world_review is not None:
+        if res.world_review is not None and res.world_review.answered:
             extras.append(f"world {res.world_review.consistency:.2f}")
         if res.novelty is not None:
             extras.append(f"novelty {res.novelty.score:.2f}")

@@ -433,8 +433,10 @@ class WritePipeline:
         return [r for r in reviews if r is not None]
 
     @staticmethod
-    def _consistency(reviews: list[CharacterReview]) -> float:
-        return sum(r.consistency for r in reviews) / len(reviews) if reviews else 1.0
+    def _consistency(reviews: list[CharacterReview]) -> Optional[float]:
+        """Mean in-character consistency over the characters who actually gave a verdict; None if none did."""
+        given = [r.consistency for r in reviews if r.answered]
+        return sum(given) / len(given) if given else None
 
     @staticmethod
     def _character_problems(reviews: list[CharacterReview]) -> list[str]:
@@ -559,8 +561,9 @@ class WritePipeline:
             if self.cfg.write.checkpoint_drafts:
                 project.save_checkpoint(n, f"revision-{revisions}", text, {"plan_title": plan.title, "cast": cast_names,
                                                                              "revisions": revisions})
-            # Only characters who had complaints are asked again; the others' verdicts stand.
-            flagged = {r.name for r in reviews if r.issues}
+            # Only characters who had complaints are asked again; the others' verdicts stand. One who
+            # gave no verdict has nothing to stand on, so is asked again too.
+            flagged = {r.name for r in reviews if r.issues or not r.answered}
             crit, new_reviews, wrev, nov, agent_revs = self._critique(text, plan, n, roster, cast_names, world_state, previous_texts,
                                                                       only=flagged or None, previous=reviews, council=council, ctx=ctx)
             reviews = new_reviews
@@ -611,12 +614,20 @@ class WritePipeline:
             except Exception as e:
                 log.warning("A/B titling failed for ch %d: %s", n, e)
 
+        if best.silent:
+            log.warning("ch %d was scored without %s: no usable verdict came back, so they had no vote%s", n,
+                        ", ".join(best.silent), "" if best.judge_answered else " (the score rests on measured checks)")
+        # 1.0 when no character was reviewed at all (as before); null when they were asked and none answered.
+        consistency = self._consistency(best_reviews) if best_reviews else 1.0
         meta = {
             "title": plan.title, "score": round(best.score, 3), "measured": round(best.measured, 3),
-            "judged": round(best.judged, 3), "rubric": best.rubric, "revisions": revisions,
+            # judged is null, never a default, when the judge did not answer; silent_judges names everyone
+            # who was asked for a verdict and gave none, so had no part in the score.
+            "judged": round(best.judged, 3) if best.judged is not None else None, "rubric": best.rubric,
+            "judge_answered": best.judge_answered, "silent_judges": best.silent, "revisions": revisions,
             "words": len(best_text.split()), "written_at": utcnow().isoformat(),
-            "cast": cast_names, "character_consistency": round(self._consistency(best_reviews), 3),
-            "world_consistency": round(best_wrev.consistency, 3) if best_wrev else None,
+            "cast": cast_names, "character_consistency": round(consistency, 3) if consistency is not None else None,
+            "world_consistency": round(best_wrev.consistency, 3) if best_wrev and best_wrev.answered else None,
             "novelty": round(best_nov.score, 3) if best_nov else None,
             "direction": project.state.current_direction[:120],
             "agents": AgentCouncil.summary(best_agents),
@@ -692,14 +703,21 @@ class WritePipeline:
         if only is not None and previous:
             redone = {r.name for r in reviews}
             reviews = reviews + [r for r in previous if r.name not in redone]
-        if reviews:
+        # A reviewer whose model failed or returned no score has no share of the chapter score: its
+        # weight stays with the parts that were actually scored. It is named in crit.silent instead.
+        crit.silent += [f"character:{r.name}" for r in reviews if not r.answered]
+        consistency = self._consistency(reviews)
+        if consistency is not None:
             w = self.cfg.write.character_weight
-            crit.score = (1 - w) * crit.score + w * self._consistency(reviews)
+            crit.score = (1 - w) * crit.score + w * consistency
         wrev = None
         if world_state is not None and self.cfg.write.world_weight > 0:
             wrev = WorldAgent(self.fast_llm, world_state, self.cfg.write.world_agency, realism=self.cfg.write.world_realism).review(text, n)
-            w = self.cfg.write.world_weight
-            crit.score = (1 - w) * crit.score + w * wrev.consistency
+            if wrev.answered:
+                w = self.cfg.write.world_weight
+                crit.score = (1 - w) * crit.score + w * wrev.consistency
+            else:
+                crit.silent.append("world")
         nov = None
         if previous_texts and self.cfg.write.novelty_weight > 0:
             nov = self.novelty.report(text, previous_texts)
@@ -717,6 +735,7 @@ class WritePipeline:
         agent_revs: list[AgentReview] = []
         if council is not None and council.agents and ctx is not None:
             agent_revs = council.review(text, ctx)
+            crit.silent += [f"agent:{name}" for name in council.silent]
             cs = council.score(agent_revs)
             if cs is not None:
                 w = council.weight

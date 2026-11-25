@@ -118,6 +118,14 @@ CHAPTER:
             return AgentReview(agent=self.name, score=max(0.0, 1.0 - 0.1 * len(drift)), issues=drift_issues,
                                data={"conflicts": 0, "facts_checked": 0, "name_drift": [v for v, *_ in drift]})
         new = self._extract("review", text, ctx.number)
+        if not new:
+            # No facts came back (the model failed, or extracted nothing), so nothing was compared with
+            # canon. That is not "no contradictions": only the measured name check stands.
+            self.no_answer()
+            if not drift:
+                return None
+            return AgentReview(agent=self.name, score=max(0.0, 1.0 - 0.1 * len(drift)), issues=drift_issues,
+                               data={"conflicts": 0, "facts_checked": 0, "name_drift": [v for v, *_ in drift]})
         conflicts = self.contradictions(new)
         issues = [f"contradiction: {c['subject']} / {c['attribute']} was '{c['was']}' (ch {c['was_chapter']}), now '{c['now']}' at \"{c['quote']}\""
                   for c in conflicts[:4]]

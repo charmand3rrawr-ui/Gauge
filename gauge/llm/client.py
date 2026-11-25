@@ -596,6 +596,20 @@ def extract_json(text: str) -> dict[str, Any]:
     return json.loads(text[start:end + 1])
 
 
+def given_number(v: Any, lo: float, hi: float) -> Optional[float]:
+    """A score the model actually gave, on the scale it was asked to use; otherwise ``None``.
+
+    Missing, null, non-numeric, NaN and out-of-scale values are all "no answer". Callers leave that
+    judge out of the score instead of filling in a default: a default is a vote nobody cast."""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if lo <= x <= hi else None  # NaN fails both comparisons
+
+
 def generate_json(llm: LLM, prompt: str, system: str = "", schema: Optional[dict[str, Any]] = None,
                   temperature: float = 0.3, max_tokens: int = 800, purpose: str = "json",
                   repair: bool = True) -> dict[str, Any]:

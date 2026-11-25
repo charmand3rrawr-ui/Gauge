@@ -65,6 +65,12 @@ cli.py           click commands
      1-10 rubric (hook, momentum, payoff, cliffhanger, clarity). Blended 50/50.
    - Each present character's `CharacterAgent.review()` scores their own portrayal; the chapter
      score is blended with that consistency (`write.character_weight`).
+   - A judge that did not answer does not vote. If the rubric call fails or returns no usable
+     score, the chapter is scored on the measured part alone (`judged` is null); a rubric answered
+     in part votes with the share it answered. A character, world or agent review whose model
+     failed or left the score out is left out of the blend rather than counted as a default.
+     Everyone who was asked and gave no verdict is listed in `Critique.silent` and in the chapter's
+     front matter as `silent_judges`, next to `judge_answered`.
    - If below `min_acceptable_score`, `Drafter.revise()` is called with the editor's notes, the
      measured issues and the characters' own corrections, up to `max_revisions` times. The best
      version is kept. An unreadable draft is drafted again rather than revised; if every attempt is

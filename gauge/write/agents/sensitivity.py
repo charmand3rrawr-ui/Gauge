@@ -33,6 +33,9 @@ Respond with ONLY JSON: {{"flags": [{{"category": "...", "severity": "mild|moder
 
 CHAPTER:
 {text}""", system=SYSTEM, temperature=0.1, max_tokens=500)
+        self._last = None
+        if not isinstance(d.get("flags"), list) and not isinstance(d.get("ok_for_general"), bool):
+            return self.no_answer()  # unread is not "clean": no verdict, and nothing is recorded for the chapter
         flags = [f for f in (d.get("flags") or []) if isinstance(f, dict) and f.get("category")] if isinstance(d.get("flags"), list) else []
         flags = [{"category": str(f["category"])[:40], "severity": str(f.get("severity", "mild"))[:10], "quote": str(f.get("quote", ""))[:80],
                   "note": str(f.get("note", ""))[:120]} for f in flags][:8]
@@ -44,7 +47,9 @@ CHAPTER:
                            notes=f"{len(flags)} flag(s)" if flags else "", data={"flags": flags, "ok_for_general": bool(d.get("ok_for_general", True))})
 
     def remember(self, text: str, ctx: SceneContext) -> None:
-        self.state.flags[ctx.number] = getattr(self, "_last", [])
+        last = getattr(self, "_last", [])
+        if last is not None:
+            self.state.flags[ctx.number] = last
 
     def report(self) -> str:
         return "\n".join(f"ch {n}: " + "; ".join(f"{f['severity']} {f['category']}" for f in fl) if fl else f"ch {n}: clean"
