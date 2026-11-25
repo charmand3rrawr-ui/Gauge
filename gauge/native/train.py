@@ -195,7 +195,10 @@ class NativeTrainer:
 
     # ---- training ------------------------------------------------------------------
     def train(self, docs: list[tuple[str, str]], mcfg: ModelConfig, tcfg: TrainConfig, resume: bool = False,
-              progress: Optional[Callable[[dict[str, Any]], None]] = None, time_budget_s: Optional[float] = None) -> dict[str, Any]:
+              progress: Optional[Callable[[dict[str, Any]], None]] = None, time_budget_s: Optional[float] = None,
+              should_stop: Optional[Callable[[], bool]] = None) -> dict[str, Any]:
+        """`should_stop` is asked after every step; when it says yes the model is saved and training returns,
+        so a pause never loses work and `resume=True` carries on from that step."""
         rng = np.random.default_rng(tcfg.seed)
         if resume and self.exists():
             model, tok = self.load(device=tcfg.device)
@@ -225,7 +228,13 @@ class NativeTrainer:
         step = step0
         total = step0 + tcfg.steps
         log.info("training on %s: %s params, %d train tokens (%d chat)", device_name(xp), f"{model.n_params():,}", len(train_data), len(chat))
+        from .. import limit
+
+        governor = limit.compute()
+        on_gpu = xp is not np
+        stopped = False
         while step < total:
+            step_t0 = time.monotonic()
             # Curriculum: mostly prose early, instruction rows concentrated late (they teach behaviour).
             frac = (step - step0) / max(1, tcfg.steps)
             grads = None
@@ -262,10 +271,17 @@ class NativeTrainer:
             if time_budget_s is not None and time.monotonic() - t0 > time_budget_s:
                 self._save(model, step, tokens_seen, last_val, losses[-1])
                 break
+            if should_stop is not None and should_stop():
+                self._save(model, step, tokens_seen, last_val, losses[-1])
+                stopped = True
+                break
+            # The capacity limit: rest after each step so this device averages its share (a graphics card
+            # runs flat out while it works; the processor is already pinned to its cores).
+            governor.pace(time.monotonic() - step_t0, 1.0 if on_gpu else None)
         return {"step": step, "loss": round(float(np.mean(losses[-50:])), 4) if losses else None,
                 "val_loss": round(last_val, 4) if last_val is not None else None, "tokens_seen": tokens_seen,
                 "seconds": round(time.monotonic() - t0, 1), "n_params": model.n_params(), "corpus_tokens": int(len(data)),
-                "device": device_name(xp), "arch": model.cfg.arch}
+                "device": device_name(xp), "arch": model.cfg.arch, "stopped": stopped}
 
     def evaluate(self, model: GaugeLM, data: np.ndarray, rng: np.random.Generator, batches_n: int = 4) -> float:
         if len(data) <= model.cfg.block_size + 1:

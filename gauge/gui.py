@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import traceback
 from collections.abc import Callable
 from pathlib import Path
@@ -20,21 +21,21 @@ log = logging.getLogger(__name__)
 
 # What "Teach Gauge" can read.
 MATERIAL_EXTS = {".txt", ".md", ".markdown", ".html", ".htm", ".docx", ".epub"}
-TEACH_INTRO = ("Give Gauge books or your own writing to learn from. It studies them, keeps the strongest passages "
-               "as examples and learns craft techniques from them, then uses both every time it writes. "
-               "Everything stays on this computer.\n\n"
-               "Add files: each file is one book (.txt .md .docx .epub .html). Add a folder: a folder of chapter "
-               "files is one book; a folder of books is a whole library.\n\n"
-               "Use only writing that is yours or that you have the right to use, such as your own work or "
-               "public-domain books. This teaches Gauge what to aim for; it does not rebuild the downloaded AI "
-               "model itself.")
+TEACH_INTRO = ("Give Gauge books or your own writing to learn from. It keeps the strongest passages as examples and "
+               "learns craft techniques from them, then uses both every time it writes. Everything stays on this computer.\n"
+               "Add files: each file is one book (.txt .md .docx .epub .html). Add a folder: a folder of chapter files "
+               "is one book; a folder of books is a library.\n"
+               "Use only writing that is yours or that you have the right to use. This teaches Gauge what to aim for; it "
+               "does not rebuild the downloaded AI model itself.")
 ENGINE_NOTE = ("GaugeLM is Gauge's own small model. It has to be trained before it can write, and it writes far more "
                "roughly than the downloaded model. It learns from your library, from every chapter written for your "
-               "stories, and from the downloaded model, which teaches it worked examples each time you press Train. "
-               "So it keeps learning while the downloaded model does the writing. Training takes hours in total; "
-               "train a little at a time and it carries on from where it stopped.")
-NOT_TRAINED = ("GaugeLM has not been trained yet. Press Teach Gauge, add books or your own writing, "
-               "then press Train GaugeLM.")
+               "stories, and from the downloaded model, which teaches it worked examples each time training starts. "
+               "So it keeps learning while the downloaded model does the writing. Training takes hours in total: "
+               "Start training whenever you like, Pause training when you need the computer, and it carries on from "
+               "where it stopped.")
+NOT_TRAINED = ("GaugeLM has not been trained yet. Press Teach Gauge and add books or your own writing, "
+               "then press Change the AI and Start training.")
+UNTIL_PAUSED = "until I pause"
 
 
 class StudioController:
@@ -44,6 +45,8 @@ class StudioController:
         self.cfg = cfg
         self.db = db
         self._pipe = None
+        self._pause = threading.Event()          # set by pause_training(); the trainer checks it after each step
+        self._training: dict[str, Any] = {"running": False, "step": 0, "loss": None}
 
     def status(self) -> dict[str, Any]:
         from .llm import make_llm
@@ -52,7 +55,23 @@ class StudioController:
         llm = make_llm(self.cfg.llm)
         eng = self.engine()
         return {"llm_ok": eng["ready"], "llm": llm.describe(), "model": self.cfg.llm.model,
-                "projects": Project.list(self.cfg.projects_dir), "engine": eng["label"], "is_gaugelm": eng["is_gaugelm"]}
+                "projects": Project.list(self.cfg.projects_dir), "engine": eng["label"], "is_gaugelm": eng["is_gaugelm"],
+                "capacity": self.capacity(), "version": self.version()}
+
+    def capacity(self) -> str:
+        """One sentence on how much of this computer Gauge may use."""
+        from . import limit
+
+        return limit.describe(self.cfg)
+
+    def version(self) -> str:
+        """The installed version (first seven characters), or '' for a copy that was not installed by the kit."""
+        marker = Path(__file__).resolve().parents[1] / "installer" / "installed-version.txt"
+        try:
+            parts = marker.read_text(encoding="utf-8-sig").split()
+        except OSError:
+            return ""
+        return parts[-1][:7] if parts else ""
 
     # ---- which AI writes ---------------------------------------------------------------
     def engine(self) -> dict[str, Any]:
@@ -110,16 +129,29 @@ class StudioController:
         eng = self.engine()
         if eng["is_gaugelm"]:
             msg = "Gauge now writes with GaugeLM, its own model, using the lean writing room and shorter chapters. "
-            msg += "It is ready to write." if eng["ready"] else "It is not trained yet: add material, then press Train GaugeLM."
+            msg += "It is ready to write." if eng["ready"] else "It is not trained yet: add material, then press Start training."
         else:
             msg = f"Gauge now writes with {eng['label']}."
             if not eng["ready"]:
                 msg += " It is not answering: open the Ollama app."
         return {**eng, "message": msg}
 
-    def train_gaugelm(self, minutes: float = 30, progress: Optional[Callable[[dict[str, Any]], None]] = None,
+    def pause_training(self) -> dict[str, Any]:
+        """Ask a running training session to stop. It stops after the step it is on, with everything saved;
+        starting again carries on from there."""
+        if not self._training["running"]:
+            return {"running": False, "message": "Nothing is training right now."}
+        self._pause.set()
+        return {"running": True, "message": "Pausing: finishing the current step and saving. This takes a few seconds."}
+
+    def training(self) -> dict[str, Any]:
+        """Is GaugeLM training right now, and how far has it got?"""
+        return dict(self._training, pause_requested=self._pause.is_set())
+
+    def train_gaugelm(self, minutes: Optional[float] = 30, progress: Optional[Callable[[dict[str, Any]], None]] = None,
                       teach: bool = True) -> dict[str, Any]:
-        """Train GaugeLM for about `minutes`, carrying on from wherever it stopped before.
+        """Start training GaugeLM, or carry on from wherever it stopped. It runs for about `minutes`, or with
+        `minutes=None` until `pause_training()` is called. Either way a pause stops it cleanly.
 
         It works whichever model is doing the writing; that is the point. GaugeLM learns from three things:
         the library; every chapter written for your stories, whoever wrote it; and worked examples of
@@ -130,6 +162,21 @@ class StudioController:
         chapters written for you and the examples made on this machine. Scraped third-party fiction is
         left out."""
         from .learn.corpus import permitted_texts
+
+        prose = permitted_texts(self.db, self.cfg.projects_dir)
+        if not prose:
+            return {"trained": False, "step": 0, "lessons": 0, "paused": False,
+                    "message": "There is nothing to train on yet. Add books or your own writing first."}
+        self._pause.clear()
+        self._training.update(running=True, step=0, loss=None)
+        try:
+            return self._train_session(prose, minutes, progress, teach)
+        finally:
+            self._training["running"] = False
+            self._pause.clear()
+
+    def _train_session(self, prose: list[tuple[str, str]], minutes: Optional[float],
+                       progress: Optional[Callable[[dict[str, Any]], None]], teach: bool) -> dict[str, Any]:
         from .native import (
             ModelConfig,
             NativeTrainer,
@@ -139,10 +186,6 @@ class StudioController:
             preset_config,
         )
 
-        prose = permitted_texts(self.db, self.cfg.projects_dir)
-        if not prose:
-            return {"trained": False, "step": 0, "lessons": 0,
-                    "message": "There is nothing to train on yet. Add books or your own writing first."}
         datasets = self.cfg.models_dir / "datasets"
         lessons = 0
         if teach and self.cfg.llm.provider != "native":
@@ -152,12 +195,18 @@ class StudioController:
             if teacher.available():
                 from .native.distill import distill
 
-                want = max(4, min(60, round(float(minutes) / 3)))
+                want = 8 if minutes is None else max(4, min(60, round(float(minutes) / 3)))
                 out = datasets / "distill.jsonl"
                 have = sum(1 for _ in out.open(encoding="utf-8")) if out.exists() else 0
                 try:
-                    # Seeded by how many lessons exist, so each press studies different passages.
-                    lessons = int(distill(self.db, teacher, out, want, seed=have).get("rows", 0))
+                    # Two at a time, so a pause is noticed between them. Seeded by how many lessons exist,
+                    # so each session studies different passages.
+                    while lessons < want and not self._pause.is_set():
+                        got = int(distill(self.db, teacher, out, min(2, want - lessons), seed=have + lessons,
+                                          task_offset=have + lessons).get("rows", 0))
+                        if got == 0:
+                            break
+                        lessons += got
                 except Exception as e:  # a teacher that stumbles must not stop the training
                     log.warning("could not collect lessons from the downloaded model: %s", e)
         docs = dedup(prose + instruction_rows(datasets))
@@ -170,23 +219,50 @@ class StudioController:
                            device=n.device, eval_every=25, checkpoint_every=50)
         trainer = NativeTrainer(self.cfg.native_dir)
         resumed = trainer.exists()
+        started = time.monotonic()
+        deadline = None if minutes is None else started + max(0.005, float(minutes)) * 60
+
+        def note(rec: dict[str, Any]) -> None:
+            self._training.update(step=rec.get("step", 0), loss=rec.get("loss"))
+            if progress:
+                progress(rec)
+
+        res: dict[str, Any] = {}
         try:
-            res = trainer.train(docs, mcfg, tcfg, resume=resumed, progress=progress, time_budget_s=max(0.05, float(minutes)) * 60)
+            # One pass of the trainer is `native.steps` long. Keep going, pass after pass, until the time is
+            # up or a pause is asked for; every pass carries on from the checkpoint the last one saved.
+            while not self._pause.is_set():
+                left = None if deadline is None else deadline - time.monotonic()
+                if left is not None and left <= 0:
+                    break
+                res = trainer.train(docs, mcfg, tcfg, resume=trainer.exists(), progress=note, time_budget_s=left,
+                                    should_stop=self._pause.is_set)
+                self._training.update(step=int(res["step"]), loss=res.get("loss"))
+                if res.get("stopped") or deadline is None and self._pause.is_set():
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
         except ValueError as e:  # the corpus is too small to cut into training windows
-            return {"trained": False, "step": 0, "lessons": lessons,
+            return {"trained": False, "step": 0, "lessons": lessons, "paused": False,
                     "message": f"Not enough text to train on yet ({e}). Add more material, a few books is a good start, and try again."}
+        if not res:
+            return {"trained": False, "step": int(trainer.status().get("step", 0) or 0), "lessons": lessons, "paused": True,
+                    "message": "Paused before training began. Press Start training to carry on."}
         self._pipe = None
+        paused = bool(res.get("stopped")) or self._pause.is_set()
         chars = sum(len(t) for _, t in docs)
-        mins = max(1, round(float(res["seconds"]) / 60))
-        msg = (f"Trained GaugeLM for {mins} minute{'' if mins == 1 else 's'} on {len(docs) - examples} chapters "
-               f"and {examples} worked example{'' if examples == 1 else 's'} ({chars:,} characters). ")
+        mins = max(1, round((time.monotonic() - started) / 60))
+        msg = ("Training paused" if paused else "Trained GaugeLM") + f" after {mins} minute{'' if mins == 1 else 's'} on " \
+              f"{len(docs) - examples} chapters and {examples} worked example{'' if examples == 1 else 's'} ({chars:,} characters). "
         if lessons:
             msg += f"The downloaded model taught it {lessons} new example{'' if lessons == 1 else 's'} first. "
-        msg += (f"It is now at step {res['step']}" + (f", loss {res['loss']} (lower is better)" if res.get("loss") is not None else "") + ". "
+        msg += (f"It is at step {res['step']}" + (f", loss {res['loss']} (lower is better)" if res.get("loss") is not None else "") + ". "
                 + ("It carried on from where it stopped. " if resumed else "")
-                + "Train again whenever you like; it keeps improving for many hours.")
-        return {"trained": True, "step": int(res["step"]), "loss": res.get("loss"), "seconds": res["seconds"],
-                "resumed": resumed, "documents": len(docs), "examples": examples, "lessons": lessons, "message": msg}
+                + ("Progress is saved; press Start training to carry on." if paused
+                   else "Start training again whenever you like; it keeps improving for many hours."))
+        return {"trained": True, "step": int(res["step"]), "loss": res.get("loss"), "seconds": round(time.monotonic() - started, 1),
+                "resumed": resumed, "documents": len(docs), "examples": examples, "lessons": lessons, "paused": paused,
+                "message": msg}
 
     def _require_engine(self) -> None:
         """A clear sentence instead of a stack trace when GaugeLM is selected but has never been trained."""
@@ -386,7 +462,7 @@ class StudioController:
         else:
             msg += " To also learn what makes chapters work, give several books a star rating when you add them."
         if self.cfg.llm.provider == "native":
-            msg += " GaugeLM itself is trained separately: press Train GaugeLM."
+            msg += " GaugeLM itself is trained separately: press Change the AI, then Start training."
         return {"chapters": total, "books": books, "examples": examples, "techniques": techniques, "model": model,
                 "message": msg}
 
@@ -406,7 +482,22 @@ class StudioController:
         return out
 
 
+def _fit(widget: Any, width: int, height: int) -> str:
+    """A window size that fits the screen it opens on: the wanted size, or less on a small display."""
+    try:
+        sw, sh = int(widget.winfo_screenwidth()), int(widget.winfo_screenheight())
+    except Exception:  # a display that will not say how big it is
+        sw, sh = 1280, 800
+    return f"{min(width, max(640, sw - 80))}x{min(height, max(480, sh - 120))}"
+
+
 def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - needs a display
+    """The Studio window.
+
+    Layout rule, learned the hard way: nothing important may depend on the window being tall. The buttons
+    are placed before the chapter list, so when space is short it is the list that shrinks, never a button
+    that falls off the bottom; the window is sized to the screen; and every action is also in the menu bar,
+    which is always visible."""
     try:
         import tkinter as tk
         from tkinter import messagebox, scrolledtext, simpledialog, ttk
@@ -415,42 +506,68 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
 
     ctl = StudioController(cfg, db)
     root = tk.Tk()
-    root.title("Gauge Studio")
-    root.geometry("1000x720")
-    root.minsize(820, 600)
-    big = ("Segoe UI", 14)
-    huge = ("Segoe UI", 20, "bold")
+    version = ctl.version()
+    root.title("Gauge Studio" + (f"  (version {version})" if version else ""))
+    root.geometry(_fit(root, 1100, 860))
+    root.minsize(820, 560)
+    big = ("Segoe UI", 13)
+    mid = ("Segoe UI", 11)
+    small = ("Segoe UI", 10)
+    huge = ("Segoe UI", 17, "bold")
     style = ttk.Style(root)
     try:
         style.theme_use("vista")
     except tk.TclError:
         pass
-    style.configure("Big.TButton", font=big, padding=10)
+    style.configure("Big.TButton", font=big, padding=8)
+    style.configure("Mid.TButton", font=mid, padding=6)
     style.configure("TLabel", font=big)
 
     state: dict[str, Any] = {"project": None, "busy": False}
-    left = ttk.Frame(root, padding=16)
+    left = ttk.Frame(root, padding=14)
     left.pack(side="left", fill="y")
-    right = ttk.Frame(root, padding=16)
+    right = ttk.Frame(root, padding=14)
     right.pack(side="right", fill="both", expand=True)
 
+    # ---- left column, top: what is going on, and the idea box
     status_var = tk.StringVar(value="Checking the story engine...")
-    ttk.Label(left, textvariable=status_var, wraplength=360).pack(anchor="w", pady=(0, 12))
-    ttk.Label(left, text="1. What is your story about?", font=huge).pack(anchor="w")
-    idea = scrolledtext.ScrolledText(left, width=40, height=7, font=big, wrap="word")
-    idea.pack(pady=6)
+    ttk.Label(left, textvariable=status_var, wraplength=400, font=mid).pack(anchor="w")
+    engine_line = tk.StringVar(value="")
+    ttk.Label(left, textvariable=engine_line, wraplength=400, font=("Segoe UI", 11, "bold")).pack(anchor="w")
+    capacity_line = tk.StringVar(value=ctl.capacity())
+    ttk.Label(left, textvariable=capacity_line, wraplength=400, font=small).pack(anchor="w", pady=(0, 8))
+    ttk.Label(left, text="What is your story about?", font=huge).pack(anchor="w")
+    idea = scrolledtext.ScrolledText(left, width=40, height=4, font=big, wrap="word")
+    idea.pack(fill="x", pady=4)
     idea.insert("1.0", "A kid who finds a dragon egg in the school lost-and-found...")
+    start_row = ttk.Frame(left)
+    start_row.pack(fill="x")
+
+    # ---- left column, bottom: the buttons. Packed BEFORE the chapter list so they always get their space.
+    bottom = ttk.Frame(left)
+    bottom.pack(side="bottom", fill="x")
+    write_row = ttk.Frame(bottom)
+    write_row.pack(fill="x", pady=(6, 2))
+    grid = ttk.Frame(bottom)
+    grid.pack(fill="x")
+    grid.columnconfigure(0, weight=1, uniform="half")
+    grid.columnconfigure(1, weight=1, uniform="half")
+
+    # ---- left column, middle: the story and its chapters. This is the part that shrinks.
     proj_var = tk.StringVar(value="No story yet")
-    ttk.Label(left, textvariable=proj_var, font=("Segoe UI", 12, "italic")).pack(anchor="w", pady=(10, 0))
+    ttk.Label(left, textvariable=proj_var, font=("Segoe UI", 11, "italic")).pack(anchor="w", pady=(8, 0))
     progress = ttk.Progressbar(left, mode="indeterminate", length=360)
-    progress.pack(pady=8)
-    chapters_box = tk.Listbox(left, font=big, height=8)
-    chapters_box.pack(fill="x", pady=6)
+    progress.pack(fill="x", pady=4)
+    chapters_box = tk.Listbox(left, font=big, height=4)
+    chapters_box.pack(fill="both", expand=True, pady=4)
+
     reader = scrolledtext.ScrolledText(right, font=("Georgia", 14), wrap="word", padx=16, pady=16)
     reader.pack(fill="both", expand=True)
     reader.insert("1.0", "Your chapters will appear here.\n\n1. Type your idea on the left.\n2. Press START MY STORY.\n"
                          "3. Press WRITE THE NEXT CHAPTER whenever you want more.\n4. Click a chapter to read it.\n\n"
-                         "Want Gauge to learn from books or your own writing? Press Teach Gauge.")
+                         "Teach Gauge: give it books or your own writing to learn from.\n"
+                         "Change the AI: choose which model writes, and train Gauge's own.\n"
+                         "Both are also in the menu at the top of this window.")
     buttons: list[Any] = []
 
     def set_busy(flag: bool, msg: str = "") -> None:
@@ -477,6 +594,18 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
                                        messagebox.showerror("Gauge", f"{err}\n\nIf this keeps happening, run 'gauge doctor'.")))
 
         threading.Thread(target=target, daemon=True).start()
+
+    def show_engine() -> None:
+        """Say which AI writes and whether it can, on the main window."""
+        eng = ctl.engine()
+        engine_line.set("Writing with: " + eng["label"])
+        capacity_line.set(ctl.capacity())
+        if eng["ready"]:
+            status_var.set("Story engine ready.")
+        elif eng["is_gaugelm"]:
+            status_var.set(NOT_TRAINED)
+        else:
+            status_var.set("Story engine is OFF. Open the Ollama app (the llama icon), then restart Gauge Studio.")
 
     def refresh_chapters() -> None:
         chapters_box.delete(0, "end")
@@ -554,44 +683,60 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     def on_export() -> None:
         if state["project"]:
             messagebox.showinfo("Gauge", f"Saved the whole story to:\n{ctl.export_story(state['project'])}")
+        else:
+            messagebox.showinfo("Gauge", "Start a story first!")
 
-    def on_teach() -> None:
-        """Add books or your own writing to the library, then have Gauge learn from them."""
-        from tkinter import filedialog
-
+    def dialog(title: str, width: int, height: int) -> tuple[Any, Any, Callable[[], bool], Any, Callable[..., None]]:
+        """A small window with a status line and a starter for background jobs that report into it."""
         win = tk.Toplevel(root)
-        win.title("Teach Gauge")
-        win.geometry("800x780")
-        frame = ttk.Frame(win, padding=16)
+        win.title(title)
+        win.geometry(_fit(root, width, height))
+        frame = ttk.Frame(win, padding=14)
         frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text="Teach Gauge", font=huge).pack(anchor="w")
-        ttk.Label(frame, text=TEACH_INTRO, wraplength=730, font=("Segoe UI", 11)).pack(anchor="w", pady=(4, 10))
-        rate_row = ttk.Frame(frame)
-        rate_row.pack(fill="x")
-        ttk.Label(rate_row, text="How good is what you are adding? (optional)", font=("Segoe UI", 11)).pack(side="left")
-        stars_var = tk.StringVar(value="not rated")
-        ttk.Combobox(rate_row, textvariable=stars_var, values=["not rated", "1", "2", "3", "4", "5"], state="readonly",
-                     width=10).pack(side="left", padx=8)
-        teach_buttons = ttk.Frame(frame)
-        teach_buttons.pack(fill="x", pady=(10, 4))
-        ttk.Label(frame, text="In the library", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(8, 0))
-        lib_box = tk.Listbox(frame, font=("Segoe UI", 11), height=6)
-        lib_box.pack(fill="both", expand=True, pady=6)
-        ttk.Label(frame, text="Which AI writes", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(6, 0))
-        engine_var = tk.StringVar(value="")
-        ttk.Label(frame, textvariable=engine_var, wraplength=730, font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        ttk.Label(frame, text=ENGINE_NOTE, wraplength=730, font=("Segoe UI", 10)).pack(anchor="w", pady=(2, 6))
-        engine_buttons = ttk.Frame(frame)
-        engine_buttons.pack(fill="x", pady=(0, 6))
-        minutes_var = tk.StringVar(value="30")
-        teach_status = tk.StringVar(value="")
-        ttk.Label(frame, textvariable=teach_status, wraplength=730, font=("Segoe UI", 11)).pack(anchor="w")
+        note = tk.StringVar(value="")
 
         def alive() -> bool:
             try:
                 return bool(win.winfo_exists())
             except tk.TclError:
                 return False
+
+        def start(work: Callable[[], Any], msg: str, after: Optional[Callable[[], None]] = None) -> None:
+            if state["busy"]:
+                note.set("Gauge is busy. Wait for the current job to finish, then try again.")
+                return
+            note.set(msg)
+
+            def done(res: dict[str, Any]) -> None:
+                if alive():
+                    note.set(res["message"])
+                if after:
+                    after()
+
+            run_bg(work, done, msg)
+
+        return win, frame, alive, note, start
+
+    def on_teach() -> None:
+        """Add books or your own writing to the library, then have Gauge learn from them."""
+        from tkinter import filedialog
+
+        win, frame, alive, note, start = dialog("Teach Gauge", 760, 600)
+        ttk.Label(frame, text="Teach Gauge", font=huge).pack(anchor="w")
+        ttk.Label(frame, text=TEACH_INTRO, wraplength=700, font=small).pack(anchor="w", pady=(2, 8))
+        rate_row = ttk.Frame(frame)
+        rate_row.pack(fill="x")
+        ttk.Label(rate_row, text="How good is what you are adding? (optional)", font=mid).pack(side="left")
+        stars_var = tk.StringVar(value="not rated")
+        ttk.Combobox(rate_row, textvariable=stars_var, values=["not rated", "1", "2", "3", "4", "5"], state="readonly",
+                     width=10).pack(side="left", padx=8)
+        teach_buttons = ttk.Frame(frame)
+        teach_buttons.pack(fill="x", pady=(8, 4))
+        # The status line goes in before the list, at the bottom, so a short window never hides it.
+        ttk.Label(frame, textvariable=note, wraplength=700, font=mid).pack(side="bottom", anchor="w", pady=(4, 0))
+        ttk.Label(frame, text="In the library", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(6, 0))
+        lib_box = tk.Listbox(frame, font=mid, height=5)
+        lib_box.pack(fill="both", expand=True, pady=4)
 
         def refresh_library() -> None:
             if not alive():
@@ -603,28 +748,12 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             if not rows:
                 lib_box.insert("end", "(nothing yet: add a book, or a folder of your writing)")
 
-        def chosen_stars() -> Optional[float]:
-            v = stars_var.get()
-            return float(v) if v.isdigit() else None
-
-        def start(work: Callable[[], Any], msg: str) -> None:
-            if state["busy"]:
-                teach_status.set("Gauge is busy. Wait for the current job to finish, then try again.")
-                return
-            teach_status.set(msg)
-
-            def done(res: dict[str, Any]) -> None:
-                if alive():
-                    teach_status.set(res["message"])
-                    refresh_library()
-
-            run_bg(work, done, msg)
-
         def add(paths: Any) -> None:
             picked = [str(x) for x in (paths or []) if x]
             if picked:
-                stars = chosen_stars()
-                start(lambda: ctl.add_material(picked, stars), "Reading your files...")
+                v = stars_var.get()
+                stars = float(v) if v.isdigit() else None
+                start(lambda: ctl.add_material(picked, stars), "Reading your files...", refresh_library)
 
         def on_files() -> None:
             add(filedialog.askopenfilenames(parent=win, title="Choose books or documents",
@@ -636,61 +765,89 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             add([folder] if folder else [])
 
         def on_learn() -> None:
-            start(ctl.learn, "Studying your library... this can take several minutes.")
+            start(ctl.learn, "Studying your library... this can take several minutes.", refresh_library)
 
-        def refresh_engine() -> None:
-            eng = ctl.engine()
+        for text, cmd in (("Add files...", on_files), ("Add a folder...", on_folder), ("Learn from the library now", on_learn)):
+            ttk.Button(teach_buttons, text=text, style="Mid.TButton", command=cmd).pack(side="left", padx=(0, 8))
+        refresh_library()
+
+    def start_training(note: Any, how_long: str, starter: Optional[Callable[..., None]] = None,
+                       after: Optional[Callable[[], None]] = None) -> None:
+        """Start (or carry on) training GaugeLM. `how_long` is a number of minutes, or UNTIL_PAUSED."""
+        minutes = float(how_long) if str(how_long).replace(".", "", 1).isdigit() else None
+
+        def progress(rec: dict[str, Any]) -> None:
+            line = f"Training GaugeLM... step {rec.get('step')}, loss {rec.get('loss')} (lower is better). Pause any time."
+            root.after(0, lambda: (status_var.set(line), note.set(line) if note is not None else None))
+
+        msg = ("Training GaugeLM until you press Pause training." if minutes is None
+               else f"Training GaugeLM for about {minutes:g} minutes. Pause any time.")
+
+        def finished(res: dict[str, Any]) -> None:
+            show_engine()
+            status_var.set(res["message"])
+            if after:
+                after()
+
+        if starter is not None:
+            starter(lambda: ctl.train_gaugelm(minutes, progress), msg, lambda: (show_engine(), after() if after else None))
+        else:
+            run_bg(lambda: ctl.train_gaugelm(minutes, progress), finished, msg)
+
+    def on_pause_training() -> None:
+        status_var.set(ctl.pause_training()["message"])
+
+    def on_engine() -> None:
+        """Choose which AI writes, and train Gauge's own."""
+        win, frame, alive, note, start = dialog("Change the AI", 760, 520)
+        ttk.Label(frame, text="Which AI writes", font=huge).pack(anchor="w")
+        now_var = tk.StringVar(value="Writing with: " + ctl.engine()["label"])
+        ttk.Label(frame, textvariable=now_var, wraplength=700, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(2, 0))
+        ttk.Label(frame, text=ENGINE_NOTE, wraplength=700, font=small).pack(anchor="w", pady=(4, 8))
+        choose = ttk.Frame(frame)
+        choose.pack(fill="x", pady=(0, 6))
+        train = ttk.Frame(frame)
+        train.pack(fill="x", pady=(0, 6))
+        minutes_var = tk.StringVar(value=UNTIL_PAUSED)
+        limit_var = tk.StringVar(value=ctl.capacity() + " Change it in Switches (Capacity limit).")
+        ttk.Label(frame, textvariable=limit_var, wraplength=700, font=small).pack(anchor="w", pady=(0, 6))
+        ttk.Label(frame, textvariable=note, wraplength=700, font=mid).pack(anchor="w")
+
+        def refresh() -> None:
             if alive():
-                engine_var.set("Writing with: " + eng["label"])
-            if eng["ready"]:
-                status_var.set(f"Story engine ready: {eng['label']}.")
-            elif eng["is_gaugelm"]:
-                status_var.set(NOT_TRAINED)
-            else:
-                status_var.set("Story engine is OFF. Open the Ollama app (the llama icon), then restart Gauge Studio.")
+                now_var.set("Writing with: " + ctl.engine()["label"])
+            show_engine()
 
         def on_use(gaugelm: bool) -> None:
             if state["busy"]:
-                teach_status.set("Gauge is busy. Wait for the current job to finish, then try again.")
+                note.set("Gauge is busy. Wait for the current job to finish, then try again.")
                 return
             try:
-                teach_status.set(ctl.use_gaugelm(gaugelm)["message"])
+                note.set(ctl.use_gaugelm(gaugelm)["message"])
             except Exception as e:
-                teach_status.set(f"Could not switch: {e}")
-            refresh_engine()
+                note.set(f"Could not switch: {e}")
+            refresh()
 
         def on_train() -> None:
-            raw = minutes_var.get()
-            minutes = float(raw) if raw.replace(".", "", 1).isdigit() else 30.0
+            start_training(note if alive() else None, minutes_var.get(), start, refresh)
 
-            def progress(rec: dict[str, Any]) -> None:
-                line = f"Training GaugeLM... step {rec.get('step')}, loss {rec.get('loss')} (lower is better)"
-                root.after(0, lambda: teach_status.set(line) if alive() else None)
+        def on_pause() -> None:
+            note.set(ctl.pause_training()["message"])
 
-            def done_training() -> dict[str, Any]:
-                res = ctl.train_gaugelm(minutes, progress)
-                root.after(0, refresh_engine)
-                return res
-
-            start(done_training, f"Training GaugeLM for about {minutes:g} minutes. You can leave this running.")
-
-        for text, cmd in (("Add files...", on_files), ("Add a folder...", on_folder), ("Learn from the library now", on_learn)):
-            ttk.Button(teach_buttons, text=text, style="Big.TButton", command=cmd).pack(side="left", padx=(0, 8))
-        ttk.Button(engine_buttons, text="Use GaugeLM", command=lambda: on_use(True)).pack(side="left", padx=(0, 8))
-        ttk.Button(engine_buttons, text="Use the downloaded model", command=lambda: on_use(False)).pack(side="left", padx=(0, 8))
-        ttk.Button(engine_buttons, text="Train GaugeLM", command=on_train).pack(side="left", padx=(16, 4))
-        ttk.Label(engine_buttons, text="for", font=("Segoe UI", 11)).pack(side="left")
-        ttk.Combobox(engine_buttons, textvariable=minutes_var, values=["10", "30", "60", "120", "240", "480"], state="readonly",
-                     width=5).pack(side="left", padx=4)
-        ttk.Label(engine_buttons, text="minutes", font=("Segoe UI", 11)).pack(side="left")
-        refresh_library()
-        engine_var.set("Writing with: " + ctl.engine()["label"])
+        ttk.Button(choose, text="Use GaugeLM", style="Mid.TButton", command=lambda: on_use(True)).pack(side="left", padx=(0, 8))
+        ttk.Button(choose, text="Use the downloaded model", style="Mid.TButton", command=lambda: on_use(False)).pack(side="left")
+        ttk.Button(train, text="Start training", style="Mid.TButton", command=on_train).pack(side="left", padx=(0, 6))
+        ttk.Button(train, text="Pause training", style="Mid.TButton", command=on_pause).pack(side="left", padx=(0, 10))
+        ttk.Label(train, text="Run for", font=mid).pack(side="left")
+        ttk.Combobox(train, textvariable=minutes_var, values=[UNTIL_PAUSED, "10", "30", "60", "120", "240", "480"],
+                     state="readonly", width=14).pack(side="left", padx=4)
+        ttk.Label(train, text="(minutes)", font=small).pack(side="left")
 
     def on_switches() -> None:
         """A window of every switch, grouped, built from the catalog. Changes save immediately."""
         win = tk.Toplevel(root)
         win.title("Gauge Switches")
-        win.geometry("760x680")
+        win.geometry(_fit(root, 760, 680))
         canvas = tk.Canvas(win, highlightthickness=0)
         scroll = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
         inner = ttk.Frame(canvas, padding=12)
@@ -706,6 +863,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             try:
                 v = ctl.set_switch(key, value)
                 status.set(f"{label} = {v}")
+                capacity_line.set(ctl.capacity())
             except Exception as e:
                 status.set(f"Could not set {label}: {e}")
 
@@ -739,37 +897,52 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
                     ent.pack(anchor="w")
                     ent.bind("<Return>", lambda e, k=r["key"], v=var, lab=r["label"]: apply(k, v.get(), lab))
                     ent.bind("<FocusOut>", lambda e, k=r["key"], v=var, lab=r["label"]: apply(k, v.get(), lab))
-                ttk.Label(frame, text=r["description"], wraplength=680, font=("Segoe UI", 10)).pack(anchor="w")
+                ttk.Label(frame, text=r["description"], wraplength=680, font=small).pack(anchor="w")
                 if r["warning"]:
                     ttk.Label(frame, text="! " + r["warning"], wraplength=680, foreground="#b00020", font=("Segoe UI", 10, "bold")).pack(anchor="w")
 
-    buttons.extend([
-        ttk.Button(left, text="START MY STORY", style="Big.TButton", command=on_start),
-        ttk.Button(left, text="WRITE THE NEXT CHAPTER", style="Big.TButton", command=on_write),
-        ttk.Button(left, text="Talk to a character", style="Big.TButton", command=on_chat),
-        ttk.Button(left, text="Open another story", style="Big.TButton", command=on_open),
-        ttk.Button(left, text="Save story as one file", style="Big.TButton", command=on_export),
-    ])
-    for b in buttons:
-        b.pack(fill="x", pady=4)
-    # Two half-width buttons on one row, so the new one costs no extra height.
-    last_row = ttk.Frame(left)
-    last_row.pack(fill="x", pady=4)
-    teach_btn = ttk.Button(last_row, text="Teach Gauge", style="Big.TButton", command=on_teach)
-    teach_btn.pack(side="left", fill="x", expand=True, padx=(0, 4))
-    switches_btn = ttk.Button(last_row, text="Switches", style="Big.TButton", command=on_switches)
-    switches_btn.pack(side="left", fill="x", expand=True, padx=(4, 0))
-    buttons.extend([teach_btn, switches_btn])
+    def on_about() -> None:
+        eng = ctl.engine()
+        messagebox.showinfo("About Gauge Studio",
+                            f"Gauge Studio{' version ' + version if version else ''}\n\n"
+                            f"Writing with: {eng['label']}\n{ctl.capacity()}\n\n"
+                            "To update Gauge, double-click 'Update Gauge.bat'.")
+
+    # ---- buttons: START under the idea box; the rest pinned to the bottom, two to a row
+    start_btn = ttk.Button(start_row, text="START MY STORY", style="Big.TButton", command=on_start)
+    start_btn.pack(fill="x", pady=(2, 0))
+    write_btn = ttk.Button(write_row, text="WRITE THE NEXT CHAPTER", style="Big.TButton", command=on_write)
+    write_btn.pack(fill="x")
+    buttons.extend([start_btn, write_btn])
+    pairs = [("Talk to a character", on_chat), ("Open another story", on_open),
+             ("Teach Gauge", on_teach), ("Change the AI", on_engine),
+             ("Switches", on_switches), ("Save story as one file", on_export)]
+    for i, (text, cmd) in enumerate(pairs):
+        b = ttk.Button(grid, text=text, style="Mid.TButton", command=cmd)
+        b.grid(row=i // 2, column=i % 2, sticky="ew", padx=2, pady=2)
+        buttons.append(b)
     chapters_box.bind("<<ListboxSelect>>", on_pick)
+
+    # ---- the menu bar: the same actions, always visible whatever the window size
+    menubar = tk.Menu(root)
+    for title, entries in (
+        ("Story", [("Start my story", on_start), ("Write the next chapter", on_write), ("Open another story...", on_open),
+                   ("Talk to a character...", on_chat), ("Save story as one file", on_export)]),
+        ("Teach", [("Add books or your own writing...", on_teach), ("Change the AI that writes...", on_engine),
+                   ("Start training GaugeLM", lambda: start_training(None, UNTIL_PAUSED)),
+                   ("Pause training", on_pause_training)]),
+        ("Settings", [("Switches...", on_switches)]),
+        ("Help", [("About and version", on_about)]),
+    ):
+        menu = tk.Menu(menubar, tearoff=0)
+        for label, cmd in entries:
+            menu.add_command(label=label, command=cmd)
+        menubar.add_cascade(label=title, menu=menu)
+    root.config(menu=menubar)
 
     def check_engine() -> None:
         def done(st: dict[str, Any]) -> None:
-            if st["llm_ok"]:
-                status_var.set(f"Story engine ready: {st['engine']}.")
-            elif st["is_gaugelm"]:
-                status_var.set(NOT_TRAINED)
-            else:
-                status_var.set("Story engine is OFF. Open the Ollama app (the llama icon), then restart Gauge Studio.")
+            show_engine()
             if st["projects"]:
                 proj_var.set(f"You have {len(st['projects'])} stor{'y' if len(st['projects']) == 1 else 'ies'}. "
                              "Press 'Open another story' or start a new one.")

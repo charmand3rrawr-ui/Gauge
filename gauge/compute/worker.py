@@ -117,9 +117,11 @@ class WorkerState:
         self.jobs = 0
 
     def info(self) -> dict[str, Any]:
+        from .. import limit
+
         return {"name": self.name, "devices": summary(self.devices)["devices"], "use": summary(self.devices)["use"],
                 "llm": self.llm.describe() if self.llm else "", "busy": self.busy, "jobs": self.jobs,
-                "uptime_s": round(time.time() - self.started)}
+                "uptime_s": round(time.time() - self.started), "capacity_percent": limit.percent()}
 
 
 def train_on_shard(weights: dict[str, np.ndarray], model_meta: dict[str, Any], tokens: np.ndarray, steps: int, lr: float,
@@ -137,11 +139,17 @@ def train_on_shard(weights: dict[str, np.ndarray], model_meta: dict[str, Any], t
     rng = np.random.default_rng(int(time.time()) % 100000)
     gen = batches(tokens, cfg.block_size, min(batch_size, max(1, (len(tokens) - cfg.block_size - 1))), rng)
     losses = []
+    from .. import limit
+
+    governor = limit.compute()
+    on_gpu = model.xp is not np
     for _ in range(steps):
+        step_t0 = time.monotonic()
         x, y = next(gen)
         _, loss, caches = model.forward(x, y)
         opt.step(model.p, model.backward(caches), lr=lr)
         losses.append(loss)
+        governor.pace(time.monotonic() - step_t0, 1.0 if on_gpu else None)  # the capacity limit
     return {k: to_numpy(v) for k, v in model.p.items()}, float(np.mean(losses)) if losses else float("nan")
 
 

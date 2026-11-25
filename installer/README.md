@@ -70,6 +70,11 @@ Type what your story is about in the big box. Press **START MY STORY**. Then pre
 themselves. **Save story as one file** makes one document you can print or share. **Switches** opens
 every setting as checkboxes and sliders, with a warning on the ones that matter.
 
+Every button is also in the menu bar at the top of the window (**Story**, **Teach**, **Settings**,
+**Help**). The window sizes itself to your screen, and when it is short it is the chapter list that
+shrinks, never a button. The top of the window says which AI is writing and how much of the computer
+Gauge may use; the title bar shows the installed version.
+
 ## Teaching Gauge with your own material
 
 Press **Teach Gauge** to give it books or your own writing to learn from.
@@ -107,13 +112,18 @@ Gauge can write with either of two models, and the Studio's top line always says
   rougher than the downloaded model's. After a minute or two of training it produces nonsense; it needs
   many hours and a good-sized library before the text becomes readable.
 
-In the **Teach Gauge** window, under *Which AI writes*:
+Press **Change the AI** (or **Teach > Change the AI that writes...** in the menu):
 
 - **Use GaugeLM** / **Use the downloaded model** switches the writer. Switching to GaugeLM also selects
   the lean writing room and shorter chapters, which a model that small needs; switching back restores
   what you had.
-- **Train GaugeLM for N minutes** trains it, carrying on from wherever it stopped. It works whichever
-  model is writing.
+- **Start training** trains GaugeLM, carrying on from wherever it stopped. Choose **until I pause** or a
+  number of minutes. It works whichever model is writing.
+- **Pause training** stops it after the step it is on, usually within a few seconds, with everything
+  saved. Press **Start training** again and it carries on from that step. Both are also in the
+  **Teach** menu, so training can be paused from the main window.
+
+While training runs, the other buttons wait; pause it when you want to write.
 
 ### How GaugeLM learns while the downloaded model does the writing
 
@@ -121,16 +131,36 @@ Using the downloaded model does not hold GaugeLM back: it is GaugeLM's teacher. 
 
 1. your library;
 2. every chapter written for your stories, whichever model wrote it;
-3. worked examples: each time you press **Train GaugeLM** while the downloaded model is running, that
-   model first answers a few of Gauge's own tasks, and GaugeLM learns to imitate the answers.
+3. worked examples: each time training starts while the downloaded model is running, that model first
+   answers a few of Gauge's own tasks, and GaugeLM learns to imitate the answers.
 
-It only learns when training actually runs. Press **Train GaugeLM** now and then, or turn on the switch
+It only learns when training actually runs. Press **Start training** now and then, or turn on the switch
 **Train GaugeLM after each chapter (minutes)** in **Switches** so it trains a little every time a chapter
 is written. A sensible path: write with the downloaded model, train GaugeLM alongside, and switch the
 writer to GaugeLM once its text reads well enough for you.
 
 Only text that is safe to train on is used: what you added yourself, public-domain books, the chapters
 written for you, and the examples made on your own machine.
+
+## How much of the computer Gauge uses
+
+Gauge uses at most **20%** of each device: this computer, and any other computers you have linked to it.
+The Studio shows the limit under the status line, and **Switches > Capacity limit** changes it (100
+removes it).
+
+| what | how it is held to the limit |
+| --- | --- |
+| the processor, for Gauge itself | Gauge pins itself to that share of the cores and lowers its priority. It cannot use a core it is not pinned to. |
+| the AI engine (Ollama) on the processor | each request tells it to use only that many threads, and requests go one at a time |
+| the graphics card | a card cannot be made to run at a fifth of its speed, so Gauge rests between requests: after one that took 10 seconds it waits 40, so the card is busy a fifth of the time |
+| GaugeLM on a graphics card | its memory is capped at the share |
+| linked computers | each applies the same to itself, and this computer also spaces out what it sends them |
+
+Two things to know. It makes everything proportionally slower: at 20%, a chapter or a training session
+takes roughly three to five times as long. And it cannot shrink a model: a loaded model needs its full
+size in memory whatever the limit says. On a 16 GB computer, 20% is about 3 GB, and `llama3.1:8b` needs
+about 5.5 GB. `gauge.bat compute limit` shows the numbers for your computer, including whether your
+model fits inside the share; `llama3.2:3b` does on most machines.
 
 ## Choosing for yourself
 

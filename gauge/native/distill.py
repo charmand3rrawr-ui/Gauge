@@ -52,7 +52,9 @@ def sample_excerpts(db: Database, n: int, rng: random.Random, words: int = 220) 
 
 
 def distill(db: Database, teacher: LLM, out_path: Path, rows: int = 200, seed: int = 0,
-            progress: Optional[Any] = None) -> dict[str, int]:
+            progress: Optional[Any] = None, task_offset: int = 0) -> dict[str, int]:
+    """`task_offset` is where in the rotation of tasks to begin, so a caller that collects a few rows at
+    a time (to stay interruptible) still cycles through every kind of task instead of repeating the first."""
     rng = random.Random(seed)
     excerpts = sample_excerpts(db, rows, rng)
     if not excerpts:
@@ -61,7 +63,7 @@ def distill(db: Database, teacher: LLM, out_path: Path, rows: int = 200, seed: i
     written = failed = 0
     with out_path.open("a", encoding="utf-8") as f:
         for i, ex in enumerate(excerpts):
-            kind, template, max_words = TASKS[i % len(TASKS)]
+            kind, template, max_words = TASKS[(i + task_offset) % len(TASKS)]
             prompt = template.format(excerpt=ex, n=max_words)
             try:
                 answer = teacher.generate(prompt, temperature=0.8, max_tokens=int(max_words * 1.6) + 30, purpose="distill").strip()

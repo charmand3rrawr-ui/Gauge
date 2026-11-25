@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 os.environ.setdefault("GAUGE_OFFLINE", "1")  # CLI tests must never reach the network
+os.environ.setdefault("GAUGE_CAPACITY_PERCENT", "100")  # tests must not pin or slow the test process; limit tests set it
 
 import pytest
 

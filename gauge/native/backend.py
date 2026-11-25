@@ -19,6 +19,14 @@ def get_xp(device: str = "auto"):
             import cupy as cp  # type: ignore
 
             if cp.cuda.runtime.getDeviceCount() > 0:
+                from .. import limit
+
+                share = limit.gpu_memory_fraction()
+                if share is not None:  # the capacity limit: GaugeLM may take only this share of graphics memory
+                    try:
+                        cp.get_default_memory_pool().set_limit(fraction=share)
+                    except Exception as e:
+                        log.warning("could not cap graphics memory at %.0f%%: %s", share * 100, e)
                 return cp
             if device == "cuda":
                 log.warning("cuda requested but no CUDA device found; using numpy")

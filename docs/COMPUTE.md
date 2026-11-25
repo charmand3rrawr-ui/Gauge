@@ -52,6 +52,31 @@ itself. Treat the token like a password and run workers only on networks you tru
   workers (a failed worker is just left out of the average), and a 4M-parameter model is a 16 MB
   payload on a LAN. Larger presets want a gigabit network.
 
+## The capacity limit
+
+`compute.capacity_percent` (default **20**) is the most of each device Gauge may use: this computer and
+every linked worker. `gauge compute limit` shows what that means here in numbers; `gauge compute limit 50`
+sets it; 100 removes it. `GAUGE_CAPACITY_PERCENT` overrides it for one run.
+
+- **Processor, Gauge's own process (firm).** At start-up Gauge pins itself to `floor(share x cores)` cores
+  (at least one), caps its math libraries to the same number of threads, and lowers its priority. Child
+  programs inherit the pin. Where one core is already more than the share (fewer than five cores at 20%)
+  the governor measures the processor time really used and rests until the average is at the limit.
+  Measured on a 4-core machine training GaugeLM: 63-70% of the machine without a limit, 20.2% at 20%,
+  10.7% at 10%.
+- **The AI engine (firm for threads, averaged for a graphics card).** Ollama is a separate program, so it
+  cannot be pinned. Each request carries `num_thread`, and calls are made one at a time. A graphics card
+  runs a request flat out, so requests are spaced: after one that took *t* seconds the next waits
+  *t x (1/share - 1)*. A single call is never delayed; a steady stream averages the share.
+- **GaugeLM on a graphics card.** The CuPy memory pool is limited to the share.
+- **Linked devices.** A worker reads its own `compute.capacity_percent` and applies all of the above to
+  itself; it reports the value in `/health`. The coordinator keeps a governor per worker and sends work to
+  the one that has rested longest, so a worker running an older Gauge is not overused either.
+
+What it cannot do: shrink a model. A loaded model occupies its full size. `gauge compute limit` prints the
+share of memory and whether the configured model fits inside it. macOS has no core pinning; thread caps,
+priority and pacing still apply there.
+
 ## Commands
 
 ```

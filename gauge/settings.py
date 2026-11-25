@@ -73,6 +73,7 @@ SWITCHES: list[Switch] = [
     # ---- model & compute --------------------------------------------------------------------
     Switch("llm.provider", "Model provider", "choice", "ollama (default), openai-compatible server, or native GaugeLM.", "Model", choices=["ollama", "openai", "native", "fake"]),
     Switch("llm.model", "Writer model", "text", "Ollama model name for prose (e.g. llama3.1:8b, qwen2.5:14b).", "Model"),
+    Switch("compute.capacity_percent", "Capacity limit (% of each device)", "int", "The most of this computer, and of every linked device, that Gauge may use. Gauge pins itself to that share of the processor cores, tells the AI engine to use that many threads, and spaces its requests so a graphics card is busy at most that share of the time. Lower is gentler on the machine and proportionally slower; 100 removes the limit. A loaded model still needs its full memory whatever this says.", "Model", 1, 100),
     Switch("native.after_chapter_minutes", "Train GaugeLM after each chapter (minutes)", "int", "In Gauge Studio, train GaugeLM, Gauge's own model, for this many minutes after every chapter, whichever model wrote it. This is how GaugeLM keeps learning while the downloaded model does the writing. 0 turns it off.", "Model", 0, 120),
     Switch("llm.fast_model", "Fast model for bookkeeping", "text", "Small model for briefs, reviews, memory (e.g. llama3.2:3b). Empty = same as writer.", "Model"),
     Switch("llm.cache", "Cache repeated calls", "bool", "Reuse the answer to an identical deterministic/bookkeeping request instead of paying again. Prose is never cached.", "Model"),
@@ -164,6 +165,11 @@ def set_value(cfg: GaugeConfig, key: str, value: Any, save: bool = True) -> Any:
     setattr(obj, parts[-1], v)
     if key == "native.device":
         cfg.llm.native_device = v
+    if key == "compute.capacity_percent":  # takes effect at once, not at the next start
+        from . import limit
+
+        limit.configure(limit.configured_percent(cfg))
+        limit.apply_process_limits()
     if save:
         cfg.save()
     return v

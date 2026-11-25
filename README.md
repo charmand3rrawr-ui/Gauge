@@ -155,6 +155,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge init` / `gauge doctor` / `gauge config` | set up, health-check, show config |
 | `gauge --dry-run <any command>` | hold every outward-facing or hard-to-undo action and report what a real run would have done; see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `gauge logs` / `gauge budget` | search the structured log; show the daemon's error budget; see [docs/DEPLOY.md](docs/DEPLOY.md) |
+| `gauge compute limit [PERCENT]` | show or set the capacity limit: the most of each device Gauge may use (default 20%); see [docs/COMPUTE.md](docs/COMPUTE.md) |
 | `gauge discover SOURCE LISTING` | follow novels from a site listing (`best-rated`, `trending`, `rising-stars`, ...) |
 | `gauge follow URL` | follow one novel |
 | `gauge ingest [--url U]` | fetch followed novels; only new chapters |

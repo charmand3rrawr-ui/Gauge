@@ -177,15 +177,20 @@ class PoolLLM:
 
     def generate(self, prompt: str, system: str = "", temperature=None, max_tokens=None, json_mode: bool = False, schema=None,
                  purpose: str = "generate") -> str:
+        from .. import limit
+
         workers = self._workers()
         if workers:
             with self._lock:
-                client = workers[self._i % len(workers)]
+                # Take turns, but under the capacity limit prefer the linked device that has rested longest.
+                order = workers[self._i % len(workers):] + workers[:self._i % len(workers)]
+                client = min(order, key=lambda c: limit.device(c.url).ready_in())
                 self._i += 1
             t0 = time.monotonic()
             try:
-                out = client.generate(prompt, system=system, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode,
-                                      schema=schema, purpose=purpose)
+                with limit.device(client.url).work():  # each linked device is held to its share
+                    out = client.generate(prompt, system=system, temperature=temperature, max_tokens=max_tokens,
+                                          json_mode=json_mode, schema=schema, purpose=purpose)
                 self.calls.add(CallRecord(purpose, f"remote:{client.url}", estimate_tokens(system) + estimate_tokens(prompt), estimate_tokens(out),
                                           int((time.monotonic() - t0) * 1000), True))
                 return out
@@ -216,8 +221,11 @@ class DistributedTrainer:
         results: list[tuple[str, Optional[dict[str, np.ndarray]], float]] = []
 
         def remote(i: int, client: WorkerClient):
+            from .. import limit
+
             try:
-                w, loss = client.train(weights, meta, shards[i], steps, lr, batch_size)
+                with limit.device(client.url).work():  # each linked device is held to its share
+                    w, loss = client.train(weights, meta, shards[i], steps, lr, batch_size)
                 return (client.url, w, loss)
             except Exception as e:
                 log.warning("worker %s failed in round: %s", client.url, e)

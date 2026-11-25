@@ -74,6 +74,7 @@ class ComputeConfig(BaseModel):
     discover_seconds: float = 3.0
     distributed_training: bool = True  # use live workers for native training rounds
     pool_generation: bool = True  # spread LLM calls over workers that serve a model
+    capacity_percent: int = 20  # the most of each device Gauge may use (this computer and every linked worker); 100 = no limit
 
 
 class CodeConfig(BaseModel):

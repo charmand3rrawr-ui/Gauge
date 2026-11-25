@@ -183,6 +183,11 @@ class OllamaLLM(_HTTPBase):
                 "num_ctx": self.cfg.num_ctx,
             },
         }
+        from .. import limit
+
+        threads = limit.engine_threads()
+        if threads is not None:  # the capacity limit: the engine may use only this many processor threads
+            payload["options"]["num_thread"] = threads
         if schema is not None and self.cfg.structured_output and not self._schema_unsupported:
             payload["format"] = schema
         elif json_mode or schema is not None:
@@ -574,12 +579,20 @@ def make_llm(cfg: LLMConfig, role: str = "main", calls: Optional[CallLog] = None
                          device=getattr(cfg, "native_device", "cpu") or "cpu")
     else:
         raise ValueError(f"unknown llm provider: {cfg.provider}")
+    from .. import limit
+
+    if limit.percent() < 100 and p != "fake":
+        # Inside the capacity limit: one call at a time, spaced so the device stays at its share. A model
+        # running inside this process is already pinned to its cores; an outside engine is paced as a whole.
+        from .governed import GovernedLLM
+
+        base = GovernedLLM(base, limit.compute() if p == "native" else limit.engine())
     if getattr(cfg, "cache", False) and getattr(cfg, "cache_dir", ""):
         from pathlib import Path
 
         from .cache import CachingLLM
 
-        return CachingLLM(base, Path(cfg.cache_dir))
+        return CachingLLM(base, Path(cfg.cache_dir))  # outside the governor: a cached answer costs nothing
     return base
 
 

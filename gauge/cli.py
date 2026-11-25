@@ -44,6 +44,11 @@ def main(ctx: click.Context, data_dir: Optional[str], verbose: bool, dry_run: bo
     """Gauge: learn what makes web novels addictive, then write them. Local, open source."""
     _setup_logging(verbose)
     ctx.obj = Ctx(data_dir)
+    # The capacity limit comes first: it caps the math threads, and that only works before numpy loads.
+    from . import limit
+
+    limit.configure(limit.configured_percent(ctx.obj.cfg))
+    limit.apply_process_limits()
     if ctx.obj.cfg.logs.structured:
         from .ops.logs import remove_structured_log, setup_structured_log
 
@@ -2589,6 +2594,74 @@ def compute_list(c: Ctx) -> None:
         devs = ", ".join(d.get("name", "?")[:24] for d in json.loads(w["devices_json"] or "[]"))
         table.add_row(w["name"], w["url"], "yes" if w["url"] in alive else "no", (w["llm"] or "")[:30], devs, (w["last_seen"] or "")[:16])
     console.print(table)
+
+
+@compute.command("limit")
+@click.argument("percent", type=click.IntRange(1, 100), required=False)
+@click.pass_obj
+def compute_limit(c: Ctx, percent: Optional[int]) -> None:
+    """Show the capacity limit, or set it: the most of each device Gauge may use (100 = no limit).
+
+    It covers this computer and every linked device. `gauge compute limit 20` holds Gauge to a fifth."""
+    from . import limit
+
+    if percent is not None:
+        c.cfg.compute.capacity_percent = percent
+        c.cfg.save()
+        limit.configure(limit.configured_percent(c.cfg))
+        limit.apply_process_limits()
+        console.print(f"[green]capacity limit set to {percent}%[/]; it applies from the next thing Gauge does.")
+    workers: list[dict] = []
+    if c.cfg.compute.token:
+        try:
+            from .compute import Pool
+
+            pool = Pool(c.db, c.cfg.compute.token)
+            for w in pool.workers():
+                health = None
+                try:
+                    from .compute.pool import WorkerClient
+
+                    health = WorkerClient(w["url"], c.cfg.compute.token, timeout=5).health()
+                except Exception:
+                    health = None
+                workers.append({"name": w["name"], "url": w["url"], "capacity_percent": (health or {}).get("capacity_percent")})
+        except Exception as e:
+            console.print(f"[yellow]could not list linked devices: {e}[/]")
+    pl = limit.plan(c.cfg, workers)
+    if not pl["limited"]:
+        console.print("Capacity limit: [yellow]off[/] (100%). Gauge may use the whole of each device. "
+                      "`gauge compute limit 20` holds it to a fifth.")
+        return
+    console.print(f"[bold]Capacity limit: {pl['percent']}% of each device[/]")
+    console.print(f"  This computer's processor : {pl['cores_allowed']} of {pl['cores_total']} cores "
+                  f"({pl['core_share_percent']:g}% of the processor)" +
+                  ("; the rest of the difference is made up by resting between pieces of work"
+                   if pl["core_share_percent"] > pl["percent"] else ""))
+    console.print(f"  The AI engine             : {pl['engine_threads']} processor thread(s) per request, one request at a time")
+    if pl["gpu"]:
+        console.print(f"  Graphics card             : after each request Gauge rests {pl['rest_per_second_of_work']:g} seconds per "
+                      "second of work, so the card is busy at most that share of the time")
+    else:
+        console.print("  Graphics card             : none detected that the AI engine would use")
+    if pl["memory_gb"]:
+        line = f"  Memory                    : {pl['percent']}% of {pl['memory_gb']:g} GB is {pl['memory_share_gb']:g} GB"
+        if pl["model_needs_gb"] is not None:
+            fits = "fits inside it" if pl["model_fits_share"] else "[yellow]is larger than that[/]"
+            line += f"; {pl['model']} needs about {pl['model_needs_gb']:g} GB, which {fits}"
+        console.print(line)
+        console.print("                              (a loaded model needs its full size; the limit cannot shrink it. "
+                      "Choose a smaller model to stay inside the share.)")
+    if pl["linked"]:
+        for w in pl["linked"]:
+            own = f"its own limit is {w['own_limit']}%" if w["own_limit"] else "it did not report a limit (older Gauge, or offline)"
+            console.print(f"  Linked device {w['name'][:20]:<20}: paced by this computer at {w['paced_at']}%; {own}")
+    else:
+        console.print("  Linked devices            : none")
+    ap = pl.get("applied") or {}
+    if ap:
+        console.print(f"  Applied to this process   : cores pinned: {'yes' if ap.get('affinity') else 'no'}, "
+                      f"math threads capped: {'yes' if ap.get('threads') else 'no'}, priority lowered: {'yes' if ap.get('priority') else 'no'}")
 
 
 @compute.command("remove")
