@@ -135,6 +135,12 @@ update_only() {
   else
     ok "Python packages are unchanged; nothing to install."
   fi
+  # An NVIDIA card Gauge's own model cannot use yet: set it up once (skipped when already done).
+  if [ -x "$vpy" ] && have nvidia-smi && ! "$vpy" -c "import cupy" 2>/dev/null; then
+    echo "    setting up the graphics card for Gauge's own model (a large download, once) ..."
+    (cd "$root" && "$vpy" -m gauge.cli compute setup-gpu) \
+      || warn "The graphics card could not be set up; GaugeLM keeps using the processor. Try later: gauge compute setup-gpu"
+  fi
 
   mkdir -p "$root/installer"
   [ -n "$sha" ] && printf '%s %s' "$branch" "$sha" > "$marker"
@@ -342,6 +348,13 @@ if ! { "$VPY" -m pip install --upgrade pip --disable-pip-version-check \
 fi
 "$VPY" -m gauge.cli --version >/dev/null && check "Gauge installed" 1 "$ROOT/.venv" || check "Gauge installed" 0 "$ROOT/.venv"
 ok "Gauge installed"
+# The downloaded model uses an NVIDIA graphics card by itself; Gauge's own model needs one more library.
+# A large download: if it fails, everything else still works.
+if [ "$VRAM" -gt 0 ] && [ "$OS" = "Linux" ]; then
+  step "Setting up the graphics card for Gauge's own model (a large download)"
+  if "$VPY" -m gauge.cli compute setup-gpu; then ok "Graphics card ready for GaugeLM"
+  else warn "The graphics card could not be set up for GaugeLM; it will use the processor. Try later: gauge compute setup-gpu"; fi
+fi
 if ! "$VPY" -c "import tkinter" 2>/dev/null && [ "$OS" != "Darwin" ] && { [ "$(id -u)" -eq 0 ] || [ -t 0 ]; }; then
   warn "The window toolkit (tkinter) is missing. Trying to install it..."
   if have apt-get; then as_root apt-get install -y python3-tk >>"$PIPLOG" 2>&1 || true

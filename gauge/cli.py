@@ -49,6 +49,9 @@ def main(ctx: click.Context, data_dir: Optional[str], verbose: bool, dry_run: bo
 
     limit.configure(limit.configured_percent(ctx.obj.cfg))
     limit.apply_process_limits()
+    from .compute import devices as _devices
+
+    _devices.apply_environment(ctx.obj.cfg)      # only the chosen graphics cards are visible to this program
     if ctx.obj.cfg.logs.structured:
         from .ops.logs import remove_structured_log, setup_structured_log
 
@@ -2484,6 +2487,12 @@ def native_train(c: Ctx, size, steps, layers, embd, heads, kv_heads, block, voca
     mcfg.arch = arch or n.arch
     tcfg = TrainConfig(steps=steps or n.steps, batch_size=batch or n.batch_size, lr=n.lr, accum_steps=accum or n.accum_steps,
                        chat_weight=n.chat_weight, device=device or n.device)
+    if not device:
+        from .compute import devices as _devices
+
+        tcfg.devices = _devices.train_devices(c.cfg)
+        if tcfg.devices:
+            console.print(f"sharing every step across: {', '.join(tcfg.devices)}")
     docs = _native_docs(c)
     if not docs:
         console.print("[red]nothing to train on[/]: ingest or import some novels first")
@@ -2855,6 +2864,62 @@ def compute_scan(c: Ctx, apply: bool) -> None:
         c.cfg.native.device = s["use"]
         c.cfg.save()
         console.print(f"[green]saved[/] native.device = {s['use']}")
+
+
+@compute.command("devices")
+@click.pass_obj
+def compute_devices(c: Ctx) -> None:
+    """The devices this computer has, which are switched on for Gauge, and what each one needs."""
+    from .compute import devices as dv
+
+    rows = dv.sensed(c.cfg)
+    table = Table(title="Devices (switch them with `gauge compute use`)")
+    for col in ("key", "device", "on", "ready", ""):
+        table.add_column(col)
+    for r in rows:
+        table.add_row(r["key"], r["label"], "ON" if r["on"] else "off", "yes" if r["ready"] else "no", r["note"])
+    console.print(table)
+    console.print(dv.describe(c.cfg))
+    if not dv.chosen_keys(c.cfg):
+        console.print(dv.AUTO_LINE)
+    if any(r["can_set_up"] for r in rows):
+        console.print("To let GaugeLM use the graphics card: gauge compute setup-gpu")
+
+
+@compute.command("use")
+@click.argument("keys", nargs=-1, required=True)
+@click.pass_obj
+def compute_use(c: Ctx, keys: tuple) -> None:
+    """Choose which devices Gauge may use: one or several keys, or `auto`.
+
+    Examples: `gauge compute use gpu0`, `gauge compute use gpu0 gpu1`, `gauge compute use cpu`,
+    `gauge compute use gpu0 cpu`, `gauge compute use auto`."""
+    from .compute import devices as dv
+
+    try:
+        res = dv.choose(c.cfg, [k for part in keys for k in part.replace(",", " ").split()])
+    except ValueError as e:
+        console.print(f"[red]{e}[/]")
+        sys.exit(1)
+    console.print(f"[green]{res['message']}[/]")
+
+
+@compute.command("setup-gpu")
+@click.option("--show", is_flag=True, help="Print the command and do nothing.")
+@click.pass_obj
+def compute_setup_gpu(c: Ctx, show: bool) -> None:
+    """Install the library GaugeLM needs to use an NVIDIA graphics card (a large download)."""
+    from .compute import devices as dv
+
+    cmd = " ".join(dv.setup_command())
+    if show:
+        click.echo(cmd)
+        return
+    console.print(f"Running: {cmd}\nThis downloads several hundred megabytes and can take a while.")
+    res = dv.setup()
+    console.print(("[green]" if res["ok"] else "[yellow]") + res["message"] + "[/]")
+    if not res["ok"] and not res["installed"]:
+        sys.exit(1)
 
 
 @compute.command("watch")

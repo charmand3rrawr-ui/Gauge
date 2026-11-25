@@ -264,3 +264,18 @@ def test_update_mode_in_install_sh_cannot_reach_the_engine():
     assert body.count("exit 0") == 2 and "Nothing was downloaded" in body
     # It runs before the installer proper, so nothing below it can execute in update mode.
     assert src.index("update_only; fi") < src.index("1. This computer")
+
+
+def test_installers_set_up_the_graphics_card_for_gaugelm_only_when_there_is_one():
+    ps = BOOTSTRAP.read_text(encoding="ascii")
+    i = ps.index("compute setup-gpu")
+    assert "if ($vram -gt 0) {" in ps[i - 400:i]                                  # only with an NVIDIA card
+    assert ps.index('Check "Gauge installed"') < i                               # after Gauge itself is in
+    assert "It will use the processor" in ps[i:i + 400]                          # a failure is a warning, not a stop
+    bat = UPDATE_BAT.read_text(encoding="ascii")
+    j = bat.index("compute setup-gpu")
+    guard = bat[j - 500:j]
+    assert "nvidia-smi" in guard and 'import cupy' in guard and "$LASTEXITCODE -ne 0" in guard   # once, never twice
+    sh = INSTALL_SH.read_text(encoding="utf-8")
+    assert sh.count("gauge.cli compute setup-gpu") == 2
+    assert '[ "$VRAM" -gt 0 ] && [ "$OS" = "Linux" ]' in sh and 'have nvidia-smi && ! "$vpy" -c "import cupy"' in sh

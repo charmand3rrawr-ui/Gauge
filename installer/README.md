@@ -230,6 +230,24 @@ size in memory whatever the limit says. On a 16 GB computer, 20% is about 3 GB, 
 about 5.5 GB. `gauge.bat compute limit` shows the numbers for your computer, including whether your
 model fits inside the share; `llama3.2:3b` does on most machines.
 
+## Which devices Gauge uses (processor and graphics cards)
+
+Open **Switches**. At the top is a **Devices** section with a switch for each device Gauge found on
+your computer: the processor and each graphics card. Switch on the ones Gauge may use; more than one
+can be on. **Automatic** lets Gauge pick.
+
+- The downloaded model already uses your graphics card by itself.
+- Gauge's own model, GaugeLM, needs one extra library before it can use an NVIDIA graphics card. If
+  the card shows greyed out, press **Set up the graphics card** (a large download, once). The
+  installer and **Update Gauge.bat** now do this for you when they find an NVIDIA card.
+- With two graphics cards switched on, they share GaugeLM's training.
+- With only the processor switched on, the downloaded model is kept off the graphics card too.
+- After changing which graphics cards are on, close and reopen Gauge Studio.
+
+This was built on a computer without a graphics card, so the graphics-card paths are tested with
+stand-ins and have not run on a real one. If training does not speed up after setup, tell me what
+**Switches** shows in the Devices section.
+
 ## Choosing for yourself
 
 | you want | Windows | macOS / Linux |

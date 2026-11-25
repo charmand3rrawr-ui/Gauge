@@ -14,7 +14,7 @@ import logging
 import math
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -44,6 +44,8 @@ class TrainConfig:
     chat_weight: int = 3  # instruction rows are repeated this many times (they are few and matter most)
     curriculum: bool = True  # prose first, instruction rows concentrated in the last third of training
     device: str = "cpu"  # cpu | cuda | auto
+    # Train on several devices at once ("cuda:0", "cuda:1", "cpu"); the first is where the model lives. Empty = just `device`.
+    devices: list[str] = field(default_factory=list)
     seed: int = 0
 
 
@@ -235,31 +237,45 @@ class NativeTrainer:
         governor = limit.compute()
         on_gpu = xp is not np
         stopped = False
+        team = None
+        if len(tcfg.devices) > 1:                # several devices share every step (see parallel.py)
+            from .parallel import Replicas
+
+            team = Replicas(model, list(tcfg.devices))
+            log.info("native train: %s", team.describe())
         while step < total:
             step_t0 = time.monotonic()
             # Curriculum: mostly prose early, instruction rows concentrated late (they teach behaviour).
             frac = (step - step0) / max(1, tcfg.steps)
             grads = None
-            for _ in range(max(1, tcfg.accum_steps)):
+            def draw(frac: float = frac):
                 if tcfg.curriculum and len(chat) > block + 1 and rng.random() < (0.15 if frac < 0.66 else 0.6):
-                    x, y = next(gen_chat)
-                elif tcfg.curriculum and len(prose) > block + 1:
-                    x, y = next(gen_prose)
+                    return next(gen_chat)
+                if tcfg.curriculum and len(prose) > block + 1:
+                    return next(gen_prose)
+                return next(gen_all)
+
+            for _ in range(max(1, tcfg.accum_steps)):
+                if team is not None and len(team) > 1:      # one batch per device, at the same time
+                    g, loss, seen = team.step([draw() for _ in range(len(team))])
                 else:
-                    x, y = next(gen_all)
-                _, loss, caches = model.forward(x, y)
-                g = model.backward(caches)
+                    x, y = draw()
+                    _, loss, caches = model.forward(x, y)
+                    g = model.backward(caches)
+                    seen = x.size
                 if grads is None:
                     grads = g
                 else:
                     for k in grads:
                         grads[k] += g[k]
                 losses.append(loss)
-                tokens_seen += x.size
+                tokens_seen += seen
             if tcfg.accum_steps > 1:
                 for k in grads:
                     grads[k] /= tcfg.accum_steps
             norm = opt.step(model.p, grads, lr=lr_at(step - step0, tcfg), clip=tcfg.grad_clip)
+            if team is not None:
+                team.sync()
             step += 1
             if step % tcfg.eval_every == 0 or step == total:
                 last_val = self.evaluate(model, val_data, rng, batches_n=4)
@@ -283,7 +299,8 @@ class NativeTrainer:
         return {"step": step, "loss": round(float(np.mean(losses[-50:])), 4) if losses else None,
                 "val_loss": round(last_val, 4) if last_val is not None else None, "tokens_seen": tokens_seen,
                 "seconds": round(time.monotonic() - t0, 1), "n_params": model.n_params(), "corpus_tokens": int(len(data)),
-                "device": device_name(xp), "arch": model.cfg.arch, "stopped": stopped}
+                "device": device_name(xp), "arch": model.cfg.arch, "stopped": stopped,
+                "devices": team.active if team is not None else [], "rested": team.rested if team is not None else []}
 
     def evaluate(self, model: GaugeLM, data: np.ndarray, rng: np.random.Generator, batches_n: int = 4) -> float:
         if len(data) <= model.cfg.block_size + 1:

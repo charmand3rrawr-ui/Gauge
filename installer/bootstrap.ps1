@@ -228,6 +228,15 @@ if (-not (Test-Path $venvPy)) { throw "Could not create the Python environment (
 if ($LASTEXITCODE -ne 0) { throw "Installing Gauge failed (pip exit code $LASTEXITCODE). Check your internet connection and run this again. Details: $Log" }
 & $venvPy -m gauge.cli --version | Out-Null
 Check "Gauge installed" ($LASTEXITCODE -eq 0) ".venv"
+
+# The downloaded model uses an NVIDIA graphics card by itself. Gauge's own model (GaugeLM) needs one more
+# library to use it, so that goes in now. It is a large download; if it fails, everything else still works.
+if ($vram -gt 0) {
+  Step "Setting up the graphics card for Gauge's own model (a large download; this can take several minutes)"
+  & $venvPy -m gauge.cli compute setup-gpu
+  if ($LASTEXITCODE -eq 0) { Ok "Graphics card ready for GaugeLM" }
+  else { Warn "The graphics card could not be set up for GaugeLM. It will use the processor. You can try again later from Gauge Studio: Switches, Set up the graphics card." }
+}
 Ok "Gauge installed"
 
 # ---------------------------------------------------------------- 5. Models

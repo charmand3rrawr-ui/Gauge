@@ -8,7 +8,7 @@ which numpy-compatible Python backend could drive each one:
 
 | vendor | backend GaugeLM can use | install |
 | --- | --- | --- |
-| NVIDIA | CuPy on CUDA | `pip install cupy-cuda12x` (CUDA 11 cards: `cupy-cuda11x`) |
+| NVIDIA | CuPy on CUDA | `gauge compute setup-gpu` (installs `cupy-cuda12x[ctk]`) |
 | AMD | CuPy on ROCm (Linux / WSL2) | `pip install cupy-rocm-6-0` |
 | Intel, Apple | none yet | reported; the CPU path is used |
 
@@ -16,6 +16,53 @@ Hardware without its backend is listed with the exact install command. `--apply`
 device into `native.device`. `gauge compute watch` polls until a usable GPU appears, for example
 an external GPU plugged in, and switches to it. The daemon does the same scan every cycle
 (`compute.auto_device`), so GaugeLM moves to a GPU as soon as one is there.
+
+## The device switch: choosing which devices Gauge uses
+
+Sensing a graphics card is not the same as using it. Two different things run on your computer:
+
+* **The downloaded model** runs inside the AI engine (Ollama), which finds and uses a graphics card by
+  itself. Nothing needs setting up.
+* **GaugeLM**, Gauge's own model, runs inside Gauge. It can only use a graphics card once the library
+  that drives it is installed (CuPy, for NVIDIA cards). The installer now does this when it finds an
+  NVIDIA card, the updater does it once for an existing installation, and
+  `gauge compute setup-gpu` (or **Set up the graphics card** in the Studio's Switches) does it on
+  demand. It installs `cupy-cuda12x[ctk]`, which brings the CUDA components with it, so only the
+  card's normal NVIDIA driver is needed. It is a download of several hundred megabytes.
+
+The switch says which sensed devices Gauge may use, one or several:
+
+```powershell
+.\gauge.bat compute devices            # what this computer has, what is on, what each needs
+.\gauge.bat compute use gpu0           # one graphics card
+.\gauge.bat compute use gpu0 gpu1      # two: they share every training step
+.\gauge.bat compute use gpu0 cpu       # a card and the processor
+.\gauge.bat compute use cpu            # the processor only
+.\gauge.bat compute use auto           # let Gauge pick (the default)
+```
+
+In the Studio, **Switches** has a **Devices** section at the top with a switch for each device and an
+**Automatic** switch. More than one can be on; at least one stays on.
+
+| choice | GaugeLM | the downloaded model |
+| --- | --- | --- |
+| automatic | the largest graphics card that is ready, else the processor | the engine decides |
+| one graphics card | that card only (it is the only one Gauge's process can see) | may use a graphics card; which one is the engine's decision |
+| several graphics cards | each holds a copy of the model and works through its own batch at the same time; the gradients are averaged and the weights copied back | as above |
+| a card and the processor | the processor is timed on the first step and rested if it is more than four times slower than the card, which it normally is | as above |
+| the processor only | the processor | kept on the processor (`num_gpu: 0`) |
+
+Several devices sharing a step give the same result as one device on a batch that many times larger
+(checked to rounding in the tests), in about the time of one batch: more text learned from per step.
+A card that fails mid-run is dropped and training carries on. The capacity limit applies to each card
+separately. Changing which cards are chosen after GaugeLM has already used one needs Gauge to be
+closed and reopened, because a program's view of its graphics cards is fixed once the library starts.
+
+**Not run on real hardware.** The machine this was built on has no graphics card, so the choosing,
+the sharing of steps (with several processor copies standing in for cards) and the setup command are
+tested, but the graphics-card paths themselves have never executed. AMD cards are listed and can be
+chosen once CuPy for ROCm is installed by hand; Intel and Apple graphics are listed but cannot be used
+by GaugeLM.
 
 ## Using your other machines
 

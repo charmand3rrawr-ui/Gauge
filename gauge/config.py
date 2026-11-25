@@ -39,6 +39,7 @@ class LLMConfig(BaseModel):
     cache: bool = False  # cache deterministic/bookkeeping LLM calls to avoid paying twice for the same request
     cache_dir: str = ""  # filled in by GaugeConfig.load
     native_device: str = "cpu"  # filled in by GaugeConfig.load from native.device
+    use_gpu: bool = True  # filled in by GaugeConfig.load: false keeps the downloaded model on the processor
 
 
 class NativeConfig(BaseModel):
@@ -73,6 +74,9 @@ class ComputeConfig(BaseModel):
     """Sensing GPUs and using the other machines you own (gauge worker)."""
 
     auto_device: bool = True  # re-scan each daemon cycle and switch GaugeLM to a GPU when one appears
+    # The device switch: which sensed devices Gauge may use, e.g. ["gpu0"], ["gpu0", "gpu1"] or ["cpu"].
+    # Empty = automatic (the best graphics card that is ready, otherwise the processor).
+    devices: list[str] = Field(default_factory=list)
     token: str = ""  # shared secret for your workers; `gauge compute token` generates one
     announce_port: int = 47631
     worker_port: int = 47632
@@ -386,5 +390,7 @@ class GaugeConfig(BaseModel):
             cfg = cls(data_dir=str(root))
         cfg.llm.native_dir = str(cfg.native_dir)
         cfg.llm.native_device = cfg.native.device
+        chosen = [str(k).lower() for k in cfg.compute.devices]
+        cfg.llm.use_gpu = not chosen or any(k.startswith("gpu") for k in chosen)
         cfg.llm.cache_dir = str(cfg.models_dir / "llm_cache")
         return cfg

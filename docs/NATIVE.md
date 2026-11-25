@@ -112,7 +112,8 @@ In rough order of effect:
 
 1. **Give it more of the machine.** The capacity limit is 20% by default; at 50% it should train roughly
    two and a half times as fast (`gauge compute limit 50`, or Switches in the Studio).
-2. **A graphics card.** With CuPy installed the same code runs 10 to 100 times faster.
+2. **A graphics card.** GaugeLM uses it once its driver library is installed (`gauge compute setup-gpu`, or
+   Switches in the Studio); choose which devices with `gauge compute use`. See [COMPUTE.md](COMPUTE.md).
 3. **More, cleaner text.** `gauge corpus fetch` adds public-domain books; your own chapters count most.
 4. **Train after every chapter** (`native.after_chapter_minutes`), so it never falls behind.
 5. **Grow it only when it has stopped improving** at its current size; a bigger model trains slower.

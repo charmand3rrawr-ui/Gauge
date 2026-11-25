@@ -113,6 +113,20 @@ try {
     Write-Host "  Python packages are unchanged; nothing to install."
   }
 
+  # ---- 4b. An NVIDIA graphics card that Gauge's own model cannot use yet: set it up once. Skipped when it
+  # is already set up, so nothing is downloaded twice.
+  if ((Test-Path $venvPy) -and (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
+    & $venvPy -c "import cupy" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "  Setting up the graphics card for Gauge's own model (a large download, once) ..."
+      Push-Location $dir
+      & $venvPy -m gauge.cli compute setup-gpu
+      $gpuCode = $LASTEXITCODE
+      Pop-Location
+      if ($gpuCode -ne 0) { Write-Host "  The graphics card could not be set up; GaugeLM keeps using the processor. Try again from Gauge Studio: Switches." -ForegroundColor Yellow }
+    }
+  }
+
   # ---- 5. Remember which version this is, and say what changed.
   $markerDir = Split-Path -Parent $marker
   if (-not (Test-Path $markerDir)) { New-Item -ItemType Directory -Path $markerDir | Out-Null }

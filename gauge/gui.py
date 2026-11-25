@@ -40,6 +40,13 @@ SHRINK_ASK = ("Shrink GaugeLM?\n\n"
               "It goes back to the size it had before it last grew (or the next size down), which is faster to train and to "
               "write with. The bigger model teaches the smaller one for about 10 minutes first. A smaller model holds less, "
               "so some of what it learned is lost; Gauge will say how much. The bigger model is kept, so you can undo this.")
+DEVICES_NOTE = ("Switch on the devices Gauge may use; more than one can be on. GaugeLM trains and writes on them, and several "
+                "graphics cards share the work. The downloaded model picks its own graphics card, but stays on the processor "
+                "if no graphics card is switched on here.")
+SETUP_GPU_ASK = ("Set up the graphics card for GaugeLM?\n\n"
+                 "Gauge found an NVIDIA graphics card, but GaugeLM needs one more library before it can use it. This downloads "
+                 "several hundred megabytes and can take several minutes. Your card's normal NVIDIA driver must be installed. "
+                 "The downloaded model already uses the graphics card and is not affected.")
 CHAT_HINT = ("Type below and press Ask Gauge to talk about your story: ideas, what a character would do, what is "
              "still unresolved. Or type what should happen and press 'Use for the next chapter'.\n")
 CHARACTER_INTRO = ("Teach Gauge how to build a character by showing it finished ones. Read the breakdown to see everything "
@@ -67,6 +74,7 @@ class StudioController:
         self._pause = threading.Event()          # set by pause_training(); the trainer checks it after each step
         self._training: dict[str, Any] = {"running": False, "step": 0, "loss": None}
         self._chat: dict[str, list[tuple[str, str]]] = {}   # the conversation with Gauge, per story
+        self._sensed: Any = None                             # the devices found on this computer (looked for once)
 
     def status(self) -> dict[str, Any]:
         from .llm import make_llm
@@ -155,6 +163,52 @@ class StudioController:
             if not eng["ready"]:
                 msg += " It is not answering: open the Ollama app."
         return {**eng, "message": msg}
+
+    # ---- the device switch -------------------------------------------------------------
+    def devices(self, refresh: bool = False) -> dict[str, Any]:
+        """The devices this computer has, which are switched on, and a sentence saying what that means."""
+        from .compute import devices as dv
+        from .compute import scan
+
+        if refresh or self._sensed is None:
+            self._sensed = scan()
+        return {"rows": dv.sensed(self.cfg, self._sensed), "automatic": not dv.chosen_keys(self.cfg),
+                "line": dv.describe(self.cfg, self._sensed), "auto_line": dv.AUTO_LINE}
+
+    def set_device(self, key: str, on: bool) -> dict[str, Any]:
+        """Switch one device on or off. Several can be on at once. At least one stays on."""
+        from .compute import devices as dv
+
+        now = self.devices()
+        current = [r["key"] for r in now["rows"] if r["on"]]
+        wanted = [k for k in current if k != key] + ([key] if on else [])
+        if not wanted:
+            return {**now, "changed": False, "message": "At least one device has to stay on. Switch another one on first."}
+        return self._choose_devices([r["key"] for r in now["rows"] if r["key"] in wanted], dv)
+
+    def set_devices_automatic(self) -> dict[str, Any]:
+        from .compute import devices as dv
+
+        return self._choose_devices([], dv)
+
+    def _choose_devices(self, keys: list[str], dv: Any) -> dict[str, Any]:
+        if self._training["running"]:
+            return {**self.devices(), "changed": False,
+                    "message": "GaugeLM is training. Press Pause training, wait for it to stop, then change the devices."}
+        try:
+            res = dv.choose(self.cfg, keys, self._sensed)
+        except ValueError as e:
+            return {**self.devices(), "changed": False, "message": str(e)}
+        self._pipe = None
+        return {**self.devices(), "changed": True, "restart": res["restart"], "message": res["message"]}
+
+    def setup_gpu(self) -> dict[str, Any]:
+        """Install the library GaugeLM needs to use the graphics card, then look at the devices again."""
+        from .compute import devices as dv
+
+        res = dv.setup()
+        self._pipe = None
+        return {**self.devices(refresh=True), **res}
 
     # ---- growing GaugeLM ---------------------------------------------------------------
     def gaugelm_size(self) -> dict[str, Any]:
@@ -368,6 +422,9 @@ class StudioController:
         mcfg.arch = n.arch
         tcfg = TrainConfig(steps=n.steps, batch_size=n.batch_size, lr=n.lr, accum_steps=n.accum_steps, chat_weight=n.chat_weight,
                            device=n.device, eval_every=25, checkpoint_every=50)
+        from .compute import devices as _devices
+
+        tcfg.devices = _devices.train_devices(self.cfg)      # several chosen devices share every step
         trainer = NativeTrainer(self.cfg.native_dir)
         resumed = trainer.exists()
         started = time.monotonic()
@@ -1341,6 +1398,70 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             except Exception as e:
                 status.set(f"Could not set {label}: {e}")
 
+        # ---- devices: one switch per device this computer has; several can be on
+        ttk.Label(inner, text="Devices", font=("Segoe UI", 15, "bold")).pack(anchor="w", pady=(4, 4))
+        ttk.Label(inner, text=DEVICES_NOTE, wraplength=680, font=small).pack(anchor="w")
+        dev_line = tk.StringVar(value="Looking at this computer's devices...")
+        ttk.Label(inner, textvariable=dev_line, wraplength=680, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(4, 2))
+        dev_box = ttk.Frame(inner)
+        dev_box.pack(fill="x")
+        dev_vars: dict[str, Any] = {}
+
+        def show_devices(info: dict[str, Any]) -> None:
+            try:
+                if not win.winfo_exists():
+                    return
+            except tk.TclError:
+                return
+            dev_line.set(info.get("message") or info["line"])
+            auto_var.set(info["automatic"])
+            for r in info["rows"]:
+                if r["key"] not in dev_vars:
+                    var = tk.BooleanVar(value=r["on"])
+                    dev_vars[r["key"]] = var
+                    row = ttk.Frame(dev_box)
+                    row.pack(fill="x", pady=2)
+                    box = ttk.Checkbutton(row, text=r["label"], variable=var,
+                                          command=lambda k=r["key"], v=var: show_devices(ctl.set_device(k, bool(v.get()))))
+                    box.pack(anchor="w")
+                    if not r["ready"]:
+                        box.state(["disabled"])
+                        ttk.Label(row, text=r["note"], wraplength=660, font=small).pack(anchor="w", padx=(22, 0))
+                else:
+                    dev_vars[r["key"]].set(r["on"])
+            if any(r["can_set_up"] for r in info["rows"]) and not setup_btn.winfo_ismapped():
+                setup_btn.pack(anchor="w", pady=(4, 0))
+
+        def on_auto() -> None:
+            if auto_var.get():
+                show_devices(ctl.set_devices_automatic())
+            else:                                   # switching Automatic off keeps what it had picked, as a fixed choice
+                picked = [r["key"] for r in ctl.devices()["rows"] if r["on"]]
+                show_devices(ctl.set_device(picked[0], True) if picked else ctl.devices())
+
+        def on_setup_gpu() -> None:
+            if state["busy"]:
+                dev_line.set("Gauge is busy. Wait for the current job to finish, then try again.")
+                return
+            if messagebox.askyesno("Set up the graphics card", SETUP_GPU_ASK, parent=win):
+                dev_line.set("Installing the graphics library... this is a large download and can take several minutes.")
+                run_bg(ctl.setup_gpu, show_devices, "Setting up the graphics card...")
+
+        auto_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(inner, text="Automatic (let Gauge pick)", variable=auto_var, command=on_auto).pack(anchor="w", pady=(4, 0))
+        setup_btn = ttk.Button(inner, text="Set up the graphics card", style="Mid.TButton", command=on_setup_gpu)
+
+        def look() -> None:
+            try:
+                info = ctl.devices()
+            except Exception as e:
+                log.warning("could not look at the devices: %s", e)
+                root.after(0, lambda: dev_line.set("Could not look at this computer's devices."))
+                return
+            root.after(0, lambda: show_devices(info))
+
+        threading.Thread(target=look, daemon=True).start()   # finding the devices can take a second or two
+
         rows = ctl.switches()
         for group in sorted({r["group"] for r in rows}, key=lambda g: [r["group"] for r in rows].index(g)):
             ttk.Label(inner, text=group, font=("Segoe UI", 15, "bold")).pack(anchor="w", pady=(12, 4))
@@ -1407,7 +1528,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
                    ("Change the AI that writes...", on_engine),
                    ("Start training GaugeLM", lambda: start_training(None, UNTIL_PAUSED)),
                    ("Pause training", on_pause_training)]),
-        ("Settings", [("Switches...", on_switches)]),
+        ("Settings", [("Switches...", on_switches), ("Devices (processor and graphics cards)...", on_switches)]),
         ("Help", [("About and version", on_about)]),
     ):
         menu = tk.Menu(menubar, tearoff=0)

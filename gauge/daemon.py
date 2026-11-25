@@ -100,7 +100,7 @@ class Daemon:
             else:
                 out["absorb"] = "skipped: LLM not reachable"
         # Sense compute: switch GaugeLM to a GPU that appeared, and find workers that announced themselves.
-        if self.cfg.compute.auto_device:
+        if self.cfg.compute.auto_device and not self.cfg.compute.devices:   # an explicit choice of devices is left alone
             try:
                 from .compute import scan, summary
 

@@ -33,6 +33,12 @@ class Device:
     install_hint: str = ""
     source: str = ""  # which probe found it
     extra: dict[str, Any] = field(default_factory=dict)
+    index: int = 0  # among the graphics cards, in the order the vendor tool lists them (bus order)
+
+    @property
+    def key(self) -> str:
+        """The name the device switch uses: 'cpu', 'gpu0', 'gpu1', ..."""
+        return "cpu" if self.kind == "cpu" else f"gpu{self.index}"
 
     @property
     def device_string(self) -> str:
@@ -177,11 +183,15 @@ def scan() -> list[Device]:
     if platform.system() == "Darwin" and not gpus:
         gpus.append(Device("gpu", "apple", "Apple GPU (Metal)", source="platform"))
     st = backend_status()
-    seen = set()
+    # Two cards of the same model are two devices: only the same card reported by two probes is a repeat.
+    per_source: dict[str, list[Device]] = {}
     for g in gpus:
-        if g.name in seen:
-            continue
-        seen.add(g.name)
+        per_source.setdefault(g.source, []).append(g)
+    first = next(iter(per_source.values()), [])
+    known = {g.name for g in first}
+    gpus = first + [g for src, rest in list(per_source.items())[1:] for g in rest if g.name not in known]
+    for i, g in enumerate(gpus):
+        g.index = i
         if g.vendor == "nvidia":
             g.backend = "cupy"
             g.backend_ready = st["cupy"] and st["cupy_devices"] > 0 and not st["cupy_rocm"]

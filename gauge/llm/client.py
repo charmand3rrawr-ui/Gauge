@@ -188,6 +188,8 @@ class OllamaLLM(_HTTPBase):
         threads = limit.engine_threads()
         if threads is not None:  # the capacity limit: the engine may use only this many processor threads
             payload["options"]["num_thread"] = threads
+        if not getattr(self.cfg, "use_gpu", True):  # the device switch: no graphics card chosen, so none is used
+            payload["options"]["num_gpu"] = 0
         if schema is not None and self.cfg.structured_output and not self._schema_unsupported:
             payload["format"] = schema
         elif json_mode or schema is not None:
