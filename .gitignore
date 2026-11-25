@@ -12,3 +12,5 @@ data/
 projects/
 *.sqlite3
 *.log
+# launcher written by install.sh (it contains this machine's paths)
+/bin/

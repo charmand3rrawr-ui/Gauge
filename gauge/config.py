@@ -368,7 +368,8 @@ class GaugeConfig(BaseModel):
         root = Path(data_dir) if data_dir else DEFAULT_DATA_DIR
         path = root / "config.json"
         if path.exists():
-            raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+            # utf-8-sig: Windows tools (PowerShell 5.1, Notepad) save UTF-8 with a byte-order mark.
+            raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8-sig"))
             raw["data_dir"] = str(root)
             raw = cls._migrate(raw)
             cfg = cls(**raw)

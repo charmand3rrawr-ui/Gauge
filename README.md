@@ -71,13 +71,24 @@ No cloud. No API bills. Your drafts never leave your machine.
 5. **Repeat** - `gauge daemon` runs the whole cycle on a schedule, or Windows Task Scheduler
    runs `gauge daemon --once` for you.
 
-## Install for everyone (double-click)
+## Install for everyone (one file)
 
-Download the ZIP, unzip it, double-click **Install Gauge.bat**, wait. It installs Python and
-Ollama if needed, downloads the models, puts a **Gauge Studio** shortcut on the Desktop and opens
-it: one big box for your idea, **START MY STORY**, **WRITE THE NEXT CHAPTER**, click a chapter to
-read, **Talk to a character**. No accounts, no keys, nothing leaves the computer.
-Details and troubleshooting: [installer/README.md](installer/README.md).
+**Windows.** Download [`Get Gauge.bat`](installer/Get%20Gauge.bat) and double-click it. That one file
+downloads Gauge and installs everything it needs: Python, Ollama (the local AI engine), Gauge and the AI
+models. It looks at your computer first and picks a model that fits its memory and graphics card. Then
+it asks the AI a real test question, shows a checklist of what worked, puts a **Gauge Studio** shortcut
+on the Desktop and opens it: one big box for your idea, **START MY STORY**, **WRITE THE NEXT CHAPTER**,
+click a chapter to read, **Talk to a character**. No git, no accounts, no keys; nothing leaves the
+computer.
+
+**macOS and Linux.** One line in a terminal does the same:
+
+```
+curl -fsSL https://raw.githubusercontent.com/charmand3rrawr-ui/Gauge/ccr-24dc418f-hsneyx/install.sh | bash
+```
+
+Running either again later updates Gauge and keeps your stories and settings.
+Details, options and troubleshooting: [installer/README.md](installer/README.md).
 
 ## Install on Windows (command line, 5 minutes)
 
@@ -94,7 +105,7 @@ The installer creates a venv, installs Gauge, installs [Ollama](https://ollama.c
 if missing, pulls `llama3.1:8b` and `nomic-embed-text`, and runs `gauge doctor`.
 Full details and troubleshooting: [docs/WINDOWS.md](docs/WINDOWS.md).
 
-Other platforms: `pip install -e ".[ml,dev]"` then `gauge init`.
+Other platforms: `./install.sh` from a copy of Gauge, or by hand: `pip install -e ".[ml,dev]"` then `gauge init`.
 
 ## Quick start
 

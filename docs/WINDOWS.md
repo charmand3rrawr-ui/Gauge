@@ -10,6 +10,10 @@
 
 ## Install
 
+The easy way is one file: download `installer\Get Gauge.bat` and double-click it (see
+[installer/README.md](../installer/README.md)). It needs nothing installed first and picks a model that
+fits the machine. The steps below are the command-line route, for when you already use git.
+
 ```powershell
 git clone https://github.com/charmand3rrawr-ui/gauge.git
 cd gauge
