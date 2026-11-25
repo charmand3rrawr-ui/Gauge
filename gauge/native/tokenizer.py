@@ -49,14 +49,10 @@ class BPETokenizer:
         return self.special["<eos>"]
 
     # ---- training -----------------------------------------------------------------
-    @classmethod
-    def train(cls, text: str, vocab_size: int = 4096, max_chars: int = 3_000_000) -> BPETokenizer:
-        text = text[:max_chars]
-        words = Counter(PRETOKEN.findall(text))
-        seqs: dict[tuple[int, ...], int] = {tuple(w.encode("utf-8")): n for w, n in words.items()}
-        merges: list[tuple[int, int]] = []
-        target = max(0, vocab_size - 256 - len(SPECIALS))
-        next_id = 256
+    @staticmethod
+    def _learn(seqs: dict[tuple[int, ...], int], merges: list[tuple[int, int]], target: int) -> list[tuple[int, int]]:
+        """Add merges of the most frequent adjacent pair until there are `target` of them or no pair repeats."""
+        next_id = 256 + len(merges)
         while len(merges) < target:
             pairs: Counter = Counter()
             for seq, n in seqs.items():
@@ -84,7 +80,24 @@ class BPETokenizer:
                 new[seq] = new.get(seq, 0) + n
             seqs = new
             next_id += 1
-        return cls(merges)
+        return merges
+
+    @classmethod
+    def train(cls, text: str, vocab_size: int = 4096, max_chars: int = 3_000_000) -> BPETokenizer:
+        words = Counter(PRETOKEN.findall(text[:max_chars]))
+        seqs: dict[tuple[int, ...], int] = {tuple(w.encode("utf-8")): n for w, n in words.items()}
+        return cls(cls._learn(seqs, [], max(0, vocab_size - 256 - len(SPECIALS))))
+
+    def extended(self, text: str, vocab_size: int, max_chars: int = 3_000_000) -> BPETokenizer:
+        """A tokenizer with a larger vocabulary that keeps every token this one has. The new tokens are
+        further merges learned on `text` as this tokenizer cuts it, so their ids come after the old merges
+        (the special tokens stay last and so move up by the number of tokens added)."""
+        words = Counter(PRETOKEN.findall(text[:max_chars]))
+        seqs: dict[tuple[int, ...], int] = {}
+        for w, n in words.items():
+            seq = tuple(self._encode_word(w))
+            seqs[seq] = seqs.get(seq, 0) + n
+        return BPETokenizer(self._learn(seqs, list(self.merges), max(0, vocab_size - 256 - len(SPECIALS))))
 
     # ---- encode / decode -----------------------------------------------------------
     def _encode_word(self, word: str) -> list[int]:

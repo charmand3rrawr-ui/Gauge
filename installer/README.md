@@ -173,19 +173,25 @@ writer to GaugeLM once its text reads well enough for you.
 Only text that is safe to train on is used: what you added yourself, public-domain books, the chapters
 written for you, and the examples made on your own machine.
 
-### Growing GaugeLM
+### Growing and shrinking GaugeLM
 
 GaugeLM's size is fixed when it is first trained, and more training only improves it up to what that
-size can hold. In **Change the AI**, the line above the **Grow GaugeLM** button says how big it is now
-and what it would become. Press **Grow GaugeLM** to move it to the next size.
+size can hold. In **Change the AI**, a line says how big it is now and what it could become, with four
+buttons. Pause training before using any of them.
 
-- It keeps everything it has learned. Gauge checks that the bigger model gives the same answers as
-  the smaller one before it replaces anything.
-- The extra room is empty until it trains, so press **Start training** afterwards.
-- A bigger model is slower. On a test machine, going from tiny to small made training about 4.5
-  times slower and writing about 3 times slower.
-- **Undo the last growth** puts the smaller model back. Training done after growing is lost.
-- Pause training before growing or undoing.
+- **Grow GaugeLM** moves it to the next size. It keeps everything it has learned: Gauge checks that
+  the bigger model gives the same answers as the smaller one before it replaces anything. The extra
+  room is empty until it trains, so press **Start training** afterwards. A bigger model is slower; on
+  a test machine, going from tiny to small made training about 4.5 times slower and writing about 3
+  times slower.
+- **Grow the vocabulary** teaches it more word-pieces from your library, so the same text takes fewer
+  pieces and it sees further back. It keeps every piece it knows, but the new ones are untrained, so
+  it gets a little worse until it has had a short training session.
+- **Shrink GaugeLM** makes it smaller and faster again. The smaller model is cut out of the bigger one
+  and then taught by it for about ten minutes (**Pause training** ends that early). A smaller model
+  holds less, so some of what it learned is lost; Gauge says how much.
+- **Undo the last size change** puts back the model from before the last of these. Training done
+  since then is lost. Press it again to step back further.
 
 ## How much of the computer Gauge uses
 

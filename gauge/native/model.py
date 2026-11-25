@@ -309,8 +309,12 @@ class GaugeLM:
         return dpre @ self.p[f"l{i}.fc"].T
 
     # ---- forward / backward ----------------------------------------------------------
-    def forward(self, idx, targets=None, kv_cache: Optional[dict] = None, pos_offset: int = 0):
-        """idx: (B,T) ints. Returns (logits, loss, caches). Loss ignores targets < 0."""
+    def forward(self, idx, targets=None, kv_cache: Optional[dict] = None, pos_offset: int = 0,
+                soft=None, soft_weight: float = 0.5):
+        """idx: (B,T) ints. Returns (logits, loss, caches). Loss ignores targets < 0.
+
+        `soft` (B,T,V probabilities from a teacher model) mixes a second target in: the loss becomes
+        (1 - soft_weight) x the usual loss + soft_weight x the cross-entropy against the teacher."""
         xp = self.xp
         idx = from_numpy(xp, np.asarray(idx))
         B, T = idx.shape
@@ -338,20 +342,29 @@ class GaugeLM:
             n = max(1, int(valid.sum()))
             rows = xp.arange(flat_t.shape[0])[valid]
             loss = float(-xp.log(probs[rows, flat_t[valid]] + 1e-12).sum() / n)
-            caches.append((probs, flat_t, valid, n, xf))
+            soft_flat = None
+            if soft is not None:
+                soft_flat = from_numpy(xp, np.asarray(soft)).reshape(-1, self.cfg.vocab_size).astype(xp.float64)
+                taught = float(-(soft_flat[valid] * xp.log(probs[valid] + 1e-12)).sum() / n)
+                loss = (1.0 - soft_weight) * loss + soft_weight * taught
+            caches.append((probs, flat_t, valid, n, xf, soft_flat, soft_weight))
         return logits, loss, caches
 
     def backward(self, caches) -> dict[str, Any]:
         xp = self.xp
         grads = {k: xp.zeros_like(v) for k, v in self.p.items()}
-        probs, flat_t, valid, n, xf = caches[-1]
+        probs, flat_t, valid, n, xf, soft_flat, soft_weight = caches[-1]
         nf = caches[-2]
         idx = caches[0]
         B, T = idx.shape
         C = self.cfg.n_embd
         dlogits = probs.copy()
         rows = xp.arange(flat_t.shape[0])[valid]
-        dlogits[rows, flat_t[valid]] -= 1.0
+        if soft_flat is None:
+            dlogits[rows, flat_t[valid]] -= 1.0
+        else:                                   # the target is a mix of the right token and the teacher's guess
+            dlogits[rows, flat_t[valid]] -= 1.0 - soft_weight
+            dlogits -= soft_weight * soft_flat
         dlogits[~valid] = 0.0
         dlogits = (dlogits / n).astype(xp.float32)
         grads["wte"] += dlogits.T @ xf.reshape(-1, C)

@@ -2545,17 +2545,36 @@ def native_continue(c: Ctx, steps, minutes) -> None:
 @click.option("--heads", type=int, default=None)
 @click.option("--kv-heads", type=int, default=None)
 @click.option("--context", type=int, default=None, help="How many tokens it reads at once.")
+@click.option("--vocab", is_flag=False, flag_value="next", default=None,
+              help="Grow the vocabulary: to this many tokens, or to the next step up when no number is given.")
 @click.option("--plan", "plan_only", is_flag=True, help="Show what would happen and change nothing.")
-@click.option("--undo", is_flag=True, help="Put back the model from before the last growth.")
+@click.option("--undo", is_flag=True, help="Put back the model from before the last change of size.")
 @click.pass_obj
-def native_grow(c: Ctx, to, layers, width, heads, kv_heads, context, plan_only, undo) -> None:
+def native_grow(c: Ctx, to, layers, width, heads, kv_heads, context, vocab, plan_only, undo) -> None:
     """Grow GaugeLM into a bigger model without losing what it learned.
 
-    The grown model gives exactly the same answers as before; the extra capacity is empty until it
-    trains. The old model is kept so the growth can be undone. The vocabulary does not change."""
+    A bigger shape gives exactly the same answers as before; the extra capacity is empty until it
+    trains. --vocab adds tokens learned from the library: every old token is kept, but the model is a
+    little worse until it has trained on the new ones. The old model is always kept, and --undo puts
+    it back."""
     from .native import grow as g
 
     d = c.cfg.native_dir
+    shape_asked = any(v is not None for v in (to, layers, width, heads, kv_heads, context))
+    if vocab and not undo and not plan_only:
+        try:
+            if shape_asked:
+                res = g.grow_checkpoint(d, to, layers=layers, width=width, heads=heads, kv_heads=kv_heads, context=context)
+                console.print(f"[green]{res['message']}[/]")
+            res = g.grow_vocab_checkpoint(d, [t for _, t in _native_docs(c)], None if vocab == "next" else int(vocab))
+        except (g.GrowError, ValueError) as e:
+            console.print(f"[red]{e}[/]")
+            sys.exit(1)
+        g.apply_to_config(c.cfg, res["to"])
+        c.cfg.save()
+        console.print(f"[green]{res['message']}[/]")
+        console.print("`gauge native grow --undo` puts the old one back. Carry on with: gauge native train --resume")
+        return
     try:
         if undo:
             res = g.undo_grow(d)
@@ -2565,7 +2584,7 @@ def native_grow(c: Ctx, to, layers, width, heads, kv_heads, context, plan_only, 
             return
         info = g.can_grow(d)
         if "now" in info:
-            console.print(f"now:   {info['now']}")
+            console.print(f"now:   {info['now']}, vocabulary {info['vocab']} tokens")
         shape = {"layers": layers, "width": width, "heads": heads, "kv_heads": kv_heads, "context": context}
         if plan_only:
             from .native import GaugeLM
@@ -2587,6 +2606,38 @@ def native_grow(c: Ctx, to, layers, width, heads, kv_heads, context, plan_only, 
     console.print(f"[green]{res['message']}[/]")
     console.print(f"The model from before is kept in {res['backup_path']}; `gauge native grow --undo` puts it back.")
     console.print("Carry on with: gauge native train --resume")
+
+
+@native.command("shrink")
+@click.option("--to", type=click.Choice(["tiny", "small", "medium"]), default=None,
+              help="The size to shrink into. Default: the shape it had before it last grew, else the next size down.")
+@click.option("--layers", type=int, default=None)
+@click.option("--width", type=int, default=None)
+@click.option("--heads", type=int, default=None)
+@click.option("--kv-heads", type=int, default=None)
+@click.option("--context", type=int, default=None)
+@click.option("--steps", type=int, default=300, show_default=True, help="How long the bigger model teaches the smaller one.")
+@click.option("--minutes", type=float, default=None, help="Stop teaching after this many minutes.")
+@click.pass_obj
+def native_shrink(c: Ctx, to, layers, width, heads, kv_heads, context, steps, minutes) -> None:
+    """Make GaugeLM smaller and faster, keeping as much of what it learned as a smaller model can hold.
+
+    The smaller model is cut out of the bigger one and then taught by it. This loses something; the
+    report says how much. The bigger model is kept: `gauge native grow --undo` puts it back."""
+    from .native import grow as g
+
+    docs = _native_docs(c)
+    try:
+        res = g.shrink_checkpoint(c.cfg.native_dir, docs, to, steps=steps, minutes=minutes, lr=c.cfg.native.lr,
+                                  progress=lambda r: console.print(f"  taught {r['step']}/{r['of']}  loss {r['loss']:.3f}"),
+                                  layers=layers, width=width, heads=heads, kv_heads=kv_heads, context=context)
+    except g.GrowError as e:
+        console.print(f"[red]{e}[/]")
+        sys.exit(1)
+    g.apply_to_config(c.cfg, res["to"])
+    c.cfg.save()
+    console.print(f"[green]{res['message']}[/]")
+    console.print(f"The bigger model is kept in {res['backup_path']}; `gauge native grow --undo` puts it back.")
 
 
 @native.command("status")

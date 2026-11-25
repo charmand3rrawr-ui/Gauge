@@ -32,6 +32,14 @@ GROW_ASK = ("Grow GaugeLM?\n\nNow: {now}\nAfter: {after}\n\n"
             "The extra room is empty until it trains. It will have about {times:g} times the weights, so training and "
             "writing become several times slower. "
             "The smaller model is kept, so you can undo this.")
+VOCAB_ASK = ("Grow GaugeLM's vocabulary from {now} to {after} tokens?\n\n"
+             "Tokens are the pieces of words it reads and writes. With more of them the same text takes fewer pieces, so it "
+             "sees further back and writes faster. It keeps every token it knows. The new ones are untrained, so it gets a "
+             "little worse until it has trained on them: start a training session afterwards. You can undo this.")
+SHRINK_ASK = ("Shrink GaugeLM?\n\n"
+              "It goes back to the size it had before it last grew (or the next size down), which is faster to train and to "
+              "write with. The bigger model teaches the smaller one for about 10 minutes first. A smaller model holds less, "
+              "so some of what it learned is lost; Gauge will say how much. The bigger model is kept, so you can undo this.")
 CHAT_HINT = ("Type below and press Ask Gauge to talk about your story: ideas, what a character would do, what is "
              "still unresolved. Or type what should happen and press 'Use for the next chapter'.\n")
 CHARACTER_INTRO = ("Teach Gauge how to build a character by showing it finished ones. Read the breakdown to see everything "
@@ -161,38 +169,85 @@ class StudioController:
                     "weights, so slower, with room to learn more.")
         else:
             line = f"GaugeLM is {info['now']}. It cannot grow further: {info['reason']}"
+        if "vocab" in info:
+            line += f" Its vocabulary is {info['vocab']} tokens and can grow to {info['next_vocab']}."
         return {**info, "line": line}
+
+    def _resize(self, work: Callable[[], dict[str, Any]], flag: str) -> dict[str, Any]:
+        """Run one change of GaugeLM's size: refused while it trains, settings kept in step afterwards."""
+        from .native import GrowError
+        from .native.grow import apply_to_config
+
+        if self._training["running"]:
+            return {flag: False, "message": "GaugeLM is training. Press Pause training, wait for it to stop, then try again."}
+        try:
+            res = work()
+        except GrowError as e:
+            return {flag: False, "message": str(e)}
+        apply_to_config(self.cfg, res.get("to") or res["config"])
+        self.cfg.save()
+        self._pipe = None                       # the writer loads the changed model next time
+        return {flag: True, **res}
+
+    def grow_vocabulary(self, vocab_size: Optional[int] = None) -> dict[str, Any]:
+        """Give GaugeLM a larger vocabulary, learned from the library. It keeps every token it knows; the
+        new ones are untrained, so it needs a training session afterwards."""
+        from .learn.corpus import permitted_texts
+        from .native import grow_vocab_checkpoint
+
+        texts = [t for _, t in permitted_texts(self.db, self.cfg.projects_dir)]
+        res = self._resize(lambda: grow_vocab_checkpoint(self.cfg.native_dir, texts, vocab_size), "grown")
+        if res["grown"]:
+            res["message"] += " To go back, press Undo the last size change."
+        return res
+
+    def shrink_gaugelm(self, to: Optional[str] = None, minutes: Optional[float] = 10,
+                       progress: Optional[Callable[[dict[str, Any]], None]] = None) -> dict[str, Any]:
+        """Make GaugeLM smaller and faster. The smaller model is cut out of the bigger one and taught by it
+        for about `minutes` (Pause training ends the teaching early). Some of what it knew is lost."""
+        from .learn.corpus import permitted_texts
+        from .native import shrink_checkpoint
+
+        if self._training["running"]:
+            return {"shrunk": False, "message": "GaugeLM is training. Press Pause training, wait for it to stop, then try again."}
+        docs = permitted_texts(self.db, self.cfg.projects_dir)
+        self._pause.clear()
+
+        def work() -> dict[str, Any]:
+            return shrink_checkpoint(self.cfg.native_dir, docs, to, steps=1_000_000 if minutes else 300, minutes=minutes,
+                                     batch_size=self.cfg.native.batch_size, lr=self.cfg.native.lr,
+                                     should_stop=self._pause.is_set, progress=progress)
+
+        try:
+            res = self._resize(lambda: self._while_training(work), "shrunk")
+        finally:
+            self._pause.clear()
+        if res["shrunk"]:
+            res["message"] += " To go back, press Undo the last size change."
+        return res
+
+    def _while_training(self, work: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        """Run `work` with the training flag up, so Pause training reaches it and nothing else starts."""
+        self._training.update(running=True, step=0, loss=None)
+        try:
+            return work()
+        finally:
+            self._training["running"] = False
 
     def grow_gaugelm(self, to: Optional[str] = None) -> dict[str, Any]:
         """Grow GaugeLM to the next size (or a named one) without losing what it learned."""
-        from .native import GrowError, grow_checkpoint
-        from .native.grow import apply_to_config
+        from .native import grow_checkpoint
 
-        if self._training["running"]:
-            return {"grown": False, "message": "GaugeLM is training. Press Pause training, wait for it to stop, then grow it."}
-        try:
-            res = grow_checkpoint(self.cfg.native_dir, to)
-        except GrowError as e:
-            return {"grown": False, "message": str(e)}
-        apply_to_config(self.cfg, res["to"])
-        self.cfg.save()
-        self._pipe = None                       # the writer loads the grown model next time
-        return {"grown": True, **res, "message": res["message"] + " To go back, press Undo the last growth."}
+        res = self._resize(lambda: grow_checkpoint(self.cfg.native_dir, to), "grown")
+        if res["grown"]:
+            res["message"] += " To go back, press Undo the last size change."
+        return res
 
     def undo_grow_gaugelm(self) -> dict[str, Any]:
-        from .native import GrowError, undo_grow
-        from .native.grow import apply_to_config
+        """Put GaugeLM back to how it was before its size last changed (grown, vocabulary, or shrunk)."""
+        from .native import undo_grow
 
-        if self._training["running"]:
-            return {"undone": False, "message": "GaugeLM is training. Press Pause training, wait for it to stop, then try again."}
-        try:
-            res = undo_grow(self.cfg.native_dir)
-        except GrowError as e:
-            return {"undone": False, "message": str(e)}
-        apply_to_config(self.cfg, res["config"])
-        self.cfg.save()
-        self._pipe = None
-        return {"undone": True, **res}
+        return self._resize(lambda: undo_grow(self.cfg.native_dir), "undone")
 
     def pause_training(self) -> dict[str, Any]:
         """Ask a running training session to stop. It stops after the step it is on, with everything saved;
@@ -1138,7 +1193,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
 
     def on_engine() -> None:
         """Choose which AI writes, and train Gauge's own."""
-        win, frame, alive, note, start = dialog("Change the AI", 760, 600)
+        win, frame, alive, note, start = dialog("Change the AI", 760, 660)
         ttk.Label(frame, text="Which AI writes", font=huge).pack(anchor="w")
         now_var = tk.StringVar(value="Writing with: " + ctl.engine()["label"])
         ttk.Label(frame, textvariable=now_var, wraplength=700, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(2, 0))
@@ -1153,7 +1208,9 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         size_var = tk.StringVar(value=ctl.gaugelm_size()["line"])
         ttk.Label(frame, textvariable=size_var, wraplength=700, font=small).pack(anchor="w")
         grow_row = ttk.Frame(frame)
-        grow_row.pack(fill="x", pady=(4, 6))
+        grow_row.pack(fill="x", pady=(4, 2))
+        shrink_row = ttk.Frame(frame)
+        shrink_row.pack(fill="x", pady=(0, 6))
         ttk.Label(frame, textvariable=note, wraplength=700, font=mid).pack(anchor="w")
 
         def refresh() -> None:
@@ -1172,10 +1229,27 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
                 return
             start(ctl.grow_gaugelm, "Growing GaugeLM... this takes a moment.", refresh)
 
+        def on_vocab() -> None:
+            info = ctl.gaugelm_size()
+            if "vocab" not in info:
+                note.set(info["line"])
+                return
+            if messagebox.askyesno("Grow the vocabulary", VOCAB_ASK.format(now=info["vocab"], after=info["next_vocab"]),
+                                   parent=win):
+                start(ctl.grow_vocabulary, "Learning new tokens from your library...", refresh)
+
+        def on_shrink() -> None:
+            if "vocab" not in ctl.gaugelm_size():
+                note.set(ctl.gaugelm_size()["line"])
+                return
+            if messagebox.askyesno("Shrink GaugeLM", SHRINK_ASK, parent=win):
+                start(ctl.shrink_gaugelm, "Shrinking GaugeLM: the bigger model is teaching the smaller one (about 10 minutes; "
+                                          "Pause training ends it early)...", refresh)
+
         def on_undo_grow() -> None:
-            if messagebox.askyesno("Undo the last growth", "Put GaugeLM back to how it was before it last grew?\n\n"
-                                   "Training it has done since then will be lost.", parent=win):
-                start(ctl.undo_grow_gaugelm, "Putting the smaller GaugeLM back...", refresh)
+            if messagebox.askyesno("Undo the last size change", "Put GaugeLM back to how it was before its size last changed?"
+                                   "\n\nTraining it has done since then will be lost.", parent=win):
+                start(ctl.undo_grow_gaugelm, "Putting the earlier GaugeLM back...", refresh)
 
         def on_use(gaugelm: bool) -> None:
             if state["busy"]:
@@ -1201,8 +1275,10 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         ttk.Combobox(train, textvariable=minutes_var, values=[UNTIL_PAUSED, "10", "30", "60", "120", "240", "480"],
                      state="readonly", width=14).pack(side="left", padx=4)
         ttk.Label(train, text="(minutes)", font=small).pack(side="left")
-        ttk.Button(grow_row, text="Grow GaugeLM", style="Mid.TButton", command=on_grow).pack(side="left", padx=(0, 8))
-        ttk.Button(grow_row, text="Undo the last growth", style="Mid.TButton", command=on_undo_grow).pack(side="left")
+        for row, pair in ((grow_row, (("Grow GaugeLM", on_grow), ("Grow the vocabulary", on_vocab))),
+                          (shrink_row, (("Shrink GaugeLM", on_shrink), ("Undo the last size change", on_undo_grow)))):
+            for text, cmd in pair:
+                ttk.Button(row, text=text, style="Mid.TButton", command=cmd).pack(side="left", padx=(0, 8))
 
     def on_switches() -> None:
         """A window of every switch, grouped, built from the catalog. Changes save immediately."""

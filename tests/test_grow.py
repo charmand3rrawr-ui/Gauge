@@ -75,8 +75,9 @@ def test_old_heads_keep_reading_their_own_keys_when_the_grouping_changes():
 def test_impossible_growths_are_refused_with_the_reason():
     old = ModelConfig(vocab_size=120, **SHAPES[1])
     for change, why in ((dict(n_layer=4), "can only grow"), (dict(n_embd=32, n_head=4), "can only grow"),
-                        (dict(vocab_size=500), "vocabulary"), (dict(n_embd=128, n_head=8), "attention head must stay 8"),
-                        (dict(arch="gpt"), "Llama-style"), ({}, "already is")):
+                        (dict(vocab_size=500), "vocabulary grows separately"),
+                        (dict(n_embd=96, n_head=8), "whole multiple"),             # heads of 12 cannot hold heads of 8
+                        (dict(arch="gpt"), "cannot change the kind of model"), ({}, "already is")):
         with pytest.raises(g.GrowError) as e:
             g.check(old, ModelConfig(**{**old.__dict__, **change}))
         assert why in str(e.value), (change, str(e.value))
@@ -190,7 +191,7 @@ def test_the_studio_grows_gaugelm_and_can_undo_it(cfg, db, tmp_path):
     ctl._training["running"] = False
 
     res = ctl.grow_gaugelm()
-    assert res["grown"] and "Undo the last growth" in res["message"]
+    assert res["grown"] and "Undo the last size change" in res["message"]
     saved = GaugeConfig.load(cfg.data_dir)                       # the settings follow the model
     assert (saved.native.n_layer, saved.native.n_embd, saved.native.block_size, saved.llm.num_ctx) == (2, 64, 64, 64)
     assert ctl.engine()["ready"]                                 # it can still write straight away
@@ -217,8 +218,8 @@ def test_grow_from_the_command_line(tmp_path):
         _docs(), ModelConfig(vocab_size=300, n_layer=1, n_head=2, n_embd=32, n_kv_head=2, block_size=32), _tcfg(10))
     r = runner.invoke(main, ["--data-dir", data, "native", "grow", "--plan", "--layers", "3"])
     assert r.exit_code == 0 and "after: 3 layers, 32 wide" in r.output and "Nothing was changed" in r.output
-    r = runner.invoke(main, ["--data-dir", data, "native", "grow", "--to", "small"])
-    assert r.exit_code == 1 and "attention head must stay 16" in r.output
+    r = runner.invoke(main, ["--data-dir", data, "native", "grow", "--width", "40"])
+    assert r.exit_code == 1 and "multiple of 16" in r.output
     r = runner.invoke(main, ["--data-dir", data, "native", "grow", "--layers", "2", "--width", "64"])
     assert r.exit_code == 0 and "after: 2 layers, 64 wide, 4 heads" in r.output and "kept everything it had learned" in r.output
     assert "native train --resume" in r.output
@@ -241,13 +242,220 @@ def test_the_window_has_grow_and_undo(cfg, db, tmp_path, monkeypatch):
     gui.run_studio(cfg, db)
     _wait_for_jobs()
     _Widget.buttons["Change the AI"]()
-    assert {"Grow GaugeLM", "Undo the last growth"} <= set(_Widget.buttons)
+    assert {"Grow GaugeLM", "Grow the vocabulary", "Shrink GaugeLM", "Undo the last size change"} <= set(_Widget.buttons)
     _Widget.buttons["Grow GaugeLM"]()                           # the yes/no stand-in answers yes
     _wait_for_jobs()
     asked = [s for s in shown if s[0] == "ask"]
     assert asked and "keeps everything it has learned" in asked[-1][1][1] and "2 layers, 64 wide" in asked[-1][1][1]
     assert NativeTrainer(cfg.native_dir).status()["config"]["n_embd"] == 64
-    _Widget.buttons["Undo the last growth"]()
+    _Widget.buttons["Undo the last size change"]()
     _wait_for_jobs()
     assert NativeTrainer(cfg.native_dir).status()["config"]["n_embd"] == 32
+    before = NativeTrainer(cfg.native_dir).status()["config"]["vocab_size"]
+    _Widget.buttons["Grow the vocabulary"]()
+    _wait_for_jobs()
+    assert "It keeps every token it knows" in [s for s in shown if s[0] == "ask"][-1][1][1]
+    assert NativeTrainer(cfg.native_dir).status()["config"]["vocab_size"] > before
+    _Widget.buttons["Grow GaugeLM"]()
+    _wait_for_jobs()
+    called: list = []
+    monkeypatch.setattr(StudioController, "shrink_gaugelm",
+                        lambda self, *a, **k: (called.append(1), {"shrunk": False, "message": "not this time"})[1])
+    _Widget.buttons["Shrink GaugeLM"]()                         # the button is wired; the teaching itself is tested below
+    _wait_for_jobs()
+    assert called
+    assert "A smaller model holds less" in [s for s in shown if s[0] == "ask"][-1][1][1]
     assert not [s for s in shown if s[0] == "error"], shown
+
+
+# ------------------------------------------------------------------ bigger heads, and the older kind of model
+def test_heads_can_grow_to_a_whole_multiple_of_their_size():
+    m, data = _trained(ModelConfig(vocab_size=90, n_layer=2, n_head=4, n_embd=32, n_kv_head=2, block_size=32))
+    x = np.stack([data[i:i + 32] % 90 for i in (0, 40)])
+    for kw in (dict(n_embd=64, n_head=4, n_kv_head=2),               # same heads, twice the size
+               dict(n_embd=96, n_head=4, n_kv_head=4),               # three times the size, ungrouped
+               dict(n_embd=128, n_head=8, n_kv_head=4, n_layer=3)):  # bigger and more heads, and deeper
+        cfg = ModelConfig(**{**m.cfg.__dict__, **kw})
+        big = g.grow(m, cfg)
+        assert cfg.head_dim % m.cfg.head_dim == 0 and cfg.head_dim > m.cfg.head_dim
+        assert g.difference(m, big) < 1e-4 and big.n_params() == g.n_params(cfg)
+        _, _, caches = big.forward(x, x)
+        assert np.abs(big.backward(caches)["l0.wq"]).max() > 0
+        back, was_cut = g.cut_down(big, m.cfg)                      # and cutting it back gives the model it was
+        assert was_cut and all(np.allclose(back.p[k], m.p[k], atol=1e-5) for k in m.p)
+
+
+def test_an_older_gpt_style_model_grows_deeper_and_longer_but_not_wider():
+    old = GaugeLM(ModelConfig(vocab_size=90, n_layer=2, n_head=4, n_embd=32, block_size=16, arch="gpt"), seed=2)
+    cfg = g.target_config(old.cfg)
+    assert (cfg.n_layer, cfg.block_size, cfg.n_embd, cfg.arch) == (4, 32, 32, "gpt")
+    new = g.grow(old, cfg)
+    assert g.difference(old, new) < 1e-5 and new.n_params() == g.n_params(cfg) and old.n_params() == g.n_params(old.cfg)
+    assert new.forward(np.zeros((1, 30), dtype=np.int64))[0].shape == (1, 30, 90)       # reads past the old limit
+    with pytest.raises(g.GrowError) as e:
+        g.target_config(old.cfg, width=64)
+    assert "deeper and read more at once, but not wider" in str(e.value)
+    with pytest.raises(g.GrowError):
+        g.smaller_config(old.cfg)
+
+
+# ------------------------------------------------------------------ the vocabulary
+def test_a_tokenizer_can_be_extended_and_keeps_every_token():
+    from gauge.native import BPETokenizer
+
+    text = _docs()[0][1] + " the lighthouse keeper counted the ships " * 200
+    small = BPETokenizer.train(text, 300)
+    more = small.extended(text, 340)
+    assert more.vocab_size > small.vocab_size and more.merges[:len(small.merges)] == small.merges
+    assert more.merges == BPETokenizer.train(text, more.vocab_size).merges      # the same as learning it all at once
+    line = "the lighthouse keeper counted the ships"
+    assert more.decode(more.encode(line)) == line and len(more.encode(line)) < len(small.encode(line))
+    assert more.special["<bos>"] == small.special["<bos>"] + (more.vocab_size - small.vocab_size)
+    assert small.extended("xyz", 400).vocab_size == small.vocab_size            # nothing repeats: nothing to add
+
+
+def test_growing_the_vocabulary_keeps_every_old_token_and_training_recovers(tmp_path):
+    from gauge.native import BPETokenizer
+
+    d = tmp_path / "native"
+    tr = NativeTrainer(d)
+    docs = [("prose", _docs()[0][1] + " the lighthouse keeper counted the ships as the tide went out " * 300)]
+    tr.train(docs, ModelConfig(vocab_size=285, n_layer=1, n_head=2, n_embd=32, n_kv_head=2, block_size=32), _tcfg(60))
+    old, tok = tr.load()
+    texts = [t for _, t in docs]
+    with pytest.raises(g.GrowError):
+        g.grow_vocab_checkpoint(d, texts, tok.vocab_size)                       # it can only grow
+    with pytest.raises(g.GrowError):
+        g.grow_vocab_checkpoint(d, [""], 400)
+    res = g.grow_vocab_checkpoint(d, texts, tok.vocab_size + 25)
+    new, tok2 = tr.load()
+    assert res["kind"] == "vocabulary" and res["added"] == tok2.vocab_size - tok.vocab_size > 0
+    assert new.cfg.vocab_size == tok2.vocab_size and res["difference"] < 1e-5 and 0 < res["fewer_tokens"] < 1
+    assert "kept every token it knew" in res["message"] and "Start training again" in res["message"]
+    n_old = len(tok.vocab)
+    assert np.array_equal(new.p["wte"][:n_old], old.p["wte"][:n_old])           # old tokens: the same rows
+    assert np.array_equal(new.p["wte"][-5:], old.p["wte"][-5:])                 # the special tokens moved to the end
+    a, b = tok2.merges[n_old - 256]
+    assert np.allclose(new.p["wte"][n_old], (old.p["wte"][a] + old.p["wte"][b]) / 2)   # a new token starts as its two parts
+    assert all(np.array_equal(new.p[k], old.p[k]) for k in old.p if k != "wte")
+    # Text cut the old way scores every old token exactly as it did.
+    ids = np.array([tok.encode("the courier ran through the rain")])
+    assert np.array_equal(old.forward(ids)[0][..., :n_old], new.forward(ids)[0][..., :n_old])
+    # The new tokens are untrained; a short session teaches the model to use them.
+    sample = docs[0][1][:3000]
+    assert res["loss_per_char_before"] > 0 and res["loss_per_char_after"] > 0
+    more = tr.train(docs, new.cfg, _tcfg(60), resume=True)
+    m3, t3 = tr.load()
+    assert more["step"] == 120 and t3.vocab_size == tok2.vocab_size
+    assert g.loss_per_char(m3, t3, sample) < g.loss_per_char(new, tok2, sample)
+    # Undo puts back the old tokenizer as well as the old weights.
+    back = g.undo_grow(d)
+    assert back["kind"] == "vocabulary" and "before its vocabulary grew" in back["message"]
+    assert BPETokenizer.load(d / "tokenizer.json").vocab_size == tok.vocab_size
+    assert tr.status()["config"]["vocab_size"] == tok.vocab_size and tr.status()["step"] == 60
+
+
+# ------------------------------------------------------------------ shrinking
+def test_teacher_targets_have_the_right_gradient():
+    from gauge.native.model import softmax
+
+    m = GaugeLM(ModelConfig(vocab_size=30, n_layer=1, n_head=2, n_embd=16, n_kv_head=1, block_size=8), seed=0)
+    rng = np.random.default_rng(0)
+    x, y = rng.integers(0, 30, (2, 8)), rng.integers(0, 30, (2, 8))
+    soft = softmax(np, rng.standard_normal((2, 8, 30)))
+    plain = m.forward(x, y)[1]
+    _, mixed, caches = m.forward(x, y, soft=soft, soft_weight=0.6)
+    grads = m.backward(caches)
+    assert mixed != plain
+    for name in ("wte", "l0.wq", "l0.w2", "lnf_g"):
+        i = tuple(int(rng.integers(0, n)) for n in m.p[name].shape)
+        keep = float(m.p[name][i])
+        m.p[name][i] = keep + 1e-3
+        up = m.forward(x, y, soft=soft, soft_weight=0.6)[1]
+        m.p[name][i] = keep - 1e-3
+        down = m.forward(x, y, soft=soft, soft_weight=0.6)[1]
+        m.p[name][i] = keep
+        assert abs((up - down) / 2e-3 - float(grads[name][i])) < 1e-3, name
+
+
+def test_shrinking_cuts_the_model_down_teaches_it_and_can_be_undone(tmp_path):
+    d = tmp_path / "native"
+    tr = NativeTrainer(d)
+    small = ModelConfig(vocab_size=300, n_layer=1, n_head=2, n_embd=32, n_kv_head=2, block_size=32)
+    tr.train(_docs(), small, _tcfg(40))
+    g.grow_checkpoint(d)
+    tr.train(_docs(), small, _tcfg(40), resume=True)
+    big, tok = tr.load()
+    assert (big.cfg.n_layer, big.cfg.n_embd) == (2, 64)
+    # With nothing said, it goes back to the shape it had before it grew.
+    assert g.smaller_config(big.cfg, history=g.growth_history(d)).n_embd == 32
+    seen: list = []
+    res = g.shrink_checkpoint(d, _docs(), steps=30, batch_size=4, lr=2e-3, progress=seen.append)
+    now, _ = tr.load()
+    assert res["kind"] == "shrink" and res["cut_from_big"] and res["taught_steps"] == 30 and seen[-1]["step"] == 30
+    assert (now.cfg.n_layer, now.cfg.n_embd, now.cfg.vocab_size) == (1, 32, big.cfg.vocab_size)
+    assert res["params_after"] < res["params_before"] and "bigger model is kept" in res["message"]
+    # Being taught made it better than the bare cut, and it stays close to the big model.
+    assert res["loss_per_char_after"] < res["loss_per_char_cut"]
+    assert res["loss_per_char_after"] < res["loss_per_char_before"] * 1.25
+    assert tr.train(_docs(), small, _tcfg(10), resume=True)["n_params"] == res["params_after"]   # and trains on
+    back = g.undo_grow(d)                                           # the big model again
+    assert back["kind"] == "shrink" and tr.status()["config"]["n_embd"] == 64
+    assert g.undo_grow(d)["kind"] == "shape" and tr.status()["config"]["n_embd"] == 32      # and back before the growth
+
+    stop = g.shrink_checkpoint(d, _docs(), layers=1, width=16, heads=1, kv_heads=1, steps=1000, should_stop=lambda: True)
+    assert stop["taught_steps"] == 1 and tr.status()["config"]["n_embd"] == 16               # a pause ends the teaching
+    with pytest.raises(g.GrowError):
+        g.shrink_checkpoint(d, _docs(), layers=4, width=64)                                    # not smaller
+    with pytest.raises(g.GrowError):
+        g.shrink_checkpoint(tmp_path / "empty", _docs())
+
+
+def test_a_shape_that_cannot_be_cut_starts_fresh_and_is_still_taught():
+    big = GaugeLM(ModelConfig(vocab_size=90, n_layer=2, n_head=4, n_embd=48, n_kv_head=4, block_size=32), seed=1)
+    odd = ModelConfig(vocab_size=90, n_layer=1, n_head=2, n_embd=40, n_kv_head=2, block_size=32)   # heads of 20 from heads of 12
+    model, was_cut = g.cut_down(big, odd)
+    assert not was_cut and model.n_params() == g.n_params(odd)
+
+
+def test_vocabulary_and_shrink_from_the_command_line_and_the_studio(cfg, db, tmp_path):
+    from click.testing import CliRunner
+
+    from gauge.cli import main
+    from gauge.config import GaugeConfig
+    from tests.test_teach import _novel_folder
+
+    _small_gaugelm(cfg)
+    cfg.native.vocab_size = 300
+    cfg.save()
+    ctl = StudioController(cfg, db)
+    assert not ctl.grow_vocabulary()["grown"] and not ctl.shrink_gaugelm()["shrunk"]       # nothing trained yet
+    ctl.add_material([str(_novel_folder(tmp_path))])
+    ctl.train_gaugelm(minutes=0.01, teach=False)
+    v0 = NativeTrainer(cfg.native_dir).status()["config"]["vocab_size"]
+    assert f"Its vocabulary is {v0} tokens and can grow to 4096" in ctl.gaugelm_size()["line"]
+
+    res = ctl.grow_vocabulary(v0 + 20)
+    assert res["grown"] and res["vocab"] > v0 and "Undo the last size change" in res["message"]
+    assert GaugeConfig.load(cfg.data_dir).native.vocab_size == res["vocab"]
+    assert ctl.train_gaugelm(minutes=0.01, teach=False)["trained"]                         # trains on with the new tokens
+    assert ctl.grow_gaugelm()["grown"]
+    ctl._training["running"] = True
+    assert "Pause training" in ctl.shrink_gaugelm()["message"] and "Pause training" in ctl.grow_vocabulary()["message"]
+    ctl._training["running"] = False
+    shrunk = ctl.shrink_gaugelm(minutes=0.02)
+    assert shrunk["shrunk"] and shrunk["taught_steps"] >= 1 and not ctl.training()["running"]
+    assert GaugeConfig.load(cfg.data_dir).native.n_embd == 32 and ctl.engine()["ready"]
+    assert ctl.undo_grow_gaugelm()["undone"] and GaugeConfig.load(cfg.data_dir).native.n_embd == 64
+
+    runner = CliRunner(env={"COLUMNS": "200"})
+    data = cfg.data_dir
+    v1 = NativeTrainer(cfg.native_dir).status()["config"]["vocab_size"]
+    r = runner.invoke(main, ["--data-dir", data, "native", "grow", "--vocab", str(v1 + 10)])
+    assert r.exit_code == 0 and "vocabulary grew from" in r.output and "native grow --undo" in r.output, r.output
+    r = runner.invoke(main, ["--data-dir", data, "native", "grow", "--plan"])
+    assert r.exit_code == 0 and f"vocabulary {NativeTrainer(cfg.native_dir).status()['config']['vocab_size']} tokens" in r.output
+    r = runner.invoke(main, ["--data-dir", data, "native", "shrink", "--steps", "5"])
+    assert r.exit_code == 0 and "GaugeLM shrank from" in r.output and "taught 5/5" in r.output, r.output
+    r = runner.invoke(main, ["--data-dir", data, "native", "shrink", "--layers", "9", "--steps", "5"])
+    assert r.exit_code == 1 and "not smaller" in r.output

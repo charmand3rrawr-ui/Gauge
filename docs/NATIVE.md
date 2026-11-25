@@ -88,11 +88,14 @@ The weights that read *into* the new parts are random, so gradients reach them f
 Before any file is replaced the grown model is run against the old one on the same input and the
 growth is refused if they differ; the old checkpoint is kept in `native/before-grow/`.
 
-What it cannot do: the **vocabulary** does not grow (the tokenizer is built with the first training run),
-the head size cannot change, a model cannot shrink, and the older GPT-style checkpoints cannot be
-grown. A bigger model is also slower. Measured on a 4-core test machine, going from tiny (3.9 million
-weights) to small (25.2 million with the same vocabulary) made training about 4.5 times slower per
-token and writing about 3 times slower; run `gauge native bench --size small` to measure yours first.
+The head size can also grow, to a whole multiple of what it was (`--width 128 --heads 4` on a model
+with heads of 16 gives heads of 32): rotary pair *i* of a small head turns at the same rate as pair
+*k x i* of a head *k* times the size, so the old head sits inside the new one exactly. An older
+GPT-style checkpoint can grow deeper and read more at once, but not wider, because its norm layers
+subtract the mean over every dimension and empty new ones cannot be hidden from that. A bigger model
+is also slower. Measured on a 4-core test machine, going from tiny (3.9 million weights) to small
+(25.2 million with the same vocabulary) made training about 4.5 times slower per token and writing
+about 3 times slower; run `gauge native bench --size small` to measure yours first.
 
 A measured run on a small test model (trained 1,600 steps, then 400 more steps each way):
 
@@ -106,6 +109,64 @@ The loss was identical before and after the growth (5.63018 both ways in an earl
 was far ahead of starting over. On that small corpus the gain over not growing was modest: a bigger
 model needs more text as well as more steps to pull ahead.
 
+### Growing the vocabulary
+
+```powershell
+.\gauge.bat native grow --vocab            # the next step up: 4096 -> 8192 -> 16384 -> 32000
+.\gauge.bat native grow --vocab 6000       # or a number
+.\gauge.bat native grow --to small --vocab # shape and vocabulary together
+```
+
+The tokenizer learns further merges on the library as it already cuts it, so every existing token keeps
+its number and its meaning, and the model gets a new row for each new token, starting as the average of
+the two tokens it joins. Text cut the old way scores every old token exactly as before (checked before
+anything is replaced). Unlike a bigger shape this is **not free**: text is now cut into fewer, longer
+tokens that the model has never seen, so it is worse until it trains on them. Measured on the small
+test model (vocabulary 1,200 to 2,400, 17% fewer tokens for the same text), in loss per character so
+the two vocabularies can be compared:
+
+| | larger vocabulary | vocabulary left alone |
+| --- | --- | --- |
+| before | 1.715 | 1.715 |
+| straight after growing | 1.902 (11% worse) | |
+| after 100 more steps | 1.724 | 1.725 |
+| after 400 more steps | 1.641 | 1.683 |
+
+So expect a short dip, level again after a brief session, and ahead after that.
+
+### Shrinking
+
+```powershell
+.\gauge.bat native shrink                  # back to the shape before it last grew, else the next size down
+.\gauge.bat native shrink --to tiny --minutes 20
+```
+
+A smaller model holds less, so shrinking cannot be lossless. What it does is keep as much as it can:
+the small model is **cut out of the big one** (growth run backwards, which on a freshly grown model
+returns exactly the original weights) and then **taught by it**, training on the library with the big
+model's guesses as targets alongside the real next token. Measured on the same test model, loss per
+character on text it never trained on:
+
+| | loss per character |
+| --- | --- |
+| the small model before it grew | 1.716 |
+| the big model after 800 more steps | 1.597 |
+| cut down, not taught | 1.656 |
+| cut down and taught for 300 steps | 1.585 |
+| a new small model taught for 300 steps from nothing | 2.182 |
+
+Most of what the big model learned survived the cut, and teaching closed the rest on that corpus. On
+a larger library, where the big model has learned things a small one cannot hold, expect a real loss;
+the command reports it. A shape the big model could not have been grown from (heads that do not
+divide evenly, for example) is not cut but started fresh and taught, which keeps much less.
+
+`gauge native grow --undo` steps back through every change of size in turn: a growth, a larger
+vocabulary or a shrink. The model from before each change is kept in `native/before-grow/`.
+
+What still cannot be done: the vocabulary cannot shrink, heads cannot grow by a fraction, an older
+GPT-style model cannot widen or shrink, and nothing here makes a model better by itself. Growing adds
+room; only training fills it.
+
 ## From Gauge Studio
 
 The Studio's **Teach Gauge** window has the same controls without a terminal: **Use GaugeLM** / **Use the
@@ -113,7 +174,7 @@ downloaded model** to choose the writer, and **Start training** / **Pause traini
 paused or for a set number of minutes, stops within a few seconds of a pause with everything saved, and
 carries on from that step next time. When the downloaded model is running, starting training first has
 it answer a few of Gauge's tasks (distillation), so the big model teaches the small one while it carries
-on doing the writing. **Grow GaugeLM** and **Undo the last growth** are in the same window. Training respects the capacity limit (`gauge compute limit`). The switch
+on doing the writing. **Grow GaugeLM**, **Grow the vocabulary**, **Shrink GaugeLM** and **Undo the last size change** are in the same window. Training respects the capacity limit (`gauge compute limit`). The switch
 `native.after_chapter_minutes` trains GaugeLM a little after every chapter. See
 [installer/README.md](../installer/README.md).
 
@@ -140,6 +201,7 @@ agent profile and short chapters.
 - `train.py`: corpus gathering and dedup, prose/instruction streams, curriculum, gradient
   accumulation, schedule, held-out evaluation, checkpoints, time budgets, `continue_training`.
 - `distill.py`: task-shaped prompts over corpus excerpts answered by the teacher model.
-- `grow.py`: function-preserving growth to a larger shape, checked before it replaces anything, with undo.
+- `grow.py`: function-preserving growth to a larger shape, vocabulary growth, shrinking by cutting down and
+  teaching, each checked or measured before it replaces anything, with undo.
 - `evaluate.py`: presets table, benchmark, perplexity, instruction-shape probes.
 - `client.py`: the `NativeLLM` provider.
