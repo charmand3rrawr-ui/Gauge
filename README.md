@@ -180,7 +180,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge persona build/show/blend` | the author persona learned from your chapters |
 | `gauge character arc` | planned personality drift |
 | `gauge corpus stats/build/fetch/find` | compile the training library from text you may train on, licence-tracked; `find` goes online and adds out-of-copyright novels by itself; see [docs/CORPUS.md](docs/CORPUS.md) |
-| `gauge native presets/bench/train/grow/shrink/teachers/teach/report/distill/eval/continue/status/sample/tokenizer` | GaugeLM, the built-in model; see [docs/NATIVE.md](docs/NATIVE.md) |
+| `gauge native presets/bench/train/grow/shrink/teachers/teach/report/understand/alike/distill/eval/continue/status/sample/tokenizer` | GaugeLM, the built-in model; see [docs/NATIVE.md](docs/NATIVE.md) |
 | `gauge compute scan/watch/token/discover/add/list/remove`, `gauge worker` | sense GPUs; pool the machines you own; see [docs/COMPUTE.md](docs/COMPUTE.md) |
 | `gauge bot new/list/run/test/schedule/remove` | bots: standalone programs written and tested by the Engineer; see [docs/BOTS.md](docs/BOTS.md) |
 | `gauge code cards/search/learn` | programming knowledge cards and your own notes |
@@ -196,7 +196,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge build-sft PROJECT` | curate instruction-tuning data from accepted chapters |
 | `gauge serve [--host H] [--port P] [--token T]` | run headless with an HTTP API + web dashboard; on a server, VPS or container; see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `gauge gui` | open Gauge Studio (the big-button window) |
-| `gauge write NAME [--chapters N] [--fresh] [--seed S]` | draft, score, revise, save; resumes checkpointed drafts; `--seed` makes it reproducible |
+| `gauge write NAME [--chapters N] [--words W] [--fresh] [--seed S]` | draft, carry on to the asked length, score, revise, save; resumes checkpointed drafts; `--seed` makes it reproducible |
 | `gauge bench` | measure model speed; estimate minutes per chapter |
 | `gauge projects [NAME]` | list projects / status |
 | `gauge character blueprint/sheet/teach/promote/study/school/check/add` | everything a new character needs, and teaching Gauge to build one from finished examples; see [docs/CHARACTER-SCHOOL.md](docs/CHARACTER-SCHOOL.md) |

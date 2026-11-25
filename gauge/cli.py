@@ -485,8 +485,10 @@ def absorb(c: Ctx, n: Optional[int]) -> None:
 @click.option("--chapters", default=1, show_default=True)
 @click.option("--fresh", is_flag=True, help="Ignore a checkpointed draft and generate from scratch.")
 @click.option("--seed", type=int, default=None, help="Make this run reproducible (seeds RNGs and the bandit).")
+@click.option("--words", type=click.IntRange(100, 20000), default=None,
+              help="How many words each chapter should be, from now on for this story.")
 @click.pass_obj
-def write(c: Ctx, name: str, chapters: int, fresh: bool, seed: Optional[int]) -> None:
+def write(c: Ctx, name: str, chapters: int, fresh: bool, seed: Optional[int], words: Optional[int]) -> None:
     """Write the next chapter(s) of a project: draft -> score -> revise -> save."""
     from .write import WritePipeline
 
@@ -497,8 +499,12 @@ def write(c: Ctx, name: str, chapters: int, fresh: bool, seed: Optional[int]) ->
         console.print(f"[red]LLM not reachable[/] ({pipe.llm.describe()}). Run `gauge doctor`.")
         sys.exit(1)
     p = pipe.open_project(name)
+    if words:
+        p.state.target_chapter_words = words
+        p.save()
+        console.print(f"Chapters of {p.state.name} will be about {words:,} words.")
     for res in pipe.write_many(p, chapters, fresh=fresh):
-        console.print(f"[green]Chapter {res.number}[/] {res.title}  score={res.score:.2f} "
+        console.print(f"[green]Chapter {res.number}[/] {res.title}  {res.words:,} words  score={res.score:.2f} "
                       f"(measured {res.critique.measured:.2f} / judged {res.critique.judged:.2f}) "
                       f"revisions={res.revisions}{'  [resumed from checkpoint]' if res.resumed else ''}\n  -> {res.path}")
         steps = "  ".join(f"{k} {v:.0f}s" for k, v in res.timings.items() if k != "total")
@@ -2842,6 +2848,52 @@ def native_report(c: Ctx) -> None:
     k = card["counts"]
     console.print(f"Collected so far: {k['answers']} worked answers, {k['tutor']} corrections, {k['lessons']} practice scenes, "
                   f"over {card['sessions']} session(s).")
+
+
+@native.command("understand")
+@click.option("--words", type=int, default=8, show_default=True, help="How many of its hardest words to list.")
+@click.pass_obj
+def native_understand(c: Ctx, words: int) -> None:
+    """How well GaugeLM understands: how much it uses context, and the words it is most lost on."""
+    from .learn.corpus import permitted_texts
+    from .native import NativeTrainer, understand
+
+    tr = NativeTrainer(c.cfg.native_dir)
+    if not tr.exists():
+        console.print("[red]GaugeLM has not been trained yet.[/]")
+        sys.exit(1)
+    model, tok = tr.load(device=c.cfg.native.device)
+    text = "\n".join(t for _, t in permitted_texts(c.db, c.cfg.projects_dir))[-400_000:]
+    rep = understand.report(model, tok, text, words=words)
+    for line in rep["lines"]:
+        console.print(line)
+    if rep["hard_words"]:
+        table = Table(title="words it is most lost on (taught first by the school)")
+        for col in ("word", "surprise", "seen", "pieces", "where"):
+            table.add_column(col)
+        for h in rep["hard_words"]:
+            table.add_row(h["word"], f"{h['surprise']:.1f}", str(h["seen"]), str(h["pieces"]), h["sentence"][:70])
+        console.print(table)
+
+
+@native.command("alike")
+@click.argument("word")
+@click.option("--count", type=int, default=8, show_default=True)
+@click.pass_obj
+def native_alike(c: Ctx, word: str, count: int) -> None:
+    """The words GaugeLM treats as most like WORD: a look at what it has learned the word means."""
+    from .native import NativeTrainer, understand
+
+    tr = NativeTrainer(c.cfg.native_dir)
+    if not tr.exists():
+        console.print("[red]GaugeLM has not been trained yet.[/]")
+        sys.exit(1)
+    model, tok = tr.load(device=c.cfg.native.device)
+    res = understand.neighbours(model, tok, word, count)
+    if not res["ok"]:
+        console.print(f"[yellow]{res['reason']}[/]")
+        return
+    console.print(f"To GaugeLM, '{word}' is most like: " + ", ".join(f"{a['word']} ({a['closeness']:.2f})" for a in res["alike"]))
 
 
 @native.command("eval")

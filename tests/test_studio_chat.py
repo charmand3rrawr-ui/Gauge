@@ -140,7 +140,7 @@ def test_the_window_has_a_working_chat_prompt(cfg, db, tmp_path, monkeypatch):
     gui.run_studio(cfg, db)
     _wait_for_jobs()
     assert {"Ask Gauge", "Use for the next chapter"} <= set(_Widget.buttons) and "Ask Gauge..." in _Widget.menu
-    box = _Entry.made[0].kw["textvariable"]
+    box = next(e.kw["textvariable"] for e in _Entry.made if e.kw["textvariable"].get() == "")   # the chat box starts empty
     log = next(t for t in made if "press Ask Gauge" in t.get())
 
     _Widget.buttons["Ask Gauge"]()                             # an empty box does nothing

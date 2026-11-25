@@ -75,6 +75,18 @@ Every button is also in the menu bar at the top of the window (**Story**, **Teac
 shrinks, never a button. The top of the window says which AI is writing and how much of the computer
 Gauge may use; the title bar shows the installed version.
 
+## How long a chapter is
+
+Above **WRITE THE NEXT CHAPTER** there is a box, **Words in the next chapter**. Type a number (for
+example `1500`, or `2k`) and press the button. The story remembers the number for the chapters after,
+and each story keeps its own.
+
+A model tends to stop when it feels finished, often well short of what was asked. Gauge now checks
+the length and, if the chapter is short, has the model carry on from its own last lines until it is
+within about a tenth of the number you typed. Chapters can be from 100 to 20,000 words; long ones
+take proportionally longer. The switch **Write chapters to the asked length** turns the carrying-on
+off.
+
 ## Asking Gauge, and saying what happens next
 
 At the bottom of the right-hand side there is a box to type in, with two buttons.
@@ -202,6 +214,23 @@ on its own. **Change the AI** says who is teaching and how it is doing.
 
 To make it learn faster, the biggest step is the capacity limit in **Switches**: at 50% instead of
 20% it should train roughly two and a half times as fast.
+
+### How well GaugeLM understands
+
+A language model has no dictionary. It learns what a word means from the words around it, over many
+passages, and it learns to use context (what came earlier in the passage) only gradually. In
+**Change the AI**, press **How well does it understand?** to measure it:
+
+- how many next word-pieces it is hesitating between when it can see the passage, compared with
+  when it can only see the last four pieces. If the two numbers are close, it is barely using
+  context yet;
+- how often its first guess for the next piece is right;
+- the words in your library it is most lost on.
+
+The teachers now explain exactly those words, in the sentence where your library uses them, at the
+start of training sessions. What raises understanding, in order: more training, more text, a longer
+reading length and a larger model (**Grow GaugeLM**), and a larger vocabulary so common words are one
+piece each (**Grow the vocabulary**).
 
 ### Growing and shrinking GaugeLM
 

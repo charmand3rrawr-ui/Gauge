@@ -144,6 +144,7 @@ class LearnConfig(BaseModel):
 
 class WriteConfig(BaseModel):
     target_chapter_words: int = 2200
+    reach_length: bool = True  # carry a chapter on until it is about as long as asked (models tend to stop short)
     max_revisions: int = 2
     min_acceptable_score: float = 0.62
     exemplars_in_prompt: int = 4

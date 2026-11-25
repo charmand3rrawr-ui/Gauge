@@ -470,3 +470,19 @@ STUDIO_CHAT_PROMPT = """{story}
 {history}The author says: {message}
 
 Answer the author."""
+
+
+CONTINUE_PROMPT = """You are partway through chapter {number} of "{title_novel}" ("{ch_title}"). It has {have} words so far and
+needs about {more} more to reach its length.
+
+THE PLAN FOR THIS CHAPTER:
+Goal: {goal}
+Turn: {turn}
+It must end on: {cliffhanger}
+
+THE CHAPTER SO FAR ENDS WITH:
+{tail}
+
+Carry straight on from the last line above for about {more} words. Do not repeat or summarise what is already written.
+{ending}
+Prose only. No title, no notes."""

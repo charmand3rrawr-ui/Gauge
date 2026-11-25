@@ -69,6 +69,7 @@ now happen at the start of every training session in the Studio, and on demand w
 | worked answers | answers Gauge's real tasks (continue, open, end, title, score, outline, brief, dialogue) on excerpts of your library | GaugeLM learns the behaviour, not just the prose |
 | the tutor | GaugeLM attempts a task itself; the teacher marks it out of 10 and writes the answer it should have given | practice goes where it is weakest: the lower the running mark for a kind of task, the more often it is set |
 | practice scenes | writes very short, simple scenes on fresh subjects, harder as GaugeLM trains | clean text at a level a small model can absorb |
+| word study | explains the words GaugeLM is most surprised by, in the sentence where your library uses them | teaching goes to the words it understands least |
 
 **More than one teacher.** Every chat model installed in Ollama teaches, taking turns session by
 session (one teacher per session, so the engine is not swapping models in and out of memory).
@@ -105,6 +106,56 @@ read from the environment variable you name, not stored in the settings.
 GaugeLM improves depends on the teachers and has not been measured here; the report card is a teacher
 model's opinion, useful as a trend rather than a measurement. A teacher is only ever shown text that
 is permitted for training (your own writing, public-domain books, your Gauge chapters).
+
+### What it understands: word meaning and context
+
+A language model has no dictionary. It learns what a word means from the company the word keeps, and
+two things inside it carry that. Each token has a row of numbers (its embedding), and words used in
+similar surroundings end up with similar rows: that is as near as it gets to meaning. Attention lets
+each position look back over the passage, so the same word can be read differently in different
+surroundings: that is context. Neither can be handed to it. Both are learned, and context is learned
+late, because guessing from the last two or three words pays off first.
+
+`gauge/native/understand.py` measures both, so it is plain whether it is learning:
+
+```powershell
+.\gauge.bat native understand     # how much it uses context, how often it guesses right, its hardest words
+.\gauge.bat native alike courier  # the words it treats as most like "courier"
+```
+
+The context measure predicts the same next tokens twice, once seeing the passage and once seeing only
+the last four tokens, and reports each as the number of next pieces it is hesitating between. On a
+small test model:
+
+| training | hesitating between, with the passage | with only four tokens | context makes it surer by |
+| --- | --- | --- | --- |
+| 20 steps | 824 | 854 | 1% |
+| 500 steps | 107 | 114 | 1% |
+| 2,000 steps | 43 | 46 | 2% |
+| 7,000 steps (a separate run) | 46 | 70 | 10% |
+
+It got far better at predicting long before it started using context: through 2,000 steps it was in
+effect looking at the last few tokens only. That is the "it does not understand" you can feel in its
+writing, as a number. The same model with attention switched off scores exactly 0%, which is the
+check that the measure means what it says.
+
+**What raises it**, in order of effect: more training steps; more text; a longer reading length and a
+bigger model (`gauge native grow`), since it cannot use what it cannot see; a larger vocabulary
+(`gauge native grow --vocab`), so a common word is one token with one meaning instead of several
+pieces.
+
+**Word study.** `hard_words` finds the ordinary words in your library GaugeLM is most surprised by
+(names, numbers and words seen once are left out). The school has a teacher explain each one in the
+sentence where your library uses it and then use it three other ways; a word is taught once. This aims
+the teaching at what it understands least. Its effect on the measures above has not been measured: it
+needs a real teacher model, which the build machine does not have.
+
+**Tried and left out: context drills.** Practice passages were built so that the ending depends on a
+detail given earlier (who has the key, what colour the door is), with ordinary sentences in between,
+on the theory that they would force it to look back. In two trials they made things worse: at 7,000
+steps the model trained with them hesitated between 56 next pieces on real text instead of 46, used
+context less (5.5% against 10%), and answered the drills themselves barely above chance (15 of 120).
+At this size the time is better spent on real prose, so they are not in Gauge.
 
 ### Other ways to make it learn faster
 
@@ -262,7 +313,8 @@ agent profile and short chapters.
 - `train.py`: corpus gathering and dedup, prose/instruction streams, curriculum, gradient
   accumulation, schedule, held-out evaluation, checkpoints, time budgets, `continue_training`.
 - `distill.py`: task-shaped prompts over corpus excerpts answered by the teacher model.
-- `school.py`: the pool of teachers, the tutor and its marks, graded practice scenes, the report card.
+- `school.py`: the pool of teachers, the tutor and its marks, graded practice scenes, word study, the report card.
+- `understand.py`: how much it uses context, the words it is most lost on, the words it treats as alike.
 - `grow.py`: function-preserving growth to a larger shape, vocabulary growth, shrinking by cutting down and
   teaching, each checked or measured before it replaces anything, with undo.
 - `evaluate.py`: presets table, benchmark, perplexity, instruction-shape probes.

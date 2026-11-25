@@ -363,6 +363,11 @@ class FakeLLM:
             if canned is not None:
                 return json.dumps(canned)
             return json.dumps({"ok": True}) if json_mode else "A fine question. The answer is in chapter one."
+        if "a student writer does not know the word" in low:
+            m = re.search(r'the word "([^"]+)"', prompt)
+            w = m.group(1) if m else "word"
+            return (f"Here \"{w}\" means the thing the passage is about.\n1. She did not trust the {w}.\n"
+                    f"2. Nobody had seen a {w} like it.\n3. The {w} was gone by morning.")
         if "a student writer was set this task" in low:
             return "mark: 4\nThe seal was whole again. Rin did not wait to learn why; she ran, and the footsteps ran with her."
         if "the author says:" in low and not json_mode:

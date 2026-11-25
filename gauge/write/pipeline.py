@@ -62,6 +62,11 @@ class ChapterResult:
     llm_calls: int = 0
     llm_seconds: float = 0.0
     resumed: bool = False
+    words: int = 0  # how long the chapter came out
+    words_asked: int = 0  # how long it was asked to be
+
+
+MIN_CHAPTER_WORDS, MAX_CHAPTER_WORDS = 100, 20000
 
 
 class WritePipeline:
@@ -462,7 +467,10 @@ class WritePipeline:
         return Project(self.cfg.projects_dir, name)
 
     # ---- one chapter -------------------------------------------------------
-    def write_next(self, project: Project, fresh: bool = False) -> ChapterResult:
+    def write_next(self, project: Project, fresh: bool = False, words: Optional[int] = None) -> ChapterResult:
+        """`words` sets how long this chapter and the ones after it should be (kept with the story)."""
+        if words:
+            project.state.target_chapter_words = max(MIN_CHAPTER_WORDS, min(MAX_CHAPTER_WORDS, int(words)))
         n = project.next_chapter_number()
         self._ctx = {"project": project.name, "chapter": n}
         timings: dict[str, float] = {}
@@ -536,6 +544,10 @@ class WritePipeline:
             t0 = time.monotonic()
             text = self.drafter.draft(project, plan, prev, words, cast=cast_text, world=world_text,
                                       techniques=self._technique_cards(plan), avoid=avoid_text, council=council_text)
+            if self.cfg.write.reach_length:
+                text, carried = self.drafter.reach_length(text, words, project, plan)
+                if carried:
+                    log.info("ch %d: carried on %d time(s) to reach %d words (now %d)", n, carried, words, len(text.split()))
             timings["draft"] = time.monotonic() - t0
             first_draft = text
             revisions = 0
@@ -604,10 +616,13 @@ class WritePipeline:
             except Exception as e:
                 log.warning("A/B titling failed for ch %d: %s", n, e)
 
+        if self.cfg.write.reach_length and len(best_text.split()) < words * 0.9:
+            # A revision can come back shorter than what it revised; the chapter is carried on once more.
+            best_text, _ = self.drafter.reach_length(best_text, words, project, plan, passes=2)
         meta = {
             "title": plan.title, "score": round(best.score, 3), "measured": round(best.measured, 3),
             "judged": round(best.judged, 3), "rubric": best.rubric, "revisions": revisions,
-            "words": len(best_text.split()), "written_at": utcnow().isoformat(),
+            "words": len(best_text.split()), "words_asked": words, "written_at": utcnow().isoformat(),
             "cast": cast_names, "character_consistency": round(self._consistency(best_reviews), 3),
             "world_consistency": round(best_wrev.consistency, 3) if best_wrev else None,
             "novelty": round(best_nov.score, 3) if best_nov else None,
@@ -659,7 +674,8 @@ class WritePipeline:
                              cast=cast_names, character_reviews=best_reviews, world_review=best_wrev, novelty=best_nov,
                              agent_reviews=best_agents, timings=timings,
                              llm_calls=len(self.calls.records) - calls_before,
-                             llm_seconds=round(self.calls.total_seconds() - secs_before, 1), resumed=resumed)
+                             llm_seconds=round(self.calls.total_seconds() - secs_before, 1), resumed=resumed,
+                             words=len(best_text.split()), words_asked=words)
 
     def _critique(self, text: str, plan, n: int, roster: Roster, cast_names: list[str],
                   world_state: Optional[WorldState] = None, previous_texts: Optional[list[str]] = None,

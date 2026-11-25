@@ -376,6 +376,21 @@ class StudioController:
 
         return school.report_card(self.cfg.models_dir / "datasets")
 
+    def understanding(self) -> dict[str, Any]:
+        """How well GaugeLM understands: how much it uses context, and the words it is most lost on."""
+        from .learn.corpus import permitted_texts
+        from .native import NativeTrainer, understand
+
+        tr = NativeTrainer(self.cfg.native_dir)
+        if not tr.exists():
+            return {"ok": False, "message": "GaugeLM has not been trained yet, so there is nothing to measure."}
+        text = "\n".join(t for _, t in permitted_texts(self.db, self.cfg.projects_dir))[-400_000:]
+        if len(text.split()) < 200:
+            return {"ok": False, "message": "There is too little text in the library to measure on. Add a book first."}
+        model, tok = tr.load(device=self.cfg.native.device)
+        rep = understand.report(model, tok, text)
+        return {"ok": True, **rep, "message": rep["line"]}
+
     def school_line(self) -> str:
         """Who teaches GaugeLM and how it is doing, in a sentence or two."""
         try:
@@ -512,12 +527,39 @@ class StudioController:
         p = self.pipeline().new_project(title, "" if long else idea, genres or ["Adventure"], premise_doc=idea if long else "")
         return p.state.name
 
-    def write_next(self, name: str) -> dict[str, Any]:
+    def chapter_words(self, name: Optional[str] = None) -> int:
+        """How long chapters are asked to be: this story's own number, or the default for new stories."""
+        from .write.project import Project
+
+        if name and Project.exists(self.cfg.projects_dir, name):
+            return int(Project(self.cfg.projects_dir, name).state.target_chapter_words)
+        return int(self.cfg.write.target_chapter_words)
+
+    @staticmethod
+    def read_words(text: Any) -> int:
+        """The number typed in the words box. Accepts '1,500', '1500 words', '2k'. Raises ValueError with
+        a sentence the window can show."""
+        from .write.pipeline import MAX_CHAPTER_WORDS, MIN_CHAPTER_WORDS
+
+        raw = str(text or "").strip().lower().replace(",", "").replace("words", "").replace("word", "").strip()
+        try:
+            n = int(float(raw[:-1]) * 1000) if raw.endswith("k") else int(float(raw))
+        except ValueError:
+            raise ValueError("Type how many words the chapter should be, as a number: for example 1500.") from None
+        if not MIN_CHAPTER_WORDS <= n <= MAX_CHAPTER_WORDS:
+            raise ValueError(f"A chapter can be from {MIN_CHAPTER_WORDS:,} to {MAX_CHAPTER_WORDS:,} words.")
+        return n
+
+    def write_next(self, name: str, words: Any = None) -> dict[str, Any]:
+        """Write the next chapter. `words` (a number, or what was typed in the box) says how long it should
+        be; the story remembers it for the chapters after."""
         self._require_engine()
+        asked = self.read_words(words) if words not in (None, "") else None
         pipe = self.pipeline()
-        res = pipe.write_next(pipe.open_project(name))
+        res = pipe.write_next(pipe.open_project(name), words=asked)
         info = {"number": res.number, "title": res.title, "score": round(res.score, 2), "path": str(res.path),
-                "seconds": round(res.timings.get("total", 0.0)), "gaugelm": ""}
+                "seconds": round(res.timings.get("total", 0.0)), "gaugelm": "", "words": res.words,
+                "words_asked": res.words_asked}
         # GaugeLM keeps learning while another model writes: the chapter just written is new material for it.
         after = self.cfg.native.after_chapter_minutes
         if after > 0:
@@ -937,8 +979,14 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     # ---- left column, bottom: the buttons. Packed BEFORE the chapter list so they always get their space.
     bottom = ttk.Frame(left)
     bottom.pack(side="bottom", fill="x")
+    words_row = ttk.Frame(bottom)
+    words_row.pack(fill="x", pady=(6, 0))
+    ttk.Label(words_row, text="Words in the next chapter:", font=mid).pack(side="left")
+    words_var = tk.StringVar(value=str(ctl.chapter_words()))
+    words_entry = ttk.Entry(words_row, textvariable=words_var, width=8, font=big)
+    words_entry.pack(side="left", padx=6)
     write_row = ttk.Frame(bottom)
-    write_row.pack(fill="x", pady=(6, 2))
+    write_row.pack(fill="x", pady=(4, 2))
     grid = ttk.Frame(bottom)
     grid.pack(fill="x")
     grid.columnconfigure(0, weight=1, uniform="half")
@@ -1038,6 +1086,9 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         chat_log.see("end")
         chat_log.configure(state="disabled")
 
+    def show_words() -> None:
+        words_var.set(str(ctl.chapter_words(state["project"])))
+
     def show_direction() -> None:
         asked = ctl.direction(state["project"])
         direction_line.set(f"The next chapter will follow: \"{asked}\"" if asked else "")
@@ -1073,6 +1124,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             proj_var.set(f"Story: {name}")
             refresh_chapters()
             show_direction()
+            show_words()
             reader.delete("1.0", "end")
             reader.insert("1.0", f"'{name}' is ready!\n\nPress WRITE THE NEXT CHAPTER to begin.")
 
@@ -1083,13 +1135,21 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             messagebox.showinfo("Gauge", "Start a story first!")
             return
 
+        try:
+            asked = ctl.read_words(words_var.get())
+        except ValueError as e:
+            messagebox.showinfo("Gauge", str(e))
+            return
+
         def done(info: dict[str, Any]) -> None:
             refresh_chapters()
             show_chapter(info["number"])
             show_direction()                    # the instruction was for that chapter; it is used up now
-            status_var.set(f"Chapter {info['number']} done in {info['seconds']}s (score {info['score']}). {info.get('gaugelm', '')}".strip())
+            status_var.set(f"Chapter {info['number']} done in {info['seconds']}s: {info['words']:,} words (asked for "
+                           f"{info['words_asked']:,}), score {info['score']}. {info.get('gaugelm', '')}".strip())
 
-        run_bg(lambda: ctl.write_next(state["project"]), done, "Writing the next chapter... this takes a few minutes.")
+        run_bg(lambda: ctl.write_next(state["project"], asked), done,
+               f"Writing the next chapter, about {asked:,} words... this takes a few minutes.")
 
     def on_pick(_evt: Any = None) -> None:
         sel = chapters_box.curselection()
@@ -1107,6 +1167,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             proj_var.set(f"Story: {pick}")
             refresh_chapters()
             show_direction()
+            show_words()
             if ctl.chapters(pick):
                 show_chapter(len(ctl.chapters(pick)))
 
@@ -1412,6 +1473,8 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         ttk.Combobox(train, textvariable=minutes_var, values=[UNTIL_PAUSED, "10", "30", "60", "120", "240", "480"],
                      state="readonly", width=14).pack(side="left", padx=4)
         ttk.Label(train, text="(minutes)", font=small).pack(side="left")
+        ttk.Button(train, text="How well does it understand?", style="Mid.TButton",
+                   command=lambda: start(ctl.understanding, "Measuring how GaugeLM uses context...")).pack(side="left", padx=(10, 0))
         for row, pair in ((grow_row, (("Grow GaugeLM", on_grow), ("Grow the vocabulary", on_vocab))),
                           (shrink_row, (("Shrink GaugeLM", on_shrink), ("Undo the last size change", on_undo_grow)))):
             for text, cmd in pair:

@@ -13,6 +13,8 @@ model taught, one way (`distill.py`: the downloaded model answers Gauge's tasks)
   practised most. The marks over time are its report card.
 * **Graded lessons.** The teacher writes very short, simple scenes: clean text at a level a small model
   can actually absorb, getting harder as it trains.
+* **Word study.** Gauge measures which words in your library GaugeLM is most surprised by, and the
+  teacher explains each one in the sentence where your library uses it, then uses it three more ways.
 
 Everything a teacher is shown comes from text that is permitted for training (your own writing,
 public-domain books, your Gauge chapters). Every row records which teacher wrote it and under what
@@ -36,7 +38,7 @@ from .distill import TASKS
 log = logging.getLogger(__name__)
 
 STATE = "school_state.json"
-FILES = {"answers": "distill.jsonl", "tutor": "tutor.jsonl", "lessons": "lessons.jsonl"}
+FILES = {"answers": "distill.jsonl", "tutor": "tutor.jsonl", "lessons": "lessons.jsonl", "words": "words.jsonl"}
 
 # Licence of the published weights, by the start of the model's name. "open" means a standard permissive
 # licence (Apache-2.0 or MIT). The others have their own terms: fine for learning on your own computer,
@@ -174,6 +176,12 @@ TUTOR_PROMPT = ("A student writer was set this task:\n\n{task}\n\nThe student wr
                 "with no comment about the student.")
 
 
+WORD_PROMPT = ("A student writer does not know the word \"{word}\". It appears in this passage:\n\n{sentence}\n\n"
+               "In one plain sentence, say what \"{word}\" means in that passage. Then write three short sentences of fiction "
+               "that each use \"{word}\" in a different situation, numbered 1 to 3. Nothing else.")
+WORD_TASK = "What does \"{word}\" mean in this passage, and how is the word used?\n{sentence}"
+
+
 def lesson_seed(i: int) -> dict[str, str]:
     """The i-th lesson subject. The three lists have no common factor in how they are stepped, so 8,000
     lessons pass before one repeats."""
@@ -196,6 +204,7 @@ def _load(datasets_dir: Path) -> dict[str, Any]:
     d.setdefault("sessions", 0)
     d.setdefault("lessons", 0)
     d.setdefault("marks", {})        # kind of task -> {"first": x, "now": y, "n": k, "history": [[step, mark], ...]}
+    d.setdefault("words", {})        # word -> how surprised GaugeLM was by it when it was taught
     return d
 
 
@@ -237,6 +246,22 @@ def report_card(datasets_dir: Path) -> dict[str, Any]:
         line = (f"The tutor's marks out of 10: {avg_now:.1f} now, {avg_first:.1f} at first. "
                 f"Weakest: {rows[0]['task']} ({rows[0]['now']:.1f}). Strongest: {rows[-1]['task']} ({rows[-1]['now']:.1f}).")
     return {"rows": rows, "counts": counts, "sessions": state["sessions"], "line": line}
+
+
+def _hard_words(student: Any, texts: list[str], state: dict[str, Any], n: int, rng: random.Random) -> list[dict[str, Any]]:
+    """The words in the library GaugeLM is most surprised by and has not been taught yet. Needs the model
+    itself, not just its answers, so it only works when the student is GaugeLM."""
+    if n <= 0 or not texts or not hasattr(student, "_ensure"):
+        return []
+    try:
+        from .understand import hard_words
+
+        model, tok = student._ensure()
+        sample = "\n".join(passages(texts, 12, rng, words=300))
+        return hard_words(model, tok, sample, n=n, skip=set(state["words"]))
+    except Exception as e:
+        log.warning("school: could not find the words GaugeLM is lost on: %s", e)
+        return []
 
 
 def _count(path: Path) -> int:
@@ -285,11 +310,16 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
     stop = should_stop or (lambda: False)
     made = {"answers": 0, "tutored": 0, "lessons": 0}
     marks: list[float] = []
+    made["words"] = 0
     plan = []                                    # what each row of this session will be
+    # Word study needs GaugeLM itself (to measure which words surprise it), not just something that answers.
+    kinds = (("lessons", "tutor", "answers", "words") if hasattr(student, "_ensure") else ("lessons", "tutor", "answers")) \
+        if student is not None else ("lessons", "answers")
     for i in range(want):
-        kind = ("lessons", "tutor", "answers")[i % 3] if student is not None else ("lessons", "answers")[i % 2]
+        kind = kinds[i % len(kinds)]
         plan.append(kind if (kind == "lessons" or texts) else "lessons")
-    excerpts = passages(texts, sum(1 for k in plan if k != "lessons"), rng)
+    excerpts = passages(texts, sum(1 for k in plan if k in ("tutor", "answers")), rng)
+    hard = _hard_words(student, texts, state, sum(1 for k in plan if k == "words"), rng) if "words" in plan else []
     for kind in plan:
         if stop():
             break
@@ -306,6 +336,19 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
                     _append(datasets / FILES["lessons"], {"task": "lesson", "level": level, "prompt": LESSON_TASK.format(**seed),
                                                           "response": text, "teacher": teacher.name, "licence": teacher.licence})
                     made["lessons"] += 1
+                continue
+            if kind == "words":                  # the words it understands least, explained where your library uses them
+                if not hard:
+                    continue
+                w = hard.pop(0)
+                answer = teacher.llm.generate(WORD_PROMPT.format(word=w["word"], sentence=w["sentence"]), temperature=0.6,
+                                              max_tokens=200, purpose="school:word").strip()
+                state["words"][w["word"]] = w["surprise"]
+                if w["word"].lower() in answer.lower():
+                    _append(datasets / FILES["words"], {"task": "word", "word": w["word"], "surprise": w["surprise"],
+                                                        "prompt": WORD_TASK.format(word=w["word"], sentence=w["sentence"]),
+                                                        "response": answer, "teacher": teacher.name, "licence": teacher.licence})
+                    made["words"] += 1
                 continue
             if not excerpts:
                 continue
@@ -345,7 +388,8 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
     rows = sum(made.values())
     parts = [f"{made['answers']} worked answer{'' if made['answers'] == 1 else 's'}" if made["answers"] else "",
              f"{made['tutored']} correction{'' if made['tutored'] == 1 else 's'} of its own attempts" if made["tutored"] else "",
-             f"{made['lessons']} practice scene{'' if made['lessons'] == 1 else 's'}" if made["lessons"] else ""]
+             f"{made['lessons']} practice scene{'' if made['lessons'] == 1 else 's'}" if made["lessons"] else "",
+             f"{made['words']} word{'' if made['words'] == 1 else 's'} it did not know, explained" if made["words"] else ""]
     msg = (f"{teacher.name} taught it: " + ", ".join(p for p in parts if p) + ".") if rows else \
         f"{teacher.name} was asked to teach but gave nothing usable."
     if marks:

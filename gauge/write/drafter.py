@@ -95,6 +95,41 @@ class Drafter:
         raw = self.llm.generate(prompt, system=self.system, max_tokens=max_out, purpose="draft")
         return clean_prose(raw)
 
+    def reach_length(self, text: str, words: int, project: Project, plan: ChapterPlan, passes: int = 4,
+                     short_of: float = 0.9) -> tuple[str, int]:
+        """Carry the chapter on until it is about `words` long. A model stops when it feels done, which is
+        often well short of what was asked, and no single answer can be longer than its context allows;
+        so the chapter is continued from its own last lines, a stretch at a time, until it is within
+        `short_of` of the target. Returns (text, passes used). A stretch that adds nothing ends it."""
+        used = 0
+        # One stretch can be no longer than the model can write in one go.
+        room = max(120, int((self.llm.context_window() * 0.5) / 1.8))
+        passes = max(passes, min(40, -(-words // room) + 1))      # a long chapter on a small model needs more stretches
+        while used < passes:
+            have = len(text.split())
+            if have >= words * short_of or not text.strip():
+                break
+            more = words - have
+            last = more <= room
+            stretch = more if last else room
+            prompt = prompts.CONTINUE_PROMPT.format(
+                number=plan.number, title_novel=project.state.name, ch_title=plan.title, have=have, more=stretch,
+                goal=plan.goal, turn=plan.turn, cliffhanger=plan.cliffhanger, tail=tail(text, 300),
+                ending=("This stretch finishes the chapter: bring it to the ending above and stop on an unresolved line."
+                        if last else "The chapter is NOT finished after this stretch: do not wrap it up, keep the scene going."))
+            prompt = truncate_to_tokens(prompt, max(200, self.llm.context_window() - output_tokens_for(stretch) - estimate_tokens(self.system) - 64))
+            try:
+                raw = self.llm.generate(prompt, system=self.system, max_tokens=output_tokens_for(stretch), purpose="draft:continue")
+            except Exception as e:
+                log.warning("could not carry the chapter on: %s", e)
+                break
+            added = clean_prose(raw)
+            used += 1
+            if len(added.split()) < 20:
+                break
+            text = text.rstrip() + "\n\n" + added
+        return text, used
+
     def revise(self, text: str, problems: list[str], measured: list[str], words: int) -> str:
         max_out = output_tokens_for(words)
         head = prompts.REVISE_PROMPT.format(

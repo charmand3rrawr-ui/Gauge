@@ -35,6 +35,7 @@ SWITCHES: list[Switch] = [
     Switch("write.realism_weight", "Reward realism", "float", "Share of the score from sensory grounding and show-dont-tell. 0 = off. Realism can trade against pace.", minimum=0, maximum=0.5),
     Switch("write.ab_titles", "A/B chapter titles", "bool", "Generate several titles per chapter and keep the best-scoring one; choices are logged."),
     Switch("write.ab_hooks", "A/B opening hooks", "bool", "Generate several opening lines and offer the strongest in the draft brief."),
+    Switch("write.reach_length", "Write chapters to the asked length", "bool", "If a chapter stops short of the number of words asked for, carry it on from its last lines until it is about that long."),
     Switch("write.min_acceptable_score", "Quality bar", "float", "Chapters below this score are revised (up to the revision limit).", minimum=0, maximum=1),
     Switch("write.max_revisions", "Revision limit", "int", "How many rewrites a chapter may get before the best version is kept.", minimum=0, maximum=5),
     # ---- the room -------------------------------------------------------------------------
