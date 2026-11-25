@@ -58,6 +58,66 @@ and author-edit pairs, the distilled teacher answers, and the character school's
 a character; see [CHARACTER-SCHOOL.md](CHARACTER-SCHOOL.md)), de-duplicated, with instruction rows
 repeated `native.chat_weight` times and concentrated in the last third of training.
 
+## The school: free models teach it
+
+A small model learns behaviour far faster from a stronger model than from raw prose. Three things
+now happen at the start of every training session in the Studio, and on demand with
+`gauge native teach` (`gauge/native/school.py`):
+
+| | what the teacher does | why it helps |
+| --- | --- | --- |
+| worked answers | answers Gauge's real tasks (continue, open, end, title, score, outline, brief, dialogue) on excerpts of your library | GaugeLM learns the behaviour, not just the prose |
+| the tutor | GaugeLM attempts a task itself; the teacher marks it out of 10 and writes the answer it should have given | practice goes where it is weakest: the lower the running mark for a kind of task, the more often it is set |
+| practice scenes | writes very short, simple scenes on fresh subjects, harder as GaugeLM trains | clean text at a level a small model can absorb |
+
+**More than one teacher.** Every chat model installed in Ollama teaches, taking turns session by
+session (one teacher per session, so the engine is not swapping models in and out of memory).
+`ollama pull qwen2.5:7b` or `ollama pull phi4` adds a teacher; nothing else needs setting. They run
+on your computer and cost nothing. GaugeLM is taught this way even when it is itself the writer.
+
+```powershell
+.\gauge.bat native teachers                      # who teaches, and each model's licence
+.\gauge.bat native teachers --use "qwen2.5:7b, phi4"   # choose; --use all for everyone installed
+.\gauge.bat native teach --rows 60               # a school session now
+.\gauge.bat native train --resume                # learn from what was collected
+.\gauge.bat native report                        # the tutor's marks per kind of task, at first and now
+```
+
+**Licences.** Each row records which teacher wrote it and the licence that model is published under.
+Qwen (most sizes), Mistral and Phi are Apache-2.0 or MIT. Llama and Gemma have their own terms: fine
+for learning on your own computer, worth reading before you share a model trained with them.
+`gauge native teachers` shows this for whatever is installed. It is a guide, not legal advice.
+
+**Teachers that are not on your computer.** Free hosted models can teach too, through any
+OpenAI-compatible address, but they are never used unless you list them yourself, because excerpts of
+your library are sent to them and because some providers do not allow their answers to be used for
+training another model:
+
+```json
+"native": {"outside_teachers": [{"name": "my-free-host", "base_url": "https://.../v1", "model": "...",
+                                 "api_key_env": "MY_KEY", "terms_ok": true}]}
+```
+
+`terms_ok` is your statement that you have read that provider's terms and they allow it. The key is
+read from the environment variable you name, not stored in the settings.
+
+**What is and is not measured.** The mechanics are tested with a stand-in teacher. How much faster
+GaugeLM improves depends on the teachers and has not been measured here; the report card is a teacher
+model's opinion, useful as a trend rather than a measurement. A teacher is only ever shown text that
+is permitted for training (your own writing, public-domain books, your Gauge chapters).
+
+### Other ways to make it learn faster
+
+In rough order of effect:
+
+1. **Give it more of the machine.** The capacity limit is 20% by default; at 50% it should train roughly
+   two and a half times as fast (`gauge compute limit 50`, or Switches in the Studio).
+2. **A graphics card.** With CuPy installed the same code runs 10 to 100 times faster.
+3. **More, cleaner text.** `gauge corpus fetch` adds public-domain books; your own chapters count most.
+4. **Train after every chapter** (`native.after_chapter_minutes`), so it never falls behind.
+5. **Grow it only when it has stopped improving** at its current size; a bigger model trains slower.
+6. **Other computers you own** can join in (`gauge worker`; see [COMPUTE.md](COMPUTE.md)).
+
 ## Growing the model
 
 A model's size is fixed when it is created; training only changes the values of its weights. Once a
@@ -201,6 +261,7 @@ agent profile and short chapters.
 - `train.py`: corpus gathering and dedup, prose/instruction streams, curriculum, gradient
   accumulation, schedule, held-out evaluation, checkpoints, time budgets, `continue_training`.
 - `distill.py`: task-shaped prompts over corpus excerpts answered by the teacher model.
+- `school.py`: the pool of teachers, the tutor and its marks, graded practice scenes, the report card.
 - `grow.py`: function-preserving growth to a larger shape, vocabulary growth, shrinking by cutting down and
   teaching, each checked or measured before it replaces anything, with undo.
 - `evaluate.py`: presets table, benchmark, perplexity, instruction-shape probes.

@@ -288,6 +288,47 @@ class StudioController:
             self._training["running"] = False
             self._pause.clear()
 
+    def _student(self) -> Any:
+        """GaugeLM as it is now, for the tutor to set tasks to. None until it has been trained, or when
+        tutoring is switched off."""
+        from .llm import make_llm
+        from .native import NativeTrainer
+
+        if not self.cfg.native.tutor or not NativeTrainer(self.cfg.native_dir).exists():
+            return None
+        try:
+            return make_llm(self.cfg.llm.model_copy(update={"provider": "native", "model": "gaugelm", "fast_model": "",
+                                                            "native_dir": str(self.cfg.native_dir)}), "main")
+        except Exception as e:
+            log.warning("could not load GaugeLM for tutoring: %s", e)
+            return None
+
+    def teachers(self) -> list[str]:
+        """Which models teach GaugeLM right now."""
+        from .native import school
+
+        return [t.line() for t in school.teachers(self.cfg)]
+
+    def report_card(self) -> dict[str, Any]:
+        from .native import school
+
+        return school.report_card(self.cfg.models_dir / "datasets")
+
+    def school_line(self) -> str:
+        """Who teaches GaugeLM and how it is doing, in a sentence or two."""
+        try:
+            names = [t.split("  -  ")[0] for t in self.teachers()]
+        except Exception:
+            names = []
+        if not names:
+            who = "No teacher model is running, so GaugeLM studies on its own. Open the Ollama app and it will be taught as well."
+        elif len(names) == 1:
+            who = f"Taught by {names[0]} at the start of each training session. Install more models in Ollama and they take turns."
+        else:
+            who = "Taught by " + ", ".join(names[:-1]) + f" and {names[-1]}, taking turns at the start of each training session."
+        card = self.report_card()
+        return who + (" " + card["line"] if card["rows"] else "")
+
     def _train_session(self, prose: list[tuple[str, str]], minutes: Optional[float],
                        progress: Optional[Callable[[dict[str, Any]], None]], teach: bool) -> dict[str, Any]:
         from .native import (
@@ -300,28 +341,21 @@ class StudioController:
         )
 
         datasets = self.cfg.models_dir / "datasets"
-        lessons = 0
-        if teach and self.cfg.llm.provider != "native":
-            from .llm import make_llm
+        lessons, taught = 0, ""
+        if teach:
+            # Free models teach it first: whichever chat models are installed take turns, answering Gauge's
+            # tasks, correcting GaugeLM's own attempts and writing simple practice scenes.
+            from .native import school
 
-            teacher = make_llm(self.cfg.llm, "main")
-            if teacher.available():
-                from .native.distill import distill
-
-                want = 8 if minutes is None else max(4, min(60, round(float(minutes) / 3)))
-                out = datasets / "distill.jsonl"
-                have = sum(1 for _ in out.open(encoding="utf-8")) if out.exists() else 0
-                try:
-                    # Two at a time, so a pause is noticed between them. Seeded by how many lessons exist,
-                    # so each session studies different passages.
-                    while lessons < want and not self._pause.is_set():
-                        got = int(distill(self.db, teacher, out, min(2, want - lessons), seed=have + lessons,
-                                          task_offset=have + lessons).get("rows", 0))
-                        if got == 0:
-                            break
-                        lessons += got
-                except Exception as e:  # a teacher that stumbles must not stop the training
-                    log.warning("could not collect lessons from the downloaded model: %s", e)
+            try:
+                pool = school.teachers(self.cfg)
+                if pool:
+                    want = 6 if minutes is None else max(4, min(60, round(float(minutes) / 3)))
+                    got = school.session(self.cfg, [t for _, t in prose], want, should_stop=self._pause.is_set, pool=pool,
+                                         student=self._student(), step=int(NativeTrainer(self.cfg.native_dir).status().get("step", 0) or 0))
+                    lessons, taught = int(got["rows"]), str(got["message"])
+            except Exception as e:  # a teacher that stumbles must not stop the training
+                log.warning("could not collect lessons from the teacher models: %s", e)
         try:  # the character school's lessons are part of every session, even before any example is added
             self.school().export_training()
         except Exception as e:
@@ -372,7 +406,7 @@ class StudioController:
         msg = ("Training paused" if paused else "Trained GaugeLM") + f" after {mins} minute{'' if mins == 1 else 's'} on " \
               f"{len(docs) - examples} chapters and {examples} worked example{'' if examples == 1 else 's'} ({chars:,} characters). "
         if lessons:
-            msg += f"The downloaded model taught it {lessons} new example{'' if lessons == 1 else 's'} first. "
+            msg += taught + " "
         msg += (f"It is at step {res['step']}" + (f", loss {res['loss']} (lower is better)" if res.get("loss") is not None else "") + ". "
                 + ("It carried on from where it stopped. " if resumed else "")
                 + ("Progress is saved; press Start training to carry on." if paused
@@ -1193,7 +1227,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
 
     def on_engine() -> None:
         """Choose which AI writes, and train Gauge's own."""
-        win, frame, alive, note, start = dialog("Change the AI", 760, 660)
+        win, frame, alive, note, start = dialog("Change the AI", 760, 720)
         ttk.Label(frame, text="Which AI writes", font=huge).pack(anchor="w")
         now_var = tk.StringVar(value="Writing with: " + ctl.engine()["label"])
         ttk.Label(frame, textvariable=now_var, wraplength=700, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(2, 0))
@@ -1205,6 +1239,8 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         minutes_var = tk.StringVar(value=UNTIL_PAUSED)
         limit_var = tk.StringVar(value=ctl.capacity() + " Change it in Switches (Capacity limit).")
         ttk.Label(frame, textvariable=limit_var, wraplength=700, font=small).pack(anchor="w", pady=(0, 6))
+        school_var = tk.StringVar(value=ctl.school_line())
+        ttk.Label(frame, textvariable=school_var, wraplength=700, font=small).pack(anchor="w", pady=(0, 6))
         size_var = tk.StringVar(value=ctl.gaugelm_size()["line"])
         ttk.Label(frame, textvariable=size_var, wraplength=700, font=small).pack(anchor="w")
         grow_row = ttk.Frame(frame)
@@ -1217,6 +1253,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             if alive():
                 now_var.set("Writing with: " + ctl.engine()["label"])
                 size_var.set(ctl.gaugelm_size()["line"])
+                school_var.set(ctl.school_line())
             show_engine()
 
         def on_grow() -> None:

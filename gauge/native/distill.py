@@ -33,7 +33,10 @@ TASKS = [
 
 def sample_excerpts(db: Database, n: int, rng: random.Random, words: int = 220) -> list[str]:
     """n random windows of prose, spread over novels and chapters (a small corpus is re-sampled)."""
-    novels = [nv for nv in db.novels() if db.chapter_count(nv.key)]
+    from ..learn.corpus import training_permission
+
+    # Only text that may be trained on: the excerpt becomes part of the training row.
+    novels = [nv for nv in db.novels() if db.chapter_count(nv.key) and training_permission(nv.source)[1]]
     if not novels:
         return []
     out: list[str] = []

@@ -319,7 +319,7 @@ def test_training_gaugelm_from_the_studio_trains_resumes_and_makes_it_ready(cfg,
     seen = []
     first = ctl.train_gaugelm(0.01, progress=seen.append)
     assert first["trained"] and first["step"] > 0 and not first["resumed"]
-    assert first["lessons"] == 0                               # GaugeLM is the writer: there is no bigger model to teach it
+    assert first["lessons"] > 0                                # GaugeLM is the writer, and the model it replaced still teaches it
     assert ctl.engine()["ready"] and f"trained {first['step']} steps" in ctl.engine()["label"]
     second = ctl.train_gaugelm(0.01)
     assert second["resumed"] and second["step"] > first["step"] and "carried on" in second["message"]
@@ -333,7 +333,7 @@ def test_the_downloaded_model_teaches_gaugelm_while_it_does_the_writing(cfg, db,
     ctl.add_material([str(_novel_folder(tmp_path))])
     res = ctl.train_gaugelm(0.01)
     assert res["trained"] and res["lessons"] >= 4               # the writer answered Gauge's own tasks first
-    assert res["examples"] >= res["lessons"] and "taught it" in res["message"]
+    assert res["examples"] >= res["lessons"] and "fake taught it" in res["message"] and "practice scene" in res["message"]
     assert len(instruction_rows(cfg.models_dir / "datasets")) >= 4
     assert not ctl.engine()["is_gaugelm"]                       # and the writer is still the downloaded model
     quiet = ctl.train_gaugelm(0.01, teach=False)
@@ -488,20 +488,20 @@ def test_training_runs_until_paused_and_then_carries_on(cfg, db, tmp_path):
 
 
 def test_pause_is_noticed_while_the_downloaded_model_is_teaching(cfg, db, tmp_path, monkeypatch):
-    from gauge.native import distill as distill_mod
+    from gauge.llm import FakeLLM
     _small_gaugelm(cfg)
     ctl = StudioController(cfg, db)
     ctl.add_material([str(_novel_folder(tmp_path))])
-    real = distill_mod.distill
-    batches = []
+    real = FakeLLM.generate
+    asked = []
 
-    def teaching(db_, teacher, out, rows, **kw):
-        batches.append(rows)
+    def teaching(self, prompt, **kw):
+        asked.append(kw.get("purpose"))
         ctl._training["running"] = True
-        ctl.pause_training()                                      # Pause pressed during the very first lessons
-        return real(db_, teacher, out, rows, **kw)
+        ctl.pause_training()                                      # Pause pressed during the very first lesson
+        return real(self, prompt, **kw)
 
-    monkeypatch.setattr(distill_mod, "distill", teaching)
+    monkeypatch.setattr(FakeLLM, "generate", teaching)
     res = ctl.train_gaugelm(None)
-    assert batches == [2]                                         # lessons come two at a time, so it stopped after one batch
+    assert len(asked) == 1                                        # a pause is noticed between rows: it stopped after one
     assert res["paused"] is True and res["trained"] is False and "Paused before training began" in res["message"]

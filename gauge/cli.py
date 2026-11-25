@@ -2715,6 +2715,85 @@ def native_distill(c: Ctx, rows: Optional[int]) -> None:
     console.print(f"by task: {distill_summary(out)}\nNext: gauge native train --resume  (instruction rows are upweighted)")
 
 
+@native.command("teachers")
+@click.option("--use", default=None, help="Comma-separated local models that should teach; 'all' for every chat model installed.")
+@click.pass_obj
+def native_teachers(c: Ctx, use: Optional[str]) -> None:
+    """Which free models teach GaugeLM, and the licence each is published under."""
+    from .native import school
+
+    if use is not None:
+        c.cfg.native.teachers = [] if use.strip().lower() in ("all", "") else [m.strip() for m in use.split(",") if m.strip()]
+        c.cfg.save()
+    pool = school.teachers(c.cfg)
+    if not pool:
+        console.print("[yellow]No teacher is running.[/] Open the Ollama app; every chat model installed there can teach. "
+                      "`ollama pull qwen2.5:7b` adds another.")
+        return
+    table = Table(title=f"{len(pool)} teacher(s), taking turns session by session")
+    for col in ("model", "where", "licence", ""):
+        table.add_column(col)
+    for t in pool:
+        table.add_row(t.name, t.where, t.licence, "" if t.open_licence else "own terms: read them before sharing a model trained with it")
+    console.print(table)
+
+
+@native.command("teach")
+@click.option("--rows", type=int, default=None, help="New rows to collect (default native.distill_rows).")
+@click.option("--no-tutor", is_flag=True, help="Skip marking and correcting GaugeLM's own attempts.")
+@click.pass_obj
+def native_teach(c: Ctx, rows: Optional[int], no_tutor: bool) -> None:
+    """A school session: free models answer Gauge's tasks, correct GaugeLM's own attempts and write practice scenes.
+
+    Teachers take turns. Train afterwards (`gauge native train --resume`) to learn from what was collected."""
+    from .learn.corpus import permitted_texts
+    from .llm import make_llm
+    from .native import NativeTrainer, school
+
+    pool = school.teachers(c.cfg)
+    if not pool:
+        console.print("[red]no teacher is running[/]: open the Ollama app, or run `gauge native teachers`")
+        sys.exit(1)
+    texts = [t for _, t in permitted_texts(c.db, c.cfg.projects_dir)]
+    tr = NativeTrainer(c.cfg.native_dir)
+    student = None
+    if tr.exists() and c.cfg.native.tutor and not no_tutor:
+        student = make_llm(c.cfg.llm.model_copy(update={"provider": "native", "model": "gaugelm", "fast_model": "",
+                                                        "native_dir": str(c.cfg.native_dir)}), "main")
+    want = rows or c.cfg.native.distill_rows
+    per = max(6, -(-want // len(pool)))          # one teacher per session, so the engine is not swapping models
+    done = 0
+    while done < want:
+        res = school.session(c.cfg, texts, min(per, want - done), pool=pool, student=student,
+                             step=int(tr.status().get("step", 0) or 0))
+        console.print(f"  {res['message']}")
+        if res["rows"] == 0:
+            break
+        done += res["rows"]
+    console.print(school.report_card(c.cfg.models_dir / "datasets")["line"])
+    console.print("Next: gauge native train --resume")
+
+
+@native.command("report")
+@click.pass_obj
+def native_report(c: Ctx) -> None:
+    """GaugeLM's report card: the tutor's marks for each kind of task, at first and now."""
+    from .native import school
+
+    card = school.report_card(c.cfg.models_dir / "datasets")
+    console.print(card["line"])
+    if card["rows"]:
+        table = Table(title="marks out of 10 (a teacher model's opinion: a trend, not a measurement)")
+        for col in ("task", "at first", "now", "practised"):
+            table.add_column(col)
+        for r in card["rows"]:
+            table.add_row(r["task"], f"{r['first']:.1f}", f"{r['now']:.1f}", str(r["practised"]))
+        console.print(table)
+    k = card["counts"]
+    console.print(f"Collected so far: {k['answers']} worked answers, {k['tutor']} corrections, {k['lessons']} practice scenes, "
+                  f"over {card['sessions']} session(s).")
+
+
 @native.command("eval")
 @click.option("--probe/--no-probe", default=True, help="Also run the instruction-shape probes.")
 @click.pass_obj

@@ -173,6 +173,23 @@ writer to GaugeLM once its text reads well enough for you.
 Only text that is safe to train on is used: what you added yourself, public-domain books, the chapters
 written for you, and the examples made on your own machine.
 
+### Who teaches GaugeLM
+
+At the start of each training session the free models on your computer teach GaugeLM before it studies
+on its own. **Change the AI** says who is teaching and how it is doing.
+
+- Every chat model installed in Ollama takes a turn. To add a teacher, open a Command Prompt and run
+  `ollama pull qwen2.5:7b` (or `phi4`, `mistral`); Gauge finds it by itself.
+- A teacher answers Gauge's writing tasks on your library, marks and corrects GaugeLM's own attempts,
+  and writes short, simple practice scenes for it.
+- GaugeLM practises most what it is marked lowest on. The marks out of 10 are a teacher's opinion:
+  watch whether they rise, not the exact number.
+- Nothing leaves your computer. Teachers on the internet are possible but are off unless you add
+  them to the settings yourself; see [docs/NATIVE.md](../docs/NATIVE.md).
+
+To make it learn faster, the biggest step is the capacity limit in **Switches**: at 50% instead of
+20% it should train roughly two and a half times as fast.
+
 ### Growing and shrinking GaugeLM
 
 GaugeLM's size is fixed when it is first trained, and more training only improves it up to what that

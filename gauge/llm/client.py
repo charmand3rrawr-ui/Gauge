@@ -361,6 +361,8 @@ class FakeLLM:
             if canned is not None:
                 return json.dumps(canned)
             return json.dumps({"ok": True}) if json_mode else "A fine question. The answer is in chapter one."
+        if "a student writer was set this task" in low:
+            return "mark: 4\nThe seal was whole again. Rin did not wait to learn why; she ran, and the footsteps ran with her."
         if "the author says:" in low and not json_mode:
             asked = prompt.rsplit("The author says:", 1)[1].split("\n")[0].strip()
             about = "your story" if "STORY:" in prompt else "writing"

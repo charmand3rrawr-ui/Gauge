@@ -79,6 +79,7 @@ SWITCHES: list[Switch] = [
     Switch("native.after_chapter_minutes", "Train GaugeLM after each chapter (minutes)", "int", "In Gauge Studio, train GaugeLM, Gauge's own model, for this many minutes after every chapter, whichever model wrote it. This is how GaugeLM keeps learning while the downloaded model does the writing. 0 turns it off.", "Model", 0, 120),
     Switch("llm.fast_model", "Fast model for bookkeeping", "text", "Small model for briefs, reviews, memory (e.g. llama3.2:3b). Empty = same as writer.", "Model"),
     Switch("llm.cache", "Cache repeated calls", "bool", "Reuse the answer to an identical deterministic/bookkeeping request instead of paying again. Prose is never cached.", "Model"),
+    Switch("native.tutor", "Tutor GaugeLM", "bool", "At the start of a training session, have a teacher model mark and correct GaugeLM's own attempts, and practise most what it is marked lowest on.", "Model"),
     Switch("native.device", "GaugeLM device", "choice", "auto picks a GPU when one is usable.", "Model", choices=["auto", "cuda", "cpu"]),
     Switch("compute.auto_device", "Switch to a GPU when one appears", "bool", "The daemon re-scans every cycle.", "Model"),
     Switch("compute.pool_generation", "Use your workers for generation", "bool", "Spread prose calls over machines you started `gauge worker` on.", "Model"),

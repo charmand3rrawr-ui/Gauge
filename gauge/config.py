@@ -62,6 +62,11 @@ class NativeConfig(BaseModel):
     daemon_minutes: int = 20  # time budget per cycle
     distill_rows: int = 200  # teacher answers to collect per `gauge native distill` run
     after_chapter_minutes: int = 0  # Studio: train GaugeLM this many minutes after each chapter (0 = off)
+    teachers: list[str] = Field(default_factory=list)  # local models that teach GaugeLM; empty = every chat model installed
+    # Teachers that are not on this computer (any OpenAI-compatible address). Excerpts of your library are sent to
+    # them, so none is used unless listed here with "terms_ok": true: {"name", "base_url", "model", "api_key_env"}.
+    outside_teachers: list[dict] = Field(default_factory=list)
+    tutor: bool = True  # have a teacher mark and correct GaugeLM's own attempts, and drill what it is worst at
 
 
 class ComputeConfig(BaseModel):
