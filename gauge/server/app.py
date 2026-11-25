@@ -93,7 +93,11 @@ class ServerState:
         pipe = self.pipeline()
         if not pipe.llm.available():
             return {"error": f"LLM not reachable ({pipe.llm.describe()})"}
-        res = pipe.write_next(pipe.open_project(name))
+        from ..write import ChapterRejected
+        try:
+            res = pipe.write_next(pipe.open_project(name))
+        except ChapterRejected as e:  # unreadable output: nothing was saved as a chapter
+            return {"error": str(e), "rejected": True, "chapter": e.number, "coherence": e.critique.coherence}
         return {"chapter": res.number, "title": res.title, "score": round(res.score, 3), "path": str(res.path)}
 
     def run_cycle(self) -> dict[str, Any]:

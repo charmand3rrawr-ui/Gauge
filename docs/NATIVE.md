@@ -78,6 +78,8 @@ typed in code (nested objects and arrays resolved through the schema), so the pl
 writing room never see unparseable output. Quality tracks the model; with `tiny` use the `lean`
 agent profile and short chapters.
 
+Nonsense is rejected rather than saved: a measured coherence floor (`write.coherence_floor`, no model call) scores a draft that is not readable prose 0, has it written again, and if every attempt fails refuses the chapter: the last attempt is kept in `drafts/rejected/`, and it is never remembered by the agents or used as training text. Train GaugeLM longer, then write the chapter again.
+
 ## Implementation
 
 - `tokenizer.py`: byte-level BPE, GPT-2 style pre-tokenization, special tokens, JSON on disk.

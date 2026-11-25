@@ -218,7 +218,7 @@ def test_crash_after_draft_resumes_from_checkpoint(cfg, db, chapter_text):
     pipe2 = WritePipeline(cfg, db, llm=good, trainer=t, fast_llm=good)
     # simulate: draft generated, then process dies before acceptance -> checkpoint remains
     plan = pipe2.planner.ensure_plan(p, 1)
-    p.save_checkpoint(1, "draft", "CHECKPOINTED DRAFT " * 60, {"plan_title": plan.title, "cast": ["Rin"], "revisions": 0})
+    p.save_checkpoint(1, "draft", "CHECKPOINTED DRAFT. " + chapter_text(True), {"plan_title": plan.title, "cast": ["Rin"], "revisions": 0})
     assert p.load_checkpoint(1)["stage"] == "draft"
     res = pipe2.write_next(p)
     assert res.resumed and "CHECKPOINTED DRAFT" in res.path.read_text(encoding="utf-8")

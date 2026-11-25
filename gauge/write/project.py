@@ -189,6 +189,18 @@ class Project:
         if p.exists():
             p.unlink()
 
+    def rejected_path(self, n: int) -> Path:
+        return self.drafts_dir / "rejected" / f"chapter_{n:03d}.md"
+
+    def save_rejected(self, n: int, title: str, text: str, meta: dict[str, Any]) -> Path:
+        """Keep a refused draft for inspection. It is not a chapter: ``written`` does not move and nothing
+        that reads the story (context, agents, training text) looks here. One file per chapter number."""
+        p = self.rejected_path(n)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        front = "---\n" + "\n".join(f"{k}: {json.dumps(v)}" for k, v in meta.items()) + "\n---\n\n"
+        p.write_text(f"{front}# REJECTED - Chapter {n}: {title}\n\n{text.strip()}\n", encoding="utf-8")
+        return p
+
     def next_chapter_number(self) -> int:
         return self.state.written + 1
 

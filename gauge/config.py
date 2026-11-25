@@ -136,6 +136,9 @@ class WriteConfig(BaseModel):
     target_chapter_words: int = 2200
     max_revisions: int = 2
     min_acceptable_score: float = 0.62
+    # Measured, model-free veto: text under this coherence (word salad, markup soup, a stuck loop) scores 0,
+    # is drafted again, and is never saved as a chapter. 0 = off (e.g. for deliberately unpunctuated prose).
+    coherence_floor: float = 0.5
     exemplars_in_prompt: int = 4
     # Characters as independent agents: scene briefs before drafting, in-character review after.
     characters_enabled: bool = True

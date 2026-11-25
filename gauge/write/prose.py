@@ -11,6 +11,10 @@ from dataclasses import dataclass, field
 
 from ..text import paragraphs, sentences, words
 
+# Coherence floor: below this the text is not prose at all (word salad, markup soup, a stuck loop).
+COHERENCE_FLOOR = 0.5
+UNREADABLE = "the text is not readable prose"
+
 # 3. Cliché / tired-metaphor lexicon.
 CLICHES = [
     "at the end of the day", "needle in a haystack", "tip of the iceberg", "calm before the storm",
@@ -171,3 +175,106 @@ def score(p: CraftProfile) -> float:
                  + 0.1 * (1 if p.pov_heads > 1 else 0) + 0.1 * (1 if p.anachronisms else 0)
                  + 0.1 * (1 if p.opener_variety < 0.6 else 0))
     return round(max(0.0, 1.0 - penalties), 3)
+
+
+# ---- coherence floor --------------------------------------------------------------------------
+# Is this prose at all? Four shape signals, none of which needs a model or an English word list, so
+# names from any language and any spaced script pass. Thresholds sit far from where real prose lives:
+# the floor is a veto, so it must stay silent on anything a person could have written on purpose.
+_OPENERS = "\"'“‘«‹([{*_¿¡—–-"
+_CLOSERS = "\"'”’»›)]}*_.,;:!?…—–-"
+_WORD_CORE = re.compile(r"[$£€#]?[^\W_]{1,30}(?:[’'./:,…—–-]+[^\W_]{1,30})*[%°]?")
+_PAUSE = re.compile(r"[—–―…-]+|\.{2,}")  # a spaced dash or ellipsis: punctuation, not noise
+_SCENE_BREAK = re.compile(r"^[ \t]*[*#~=_•·—–-][ \t*#~=_•·—–-]{0,24}$", re.M)
+_SPACED_DOTS = re.compile(r"\.(?:[ \t]\.){2,}")
+_MARKUP = re.compile(r"[`|#\\<>{}=~^]|\*{2,}|_{2,}")
+_UNIT_END = re.compile(r"([.!?…。！？]+)([\"'”’»)\]*_]*)\s+")
+_UNSPACED = re.compile(r"[\u0e00-\u0e7f\u3040-\u30ff\u3400-\u9fff]")  # scripts written without spaces
+_WINDOW = 25  # words; short enough that a paragraph repeated on purpose is not a loop
+_RUN_ON = 150  # words without a full stop before a "sentence" counts as shapeless
+
+
+@dataclass
+class Coherence:
+    score: float = 1.0  # 0..1; under COHERENCE_FLOOR the text is not prose
+    word_share: float = 1.0  # tokens that are words, not punctuation or markup debris
+    sentence_share: float = 1.0  # sentences that start and end like sentences
+    markup_density: float = 0.0  # stray markup characters (backticks, pipes, ##, **) per token
+    loop_share: float = 0.0  # share of the text stuck repeating a short fragment
+    issues: list[str] = field(default_factory=list)
+
+
+def _ramp(v: float, bad: float, good: float) -> float:
+    """0 at ``bad``, 1 at ``good``, linear between (``bad`` may be above ``good``)."""
+    return max(0.0, min(1.0, (v - bad) / (good - bad)))
+
+
+def _is_word(token: str) -> bool:
+    return bool(_WORD_CORE.fullmatch(token.lstrip(_OPENERS).rstrip(_CLOSERS)))
+
+
+def _sentence_share(body: str) -> float:
+    """Share of sentence-sized units that open on a capital (or digit, or caseless script), close on
+    terminal punctuation and are not a 150-word run with no full stop. A lower-case start is fine after a
+    closing quote or an ellipsis: dialogue tags and trailing-off are how fiction is punctuated."""
+    flat = re.sub(r"\s+", " ", body).strip() + " "
+    good = bad = 0
+    pos, carry_on = 0, False
+    for m in list(_UNIT_END.finditer(flat)) + [None]:
+        unit = flat[pos:m.end(1) if m else len(flat)].strip()
+        if not unit:
+            break
+        n_words = sum(1 for t in unit.split() if _is_word(t))
+        first = next((ch for ch in unit.lstrip(_OPENERS + " ") if ch.isalnum()), "")
+        lead = unit.lstrip("\"'“‘«‹([{*_¿¡ ")
+        # A dash or an ellipsis in front is a dialogue tag or a trailing-off resumed ("—dijo Tomás.").
+        starts = carry_on or lead.startswith(("—", "–", "-", "…", "..")) or (bool(first) and not first.islower())
+        ends = m is not None or unit[-1] in "\"'”’»)]*_—–-"  # the tail may stop on a quote or a cut-off dash
+        if n_words and starts and ends and n_words <= _RUN_ON:
+            good += 1
+        else:
+            bad += max(1, n_words // _RUN_ON)
+        if m is None:
+            break
+        pos = m.end()
+        carry_on = bool(m.group(2)) or "…" in m.group(1) or len(m.group(1)) > 1
+    return (good + 2) / (good + bad + 2)  # a short text gets the benefit of the doubt
+
+
+def _loop_share(toks: list[str]) -> float:
+    """Share of 25-word windows where fewer than half the words are distinct: a model stuck on a fragment."""
+    wins = [toks[i:i + _WINDOW] for i in range(0, len(toks), _WINDOW)]
+    wins = [w for w in wins if len(w) >= _WINDOW // 2]
+    if not wins:
+        return 0.0
+    return sum(1 for w in wins if len(set(w)) < 0.5 * len(w)) / len(wins)
+
+
+def coherence(text: str, floor: float = COHERENCE_FLOOR) -> Coherence:
+    """Measured, model-free: does this read as prose at all? Catches what an under-trained or broken
+    model emits (punctuation soup, markup debris, word fragments with no sentences, a stuck loop). It does
+    not judge quality: flat, clumsy or dull prose scores 1.0, and so does word salad that is punctuated
+    like prose. ``floor`` only decides whether the headline issue is added."""
+    body = _SPACED_DOTS.sub("…", _SCENE_BREAK.sub("", text))
+    tokens = [t for t in body.split() if not _PAUSE.fullmatch(t)]
+    letters = sum(1 for ch in body if ch.isalpha())
+    if letters and len(_UNSPACED.findall(body)) > 0.3 * letters:
+        return Coherence()  # written without spaces between words: these word-shape measures do not apply
+    wordlike = [t for t in tokens if _is_word(t)]
+    if not wordlike:
+        return Coherence(0.0, 0.0, 0.0, 0.0, 0.0, [f"{UNREADABLE}: there are no words in it"] if floor > 0 else [])
+    word_share = (len(wordlike) + 3) / (len(tokens) + 3)
+    sentence_share = _sentence_share(body)
+    markup = len(_MARKUP.findall(body)) / len(tokens)
+    loops = _loop_share([t.lstrip(_OPENERS).rstrip(_CLOSERS).lower() for t in wordlike])
+    parts = [
+        (_ramp(word_share, 0.70, 0.88), f"{1 - word_share:.0%} of the tokens are punctuation or markup debris, not words"),
+        (_ramp(sentence_share, 0.50, 0.85), f"only {sentence_share:.0%} of the sentences start with a capital and end with a full stop"),
+        (_ramp(markup, 0.35, 0.15), f"stray markup (backticks, pipes, ##, **) on {markup:.0%} of the tokens"),
+        (_ramp(loops, 0.35, 0.05), f"{loops:.0%} of the text repeats the same few words over and over"),
+    ]
+    score = min(h for h, _ in parts)
+    issues = [msg for h, msg in parts if h < 1.0]
+    if score < floor:
+        issues.insert(0, f"{UNREADABLE}; write it again in plain, complete sentences")
+    return Coherence(round(score, 3), round(word_share, 3), round(sentence_share, 3), round(markup, 3), round(loops, 3), issues)

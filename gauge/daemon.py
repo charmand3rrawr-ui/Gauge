@@ -161,13 +161,17 @@ class Daemon:
             hold("daemon chapter writes", f"next chapter of {self.cfg.daemon.active_project}")
             out["write"] = "held: dry run"
         elif do_write and self.cfg.daemon.active_project:
-            from .write.pipeline import WritePipeline
+            from .write.pipeline import ChapterRejected, WritePipeline
 
             pipe = WritePipeline(self.cfg, self.db, trainer=trainer)
             if pipe.llm.available():
                 project = pipe.open_project(self.cfg.daemon.active_project)
-                res = pipe.write_next(project)
-                out["write"] = {"chapter": res.number, "score": round(res.score, 3), "path": str(res.path)}
+                try:
+                    res = pipe.write_next(project)
+                    out["write"] = {"chapter": res.number, "score": round(res.score, 3), "path": str(res.path)}
+                except ChapterRejected as e:
+                    # Unreadable output: nothing was saved, and the rest of the cycle carries on.
+                    out["write"] = {"rejected": e.number, "coherence": e.critique.coherence, "path": str(e.path)}
             else:
                 out["write"] = f"skipped: LLM not reachable ({pipe.llm.describe()})"
         # Newsdesk: trends -> original sourced commentary into the review queue -> publish one due piece.

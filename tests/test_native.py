@@ -2,6 +2,7 @@
 import json
 
 import numpy as np
+import pytest
 
 from gauge.config import GaugeConfig, LLMConfig
 from gauge.llm import make_llm
@@ -171,7 +172,8 @@ def test_native_llm_provider_and_schema_fill(tmp_path, chapter_text):
 
 
 def test_native_pipeline_runs_without_outside_models(cfg, db, chapter_text, monkeypatch):
-    """The whole writing pipeline on GaugeLM alone: slow and crude, but no outside code."""
+    """The whole writing pipeline on GaugeLM alone: slow and crude, but no outside code. Thirty steps of
+    training produce noise, and noise is refused by the coherence floor rather than saved as a chapter."""
     from tests.test_pipeline import _seed_corpus
 
     _seed_corpus(db, chapter_text)
@@ -187,13 +189,19 @@ def test_native_pipeline_runs_without_outside_models(cfg, db, chapter_text, monk
     cfg.write.characters_enabled = False
     cfg.write.world_enabled = False
     cfg.write.muse_enabled = False
-    from gauge.write import WritePipeline
+    from gauge.write import ChapterRejected, WritePipeline
 
     pipe = WritePipeline(cfg, db)
     assert isinstance(pipe.llm, NativeLLM) and isinstance(pipe.fast_llm, NativeLLM)
     p = pipe.new_project("Native Tale", "a courier", ["Sci-fi"], words=40)
     assert p.state.outline  # the outline came back as a filled schema
-    res = pipe.write_next(p)
+    with pytest.raises(ChapterRejected) as rejected:
+        pipe.write_next(p)
+    assert p.state.written == 0 and not p.chapter_path(1).exists() and rejected.value.path.exists()
+    assert gather_texts(db, cfg.projects_dir, None) == gather_texts(db, None, None)  # the noise is not training text
+    # With the floor switched off the rest of the loop (memory, save) still runs on GaugeLM alone.
+    cfg.write.coherence_floor = 0.0
+    res = WritePipeline(cfg, db).write_next(p)
     assert res.path.exists() and res.number == 1
 
 

@@ -421,6 +421,19 @@ def new(c: Ctx, name: str, idea: Optional[str], premise_file: Optional[str], con
         console.print(f"World: {w.name}  rules={len(w.physics_rules) + len(w.power_rules) + len(w.social_rules)}  places={len(w.locations)}")
 
 
+def _write_or_refuse(pipe, project, chapters: int, fresh: bool = False) -> list:
+    """Write chapters; if one is refused as unreadable, say so plainly and exit non-zero."""
+    from .write import ChapterRejected
+
+    try:
+        return pipe.write_many(project, chapters, fresh=fresh)
+    except ChapterRejected as e:
+        for res in e.completed:
+            console.print(f"[green]Chapter {res.number}[/] {res.title}  score={res.score:.2f}  -> {res.path}")
+        console.print(f"[red]Chapter {e.number} rejected[/]: {e}", soft_wrap=True)
+        sys.exit(1)
+
+
 @main.command()
 @click.argument("premise")
 @click.option("--name", default=None, help="Project name (default: first words of the premise).")
@@ -443,7 +456,7 @@ def start(c: Ctx, premise: str, name: Optional[str], chapters: int, genres: tupl
     p = pipe.new_project(title, text if len(text) < 300 else "", list(genres) or ["Fantasy"], words,
                          premise_doc=text if len(text) >= 300 else "")
     console.print(f"[green]Created[/] {p.state.name}: {p.state.bible.premise}\n")
-    for res in pipe.write_many(p, chapters):
+    for res in _write_or_refuse(pipe, p, chapters):
         console.print(f"[green]Chapter {res.number}[/] {res.title}  score={res.score:.2f}  -> {res.path}")
     console.print(f"\nContinue with: gauge write \"{p.state.name}\" --chapters 5")
 
@@ -489,7 +502,7 @@ def write(c: Ctx, name: str, chapters: int, fresh: bool, seed: Optional[int]) ->
         console.print(f"[red]LLM not reachable[/] ({pipe.llm.describe()}). Run `gauge doctor`.")
         sys.exit(1)
     p = pipe.open_project(name)
-    for res in pipe.write_many(p, chapters, fresh=fresh):
+    for res in _write_or_refuse(pipe, p, chapters, fresh=fresh):
         console.print(f"[green]Chapter {res.number}[/] {res.title}  score={res.score:.2f} "
                       f"(measured {res.critique.measured:.2f} / judged {res.critique.judged:.2f}) "
                       f"revisions={res.revisions}{'  [resumed from checkpoint]' if res.resumed else ''}\n  -> {res.path}")

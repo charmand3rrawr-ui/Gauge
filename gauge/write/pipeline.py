@@ -39,10 +39,27 @@ from .muse import Muse, NoveltyReport, NoveltyTracker, direction_record
 from .persona import load_persona
 from .planner import Planner
 from .project import Project
+from .prose import UNREADABLE, coherence
 from .schemas import ContinueSummaryOut, SummaryOut, schema_of
 from .world import WorldAgent, WorldBrief, WorldReview, WorldState, load_world, save_world
 
 log = logging.getLogger(__name__)
+
+
+class ChapterRejected(RuntimeError):
+    """Every attempt at a chapter was unreadable (under the coherence floor). Nothing was saved as a
+    chapter, nothing was remembered, and the project still stands at the previous chapter. The last
+    attempt is kept at ``path`` so the author can see what the model produced."""
+
+    def __init__(self, project: str, number: int, attempts: int, critique: Critique, path: Path):
+        self.project, self.number, self.attempts, self.critique, self.path = project, number, attempts, critique, path
+        self.completed: list[ChapterResult] = []  # chapters saved earlier in the same write_many run
+        why = critique.measured_issues[1] if len(critique.measured_issues) > 1 else UNREADABLE
+        super().__init__(
+            f"Chapter {number} of {project} was not saved: {UNREADABLE} "
+            f"({attempts} attempt{'' if attempts == 1 else 's'}; coherence {critique.coherence:.2f}: {why}). "
+            f"The model is too weak or under-trained for this; train GaugeLM longer or switch to a stronger model. "
+            f"The last attempt is kept at {path}.")
 
 
 @dataclass
@@ -112,7 +129,8 @@ class WritePipeline:
         self.guide_compact = compact
         self.planner = Planner(self.llm, self.exemplars, compact)
         self.drafter = Drafter(self.llm, self.exemplars, compact, cfg.write.exemplars_in_prompt)
-        self.critic = Critic(self.fast_llm, self.model, rebel=cfg.write.rebel, retention_weight=cfg.write.retention_weight, realism_weight=cfg.write.realism_weight)
+        self.critic = Critic(self.fast_llm, self.model, rebel=cfg.write.rebel, retention_weight=cfg.write.retention_weight, realism_weight=cfg.write.realism_weight,
+                             coherence_floor=cfg.write.coherence_floor)
         self.techniques = TechniqueLibrary(self.trainer.embedder)
         self.techniques.load(cfg.models_dir)
         self.novelty = NoveltyTracker()
@@ -458,8 +476,12 @@ class WritePipeline:
 
         # Resume from a checkpointed draft if the last run died after generating it.
         ckpt = None if fresh else project.load_checkpoint(n)
+        if ckpt and coherence(ckpt["text"]).score < self.critic.coherence_floor:
+            log.info("ch %d: the checkpointed draft is not readable prose; drafting from scratch", n)
+            ckpt = None
         resumed = False
         first_draft = ""
+        redraft = None  # writes the chapter again from the same brief; unknown when resuming from a checkpoint
         if ckpt and ckpt.get("plan_title") == plan.title:
             text = ckpt["text"]
             cast_names = list(ckpt.get("cast", []))
@@ -500,8 +522,12 @@ class WritePipeline:
             council_text = council.brief(ctx) if council.agents else ""
             timings["council"] = time.monotonic() - t0
             t0 = time.monotonic()
-            text = self.drafter.draft(project, plan, prev, words, cast=cast_text, world=world_text,
-                                      techniques=self._technique_cards(plan), avoid=avoid_text, council=council_text)
+
+            def redraft() -> str:
+                return self.drafter.draft(project, plan, prev, words, cast=cast_text, world=world_text,
+                                          techniques=self._technique_cards(plan), avoid=avoid_text, council=council_text)
+
+            text = redraft()
             timings["draft"] = time.monotonic() - t0
             first_draft = text
             revisions = 0
@@ -517,11 +543,19 @@ class WritePipeline:
         t_rev = 0.0
         while crit.score < self.cfg.write.min_acceptable_score and revisions < self.cfg.write.max_revisions:
             revisions += 1
-            log.info("ch %d score %.2f < %.2f; revising (%d)", n, crit.score, self.cfg.write.min_acceptable_score, revisions)
-            problems = (self.critic.problems(crit) + self._character_problems(reviews) + self._world_problems(wrev)
-                        + (nov.notes if nov else []) + AgentCouncil.problems(agent_revs))
+            if not crit.readable and best.readable:
+                # A revision came back as noise: go back to the best readable version and revise that.
+                text, crit, reviews, wrev, nov, agent_revs = best_text, best, best_reviews, best_wrev, best_nov, best_agents
             t1 = time.monotonic()
-            text = self.drafter.revise(text, problems, crit.measured_issues, words)
+            if not crit.readable and redraft is not None:
+                # Nothing in an unreadable draft is worth keeping, so it is written again, not revised.
+                log.info("ch %d is not readable prose (coherence %.2f); drafting it again (%d)", n, crit.coherence, revisions)
+                text = redraft()
+            else:
+                log.info("ch %d score %.2f < %.2f; revising (%d)", n, crit.score, self.cfg.write.min_acceptable_score, revisions)
+                problems = (self.critic.problems(crit) + self._character_problems(reviews) + self._world_problems(wrev)
+                            + (nov.notes if nov else []) + AgentCouncil.problems(agent_revs))
+                text = self.drafter.revise(text, problems, crit.measured_issues, words)
             if self.cfg.write.checkpoint_drafts:
                 project.save_checkpoint(n, f"revision-{revisions}", text, {"plan_title": plan.title, "cast": cast_names,
                                                                              "revisions": revisions})
@@ -531,10 +565,17 @@ class WritePipeline:
                                                                       only=flagged or None, previous=reviews, council=council, ctx=ctx)
             reviews = new_reviews
             t_rev += time.monotonic() - t1
-            if crit.score > best.score:
+            if (crit.readable, crit.score) > (best.readable, best.score):
                 best_text, best, best_reviews, best_wrev, best_nov, best_agents = text, crit, reviews, wrev, nov, agent_revs
         if t_rev:
             timings["revise"] = t_rev
+        if not best.readable:
+            # Every attempt was noise. Saving it would put nonsense in the book, in every agent's memory
+            # and in GaugeLM's training text, so the chapter is refused instead.
+            if prev_settings is not None:
+                self._restore_settings(prev_settings)
+            self._ctx = {"project": project.name, "chapter": None}
+            raise self._reject(project, n, plan.title, text, crit, 1 + revisions)
 
         # Everyone who was really on the page remembers it, in their own terms (in parallel).
         t0 = time.monotonic()
@@ -625,11 +666,28 @@ class WritePipeline:
                              llm_calls=len(self.calls.records) - calls_before,
                              llm_seconds=round(self.calls.total_seconds() - secs_before, 1), resumed=resumed)
 
+    def _reject(self, project: Project, n: int, title: str, text: str, crit: Critique, attempts: int) -> ChapterRejected:
+        """Put the unreadable last attempt aside (outside chapters/, so it is never read back as story or
+        gathered as training text) and drop the checkpoint so the next run starts clean. It is logged but
+        kept out of the error journal: that feeds self-heal, and a weak model is not a fault in the code."""
+        path = project.save_rejected(n, title, text, {
+            "rejected": UNREADABLE, "coherence": crit.coherence, "issues": crit.measured_issues, "attempts": attempts,
+            "words": len(text.split()), "rejected_at": utcnow().isoformat()})
+        project.clear_checkpoint(n)
+        project.save()  # keep the outline the planner may have extended; `written` has not moved
+        err = ChapterRejected(project.name, n, attempts, crit, path)
+        log.warning("%s", err)
+        return err
+
     def _critique(self, text: str, plan, n: int, roster: Roster, cast_names: list[str],
                   world_state: Optional[WorldState] = None, previous_texts: Optional[list[str]] = None,
                   only: Optional[set[str]] = None, previous: Optional[list[CharacterReview]] = None,
                   council: Optional[AgentCouncil] = None, ctx: Optional[SceneContext] = None):
         crit = self.critic.critique(text, plan)
+        if not crit.readable:
+            # Blocked at 0: no character, world, novelty, reader or council share is blended in to lift
+            # it, and none of those reviewers is asked to read noise.
+            return crit, list(previous or []), None, None, []
         reviews = self._character_reviews(text, n, roster, cast_names, only=only) if cast_names else []
         if only is not None and previous:
             redone = {r.name for r in reviews}
@@ -691,6 +749,9 @@ class WritePipeline:
         for i in range(count):
             try:
                 out.append(self.write_next(project, fresh=fresh and i == 0))
+            except ChapterRejected as e:  # not journaled (see _reject); the chapters before it were saved
+                e.completed = out
+                raise
             except Exception as e:
                 import traceback
 

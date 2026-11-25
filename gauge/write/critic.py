@@ -1,4 +1,5 @@
-"""Critic: combines the learned engagement model (measured) with an LLM rubric (judged)."""
+"""Critic: combines the learned engagement model (measured) with an LLM rubric (judged), behind a
+measured coherence floor that scores unreadable text 0 before either is consulted."""
 from __future__ import annotations
 
 import logging
@@ -11,6 +12,7 @@ from ..llm.client import LLM, generate_json
 from ..models import ChapterRecord
 from . import prompts
 from .project import ChapterPlan
+from .prose import COHERENCE_FLOOR, coherence
 from .schemas import CriticOut, schema_of
 
 log = logging.getLogger(__name__)
@@ -26,6 +28,8 @@ class Critique:
     measured_issues: list[str] = field(default_factory=list)
     features: dict[str, float] = field(default_factory=dict)
     retention: float = 0.0  # 0..1 retention-curve shape (inert unless retention_weight > 0)
+    coherence: float = 1.0  # 0..1 measured: is this prose at all (see prose.coherence)
+    readable: bool = True  # False = under the coherence floor: score is 0 and nothing may raise it
 
 
 # Sensible defaults when no model has been trained yet: what a chapter should look like.
@@ -41,13 +45,15 @@ _HEURISTIC_TARGETS = {
 
 class Critic:
     def __init__(self, llm: LLM, model: Optional[EngagementModel], novel_level_feats: Optional[dict[str, float]] = None,
-                 rebel: bool = False, retention_weight: float = 0.0, realism_weight: float = 0.0):
+                 rebel: bool = False, retention_weight: float = 0.0, realism_weight: float = 0.0,
+                 coherence_floor: float = COHERENCE_FLOOR):
         self.llm = llm
         self.model = model
         self.novel_feats = novel_level_feats or {}
         self.rebel = rebel
         self.retention_weight = max(0.0, min(0.5, retention_weight))
         self.realism_weight = max(0.0, min(0.5, realism_weight))
+        self.coherence_floor = max(0.0, min(1.0, coherence_floor))  # 0 = measure but never veto
 
     def _measured(self, feats: dict[str, float]) -> (float, list[str]):  # type: ignore[valid-type]
         issues: list[str] = []
@@ -95,8 +101,15 @@ class Critic:
         return judged, rubric, str(data.get("notes", ""))
 
     def critique(self, text: str, plan: ChapterPlan, title: str = "") -> Critique:
+        # The floor comes first: text that is not prose is scored 0 on the measurement alone. No rubric
+        # call is spent on it, and no judge (a weak one says "fine" to anything) gets a vote.
+        co = coherence(text, self.coherence_floor)
+        if co.score < self.coherence_floor:
+            return Critique(score=0.0, measured=0.0, judged=0.0, measured_issues=co.issues[:4],
+                            coherence=co.score, readable=False)
         feats = chapter_features(ChapterRecord(novel_key="draft", index=plan.number, title=title or plan.title, text=text))
         measured, issues = self._measured(feats)
+        issues = co.issues + issues  # readable, but with debris the reviser should clean up
         judged, rubric, notes = self._judged(text, plan)
         retention = 0.0
         base = 0.5 * measured + 0.5 * judged
@@ -118,7 +131,7 @@ class Critic:
         total_w = sum(w for _, w in parts) or 1.0
         score = sum(p * w for p, w in parts) / total_w
         return Critique(score=round(score, 4), measured=measured, judged=judged, rubric=rubric, notes=notes,
-                        measured_issues=issues, features=feats, retention=round(retention, 3))
+                        measured_issues=issues, features=feats, retention=round(retention, 3), coherence=co.score)
 
     def problems(self, c: Critique) -> list[str]:
         out = []

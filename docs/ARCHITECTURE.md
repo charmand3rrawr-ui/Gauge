@@ -58,14 +58,18 @@ cli.py           click commands
      refusals, friction with the plan). The briefs become the CAST section of the draft prompt.
    - `Drafter.draft()` writes the chapter with the bible, running summary, previous chapter
      tail, the plan, and retrieved opening/ending exemplars.
-   - `Critic.critique()` computes chapter features, projects them into novel-feature space and
+   - `Critic.critique()` first measures coherence (`prose.coherence()`, no model): text that is not
+     prose at all (word salad, markup debris, a stuck loop) scores 0 and no other judge is asked.
+     Otherwise it computes chapter features, projects them into novel-feature space and
      scores with the engagement model (or heuristic targets if no model), and asks the LLM for a
      1-10 rubric (hook, momentum, payoff, cliffhanger, clarity). Blended 50/50.
    - Each present character's `CharacterAgent.review()` scores their own portrayal; the chapter
      score is blended with that consistency (`write.character_weight`).
    - If below `min_acceptable_score`, `Drafter.revise()` is called with the editor's notes, the
      measured issues and the characters' own corrections, up to `max_revisions` times. The best
-     version is kept.
+     version is kept. An unreadable draft is drafted again rather than revised; if every attempt is
+     unreadable, `ChapterRejected` is raised: the last attempt goes to `drafts/rejected/`, and the
+     steps below (memory, save, learning) do not run.
    - Every character on the page runs `remember()`: memories, mood, knowledge and relationship
      deltas are written back to `characters/<name>.json`.
    - The chapter is saved as Markdown with front matter; the running summary and open threads
