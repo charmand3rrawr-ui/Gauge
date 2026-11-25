@@ -28,6 +28,13 @@ TEACH_INTRO = ("Give Gauge books or your own writing to learn from. It studies t
                "Use only writing that is yours or that you have the right to use, such as your own work or "
                "public-domain books. This teaches Gauge what to aim for; it does not rebuild the downloaded AI "
                "model itself.")
+ENGINE_NOTE = ("GaugeLM is Gauge's own small model. It has to be trained before it can write, and it writes far more "
+               "roughly than the downloaded model. It learns from your library, from every chapter written for your "
+               "stories, and from the downloaded model, which teaches it worked examples each time you press Train. "
+               "So it keeps learning while the downloaded model does the writing. Training takes hours in total; "
+               "train a little at a time and it carries on from where it stopped.")
+NOT_TRAINED = ("GaugeLM has not been trained yet. Press Teach Gauge, add books or your own writing, "
+               "then press Train GaugeLM.")
 
 
 class StudioController:
@@ -43,8 +50,151 @@ class StudioController:
         from .write.project import Project
 
         llm = make_llm(self.cfg.llm)
-        return {"llm_ok": llm.available(), "llm": llm.describe(), "model": self.cfg.llm.model,
-                "projects": Project.list(self.cfg.projects_dir)}
+        eng = self.engine()
+        return {"llm_ok": eng["ready"], "llm": llm.describe(), "model": self.cfg.llm.model,
+                "projects": Project.list(self.cfg.projects_dir), "engine": eng["label"], "is_gaugelm": eng["is_gaugelm"]}
+
+    # ---- which AI writes ---------------------------------------------------------------
+    def engine(self) -> dict[str, Any]:
+        """Which model does the writing, in words, and whether it can write right now."""
+        if self.cfg.llm.provider == "native":
+            from .native import NativeTrainer
+
+            st = NativeTrainer(self.cfg.native_dir).status()
+            trained = bool(st.get("trained"))
+            steps = int(st.get("step", 0) or 0)
+            label = f"GaugeLM, Gauge's own model (trained {steps} steps)" if trained else "GaugeLM, Gauge's own model (not trained yet)"
+            return {"provider": "native", "is_gaugelm": True, "ready": trained, "steps": steps, "label": label}
+        from .llm import make_llm
+
+        ready = make_llm(self.cfg.llm).available()
+        return {"provider": self.cfg.llm.provider, "is_gaugelm": False, "ready": ready, "steps": 0,
+                "label": f"the downloaded model {self.cfg.llm.model}"}
+
+    def _engine_memo(self) -> Path:
+        return self.cfg.root / "studio_engine.json"
+
+    def use_gaugelm(self, on: bool = True) -> dict[str, Any]:
+        """Point the writer at GaugeLM (on) or back at the downloaded model (off).
+
+        Switching to GaugeLM also selects the lean writing room and shorter chapters, which is what a
+        model this small needs; the previous choices are remembered and restored when switching back."""
+        import json
+
+        llm, memo = self.cfg.llm, self._engine_memo()
+        if on:
+            if llm.provider != "native":
+                memo.write_text(json.dumps({"provider": llm.provider, "model": llm.model, "fast_model": llm.fast_model,
+                                            "num_ctx": llm.num_ctx, "profile": self.cfg.agents.profile,
+                                            "words": self.cfg.write.target_chapter_words}), encoding="utf-8")
+                llm.provider, llm.model, llm.fast_model = "native", "gaugelm", ""
+                llm.num_ctx = self.cfg.native.block_size
+                llm.native_dir = str(self.cfg.native_dir)
+                self.cfg.agents.profile = "lean"
+                self.cfg.write.target_chapter_words = min(self.cfg.write.target_chapter_words, 800)
+        elif llm.provider == "native":
+            prev: dict[str, Any] = {}
+            if memo.exists():
+                try:
+                    prev = json.loads(memo.read_text(encoding="utf-8-sig"))
+                except ValueError:
+                    prev = {}
+            llm.provider = prev.get("provider") or "ollama"
+            llm.model = prev.get("model") or "llama3.1:8b"
+            llm.fast_model = prev.get("fast_model", "")
+            llm.num_ctx = int(prev.get("num_ctx") or 8192)
+            self.cfg.agents.profile = prev.get("profile") or "full"
+            self.cfg.write.target_chapter_words = int(prev.get("words") or 2200)
+        self.cfg.save()
+        self._pipe = None
+        eng = self.engine()
+        if eng["is_gaugelm"]:
+            msg = "Gauge now writes with GaugeLM, its own model, using the lean writing room and shorter chapters. "
+            msg += "It is ready to write." if eng["ready"] else "It is not trained yet: add material, then press Train GaugeLM."
+        else:
+            msg = f"Gauge now writes with {eng['label']}."
+            if not eng["ready"]:
+                msg += " It is not answering: open the Ollama app."
+        return {**eng, "message": msg}
+
+    def train_gaugelm(self, minutes: float = 30, progress: Optional[Callable[[dict[str, Any]], None]] = None,
+                      teach: bool = True) -> dict[str, Any]:
+        """Train GaugeLM for about `minutes`, carrying on from wherever it stopped before.
+
+        It works whichever model is doing the writing; that is the point. GaugeLM learns from three things:
+        the library; every chapter written for your stories, whoever wrote it; and worked examples of
+        Gauge's own tasks. When the downloaded model is the writer and is running, `teach` has it answer
+        a few of those tasks first, so the big model teaches the small one.
+
+        Only text that is safe to train on is used: what you added yourself, public-domain books, the
+        chapters written for you and the examples made on this machine. Scraped third-party fiction is
+        left out."""
+        from .learn.corpus import permitted_texts
+        from .native import (
+            ModelConfig,
+            NativeTrainer,
+            TrainConfig,
+            dedup,
+            instruction_rows,
+            preset_config,
+        )
+
+        prose = permitted_texts(self.db, self.cfg.projects_dir)
+        if not prose:
+            return {"trained": False, "step": 0, "lessons": 0,
+                    "message": "There is nothing to train on yet. Add books or your own writing first."}
+        datasets = self.cfg.models_dir / "datasets"
+        lessons = 0
+        if teach and self.cfg.llm.provider != "native":
+            from .llm import make_llm
+
+            teacher = make_llm(self.cfg.llm, "main")
+            if teacher.available():
+                from .native.distill import distill
+
+                want = max(4, min(60, round(float(minutes) / 3)))
+                out = datasets / "distill.jsonl"
+                have = sum(1 for _ in out.open(encoding="utf-8")) if out.exists() else 0
+                try:
+                    # Seeded by how many lessons exist, so each press studies different passages.
+                    lessons = int(distill(self.db, teacher, out, want, seed=have).get("rows", 0))
+                except Exception as e:  # a teacher that stumbles must not stop the training
+                    log.warning("could not collect lessons from the downloaded model: %s", e)
+        docs = dedup(prose + instruction_rows(datasets))
+        examples = sum(1 for kind, _ in docs if kind.startswith("chat:"))
+        n = self.cfg.native
+        mcfg = preset_config(n.size) if n.size else ModelConfig(vocab_size=n.vocab_size, block_size=n.block_size, n_layer=n.n_layer,
+                                                                 n_head=n.n_head, n_embd=n.n_embd, n_kv_head=n.n_kv_head)
+        mcfg.arch = n.arch
+        tcfg = TrainConfig(steps=n.steps, batch_size=n.batch_size, lr=n.lr, accum_steps=n.accum_steps, chat_weight=n.chat_weight,
+                           device=n.device, eval_every=25, checkpoint_every=50)
+        trainer = NativeTrainer(self.cfg.native_dir)
+        resumed = trainer.exists()
+        try:
+            res = trainer.train(docs, mcfg, tcfg, resume=resumed, progress=progress, time_budget_s=max(0.05, float(minutes)) * 60)
+        except ValueError as e:  # the corpus is too small to cut into training windows
+            return {"trained": False, "step": 0, "lessons": lessons,
+                    "message": f"Not enough text to train on yet ({e}). Add more material, a few books is a good start, and try again."}
+        self._pipe = None
+        chars = sum(len(t) for _, t in docs)
+        mins = max(1, round(float(res["seconds"]) / 60))
+        msg = (f"Trained GaugeLM for {mins} minute{'' if mins == 1 else 's'} on {len(docs) - examples} chapters "
+               f"and {examples} worked example{'' if examples == 1 else 's'} ({chars:,} characters). ")
+        if lessons:
+            msg += f"The downloaded model taught it {lessons} new example{'' if lessons == 1 else 's'} first. "
+        msg += (f"It is now at step {res['step']}" + (f", loss {res['loss']} (lower is better)" if res.get("loss") is not None else "") + ". "
+                + ("It carried on from where it stopped. " if resumed else "")
+                + "Train again whenever you like; it keeps improving for many hours.")
+        return {"trained": True, "step": int(res["step"]), "loss": res.get("loss"), "seconds": res["seconds"],
+                "resumed": resumed, "documents": len(docs), "examples": examples, "lessons": lessons, "message": msg}
+
+    def _require_engine(self) -> None:
+        """A clear sentence instead of a stack trace when GaugeLM is selected but has never been trained."""
+        if self.cfg.llm.provider == "native":
+            from .native import NativeTrainer
+
+            if not NativeTrainer(self.cfg.native_dir).exists():
+                raise ValueError(NOT_TRAINED)
 
     def pipeline(self):
         if self._pipe is None:
@@ -57,6 +207,7 @@ class StudioController:
         idea = idea.strip()
         if not idea:
             raise ValueError("Tell me your story idea first.")
+        self._require_engine()
         from .write.project import Project, title_from_text
 
         title = name or title_from_text(idea)
@@ -70,10 +221,21 @@ class StudioController:
         return p.state.name
 
     def write_next(self, name: str) -> dict[str, Any]:
+        self._require_engine()
         pipe = self.pipeline()
         res = pipe.write_next(pipe.open_project(name))
-        return {"number": res.number, "title": res.title, "score": round(res.score, 2), "path": str(res.path),
-                "seconds": round(res.timings.get("total", 0.0))}
+        info = {"number": res.number, "title": res.title, "score": round(res.score, 2), "path": str(res.path),
+                "seconds": round(res.timings.get("total", 0.0)), "gaugelm": ""}
+        # GaugeLM keeps learning while another model writes: the chapter just written is new material for it.
+        after = self.cfg.native.after_chapter_minutes
+        if after > 0:
+            try:
+                t = self.train_gaugelm(after, teach=False)
+                info["gaugelm"] = f"GaugeLM trained {after} more minute{'' if after == 1 else 's'} (step {t['step']})." if t["trained"] else t["message"]
+            except Exception as e:  # training is a bonus; never lose the chapter over it
+                log.warning("after-chapter GaugeLM training failed: %s", e)
+                info["gaugelm"] = "GaugeLM could not be trained this time."
+        return info
 
     def chapters(self, name: str) -> list[tuple[int, str]]:
         from .write.project import Project
@@ -224,7 +386,7 @@ class StudioController:
         else:
             msg += " To also learn what makes chapters work, give several books a star rating when you add them."
         if self.cfg.llm.provider == "native":
-            msg += " The built-in model is trained separately: run 'gauge native train' (it takes hours)."
+            msg += " GaugeLM itself is trained separately: press Train GaugeLM."
         return {"chapters": total, "books": books, "examples": examples, "techniques": techniques, "model": model,
                 "message": msg}
 
@@ -346,7 +508,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         def done(info: dict[str, Any]) -> None:
             refresh_chapters()
             show_chapter(info["number"])
-            status_var.set(f"Chapter {info['number']} done in {info['seconds']}s (score {info['score']}).")
+            status_var.set(f"Chapter {info['number']} done in {info['seconds']}s (score {info['score']}). {info.get('gaugelm', '')}".strip())
 
         run_bg(lambda: ctl.write_next(state["project"]), done, "Writing the next chapter... this takes a few minutes.")
 
@@ -399,7 +561,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
 
         win = tk.Toplevel(root)
         win.title("Teach Gauge")
-        win.geometry("780x660")
+        win.geometry("800x780")
         frame = ttk.Frame(win, padding=16)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text="Teach Gauge", font=huge).pack(anchor="w")
@@ -413,8 +575,15 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         teach_buttons = ttk.Frame(frame)
         teach_buttons.pack(fill="x", pady=(10, 4))
         ttk.Label(frame, text="In the library", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(8, 0))
-        lib_box = tk.Listbox(frame, font=("Segoe UI", 11), height=9)
+        lib_box = tk.Listbox(frame, font=("Segoe UI", 11), height=6)
         lib_box.pack(fill="both", expand=True, pady=6)
+        ttk.Label(frame, text="Which AI writes", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(6, 0))
+        engine_var = tk.StringVar(value="")
+        ttk.Label(frame, textvariable=engine_var, wraplength=730, font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        ttk.Label(frame, text=ENGINE_NOTE, wraplength=730, font=("Segoe UI", 10)).pack(anchor="w", pady=(2, 6))
+        engine_buttons = ttk.Frame(frame)
+        engine_buttons.pack(fill="x", pady=(0, 6))
+        minutes_var = tk.StringVar(value="30")
         teach_status = tk.StringVar(value="")
         ttk.Label(frame, textvariable=teach_status, wraplength=730, font=("Segoe UI", 11)).pack(anchor="w")
 
@@ -469,9 +638,53 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         def on_learn() -> None:
             start(ctl.learn, "Studying your library... this can take several minutes.")
 
+        def refresh_engine() -> None:
+            eng = ctl.engine()
+            if alive():
+                engine_var.set("Writing with: " + eng["label"])
+            if eng["ready"]:
+                status_var.set(f"Story engine ready: {eng['label']}.")
+            elif eng["is_gaugelm"]:
+                status_var.set(NOT_TRAINED)
+            else:
+                status_var.set("Story engine is OFF. Open the Ollama app (the llama icon), then restart Gauge Studio.")
+
+        def on_use(gaugelm: bool) -> None:
+            if state["busy"]:
+                teach_status.set("Gauge is busy. Wait for the current job to finish, then try again.")
+                return
+            try:
+                teach_status.set(ctl.use_gaugelm(gaugelm)["message"])
+            except Exception as e:
+                teach_status.set(f"Could not switch: {e}")
+            refresh_engine()
+
+        def on_train() -> None:
+            raw = minutes_var.get()
+            minutes = float(raw) if raw.replace(".", "", 1).isdigit() else 30.0
+
+            def progress(rec: dict[str, Any]) -> None:
+                line = f"Training GaugeLM... step {rec.get('step')}, loss {rec.get('loss')} (lower is better)"
+                root.after(0, lambda: teach_status.set(line) if alive() else None)
+
+            def done_training() -> dict[str, Any]:
+                res = ctl.train_gaugelm(minutes, progress)
+                root.after(0, refresh_engine)
+                return res
+
+            start(done_training, f"Training GaugeLM for about {minutes:g} minutes. You can leave this running.")
+
         for text, cmd in (("Add files...", on_files), ("Add a folder...", on_folder), ("Learn from the library now", on_learn)):
             ttk.Button(teach_buttons, text=text, style="Big.TButton", command=cmd).pack(side="left", padx=(0, 8))
+        ttk.Button(engine_buttons, text="Use GaugeLM", command=lambda: on_use(True)).pack(side="left", padx=(0, 8))
+        ttk.Button(engine_buttons, text="Use the downloaded model", command=lambda: on_use(False)).pack(side="left", padx=(0, 8))
+        ttk.Button(engine_buttons, text="Train GaugeLM", command=on_train).pack(side="left", padx=(16, 4))
+        ttk.Label(engine_buttons, text="for", font=("Segoe UI", 11)).pack(side="left")
+        ttk.Combobox(engine_buttons, textvariable=minutes_var, values=["10", "30", "60", "120", "240", "480"], state="readonly",
+                     width=5).pack(side="left", padx=4)
+        ttk.Label(engine_buttons, text="minutes", font=("Segoe UI", 11)).pack(side="left")
         refresh_library()
+        engine_var.set("Writing with: " + ctl.engine()["label"])
 
     def on_switches() -> None:
         """A window of every switch, grouped, built from the catalog. Changes save immediately."""
@@ -552,7 +765,9 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     def check_engine() -> None:
         def done(st: dict[str, Any]) -> None:
             if st["llm_ok"]:
-                status_var.set(f"Story engine ready ({st['model']}).")
+                status_var.set(f"Story engine ready: {st['engine']}.")
+            elif st["is_gaugelm"]:
+                status_var.set(NOT_TRAINED)
             else:
                 status_var.set("Story engine is OFF. Open the Ollama app (the llama icon), then restart Gauge Studio.")
             if st["projects"]:

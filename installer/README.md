@@ -79,6 +79,43 @@ than duplicating it.
 The same thing from the command line: `gauge.bat import "C:\path\to\folder"`, then `gauge.bat train`
 and `gauge.bat absorb`.
 
+## Which AI writes: the downloaded model or GaugeLM
+
+Gauge can write with either of two models, and the Studio's top line always says which one is in use
+("Story engine ready: ...").
+
+- **The downloaded model** (for example `llama3.1:8b`, run by Ollama). Ready as soon as it is installed.
+  This is what writes good chapters today.
+- **GaugeLM**, Gauge's own model. It is very small and ships untrained. It knows only what it has been
+  trained on, so it must be trained before it can write at all, and for a long time its text is far
+  rougher than the downloaded model's. After a minute or two of training it produces nonsense; it needs
+  many hours and a good-sized library before the text becomes readable.
+
+In the **Teach Gauge** window, under *Which AI writes*:
+
+- **Use GaugeLM** / **Use the downloaded model** switches the writer. Switching to GaugeLM also selects
+  the lean writing room and shorter chapters, which a model that small needs; switching back restores
+  what you had.
+- **Train GaugeLM for N minutes** trains it, carrying on from wherever it stopped. It works whichever
+  model is writing.
+
+### How GaugeLM learns while the downloaded model does the writing
+
+Using the downloaded model does not hold GaugeLM back: it is GaugeLM's teacher. GaugeLM learns from
+
+1. your library;
+2. every chapter written for your stories, whichever model wrote it;
+3. worked examples: each time you press **Train GaugeLM** while the downloaded model is running, that
+   model first answers a few of Gauge's own tasks, and GaugeLM learns to imitate the answers.
+
+It only learns when training actually runs. Press **Train GaugeLM** now and then, or turn on the switch
+**Train GaugeLM after each chapter (minutes)** in **Switches** so it trains a little every time a chapter
+is written. A sensible path: write with the downloaded model, train GaugeLM alongside, and switch the
+writer to GaugeLM once its text reads well enough for you.
+
+Only text that is safe to train on is used: what you added yourself, public-domain books, the chapters
+written for you, and the examples made on your own machine.
+
 ## Choosing for yourself
 
 | you want | Windows | macOS / Linux |

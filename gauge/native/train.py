@@ -79,23 +79,33 @@ def gather_texts(db: Database, projects_dir: Optional[Path] = None, datasets_dir
                     import re
 
                     docs.append(("prose", re.sub(r"^#[^\n]*\n+", "", t)))
-    if datasets_dir and datasets_dir.exists():
-        for name in ("sft.jsonl", "self_preference.jsonl", "author_edits.jsonl", "distill.jsonl"):
-            f = datasets_dir / name
-            if not f.exists():
-                continue
-            for line in f.open(encoding="utf-8"):
-                try:
-                    r = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if "output" in r:
-                    docs.append((f"chat:{r.get('instruction', '')}\n{r.get('input', '')}", r["output"]))
-                elif "chosen" in r:
-                    docs.append((f"chat:{r.get('prompt', '')}", r["chosen"]))
-                elif "response" in r:
-                    docs.append((f"chat:{r.get('prompt', '')}", r["response"]))
+    docs.extend(instruction_rows(datasets_dir))
     return dedup(docs)
+
+
+def instruction_rows(datasets_dir: Optional[Path]) -> list[tuple[str, str]]:
+    """The rows that teach behaviour rather than prose: curated instruction data, the preferred side of
+    draft-versus-accepted pairs, the author's edits, and the big model's answers to Gauge's own tasks
+    (distillation). Each is ('chat:<prompt>', answer). All of it was produced on this machine."""
+    rows: list[tuple[str, str]] = []
+    if not datasets_dir or not datasets_dir.exists():
+        return rows
+    for name in ("sft.jsonl", "self_preference.jsonl", "author_edits.jsonl", "distill.jsonl"):
+        f = datasets_dir / name
+        if not f.exists():
+            continue
+        for line in f.open(encoding="utf-8"):
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if "output" in r:
+                rows.append((f"chat:{r.get('instruction', '')}\n{r.get('input', '')}", r["output"]))
+            elif "chosen" in r:
+                rows.append((f"chat:{r.get('prompt', '')}", r["chosen"]))
+            elif "response" in r:
+                rows.append((f"chat:{r.get('prompt', '')}", r["response"]))
+    return rows
 
 
 def dedup(docs: list[tuple[str, str]]) -> list[tuple[str, str]]:

@@ -61,6 +61,7 @@ class NativeConfig(BaseModel):
     daemon_steps: int = 200  # continue-training steps per daemon cycle on new material
     daemon_minutes: int = 20  # time budget per cycle
     distill_rows: int = 200  # teacher answers to collect per `gauge native distill` run
+    after_chapter_minutes: int = 0  # Studio: train GaugeLM this many minutes after each chapter (0 = off)
 
 
 class ComputeConfig(BaseModel):

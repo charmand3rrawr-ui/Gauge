@@ -73,6 +73,7 @@ SWITCHES: list[Switch] = [
     # ---- model & compute --------------------------------------------------------------------
     Switch("llm.provider", "Model provider", "choice", "ollama (default), openai-compatible server, or native GaugeLM.", "Model", choices=["ollama", "openai", "native", "fake"]),
     Switch("llm.model", "Writer model", "text", "Ollama model name for prose (e.g. llama3.1:8b, qwen2.5:14b).", "Model"),
+    Switch("native.after_chapter_minutes", "Train GaugeLM after each chapter (minutes)", "int", "In Gauge Studio, train GaugeLM, Gauge's own model, for this many minutes after every chapter, whichever model wrote it. This is how GaugeLM keeps learning while the downloaded model does the writing. 0 turns it off.", "Model", 0, 120),
     Switch("llm.fast_model", "Fast model for bookkeeping", "text", "Small model for briefs, reviews, memory (e.g. llama3.2:3b). Empty = same as writer.", "Model"),
     Switch("llm.cache", "Cache repeated calls", "bool", "Reuse the answer to an identical deterministic/bookkeeping request instead of paying again. Prose is never cached.", "Model"),
     Switch("native.device", "GaugeLM device", "choice", "auto picks a GPU when one is usable.", "Model", choices=["auto", "cuda", "cpu"]),

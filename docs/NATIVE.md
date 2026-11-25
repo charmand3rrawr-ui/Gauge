@@ -57,6 +57,15 @@ and the instruction rows under `data/models/datasets/` (SFT, the chosen side of 
 and author-edit pairs, and the distilled teacher answers), de-duplicated, with instruction rows
 repeated `native.chat_weight` times and concentrated in the last third of training.
 
+## From Gauge Studio
+
+The Studio's **Teach Gauge** window has the same controls without a terminal: **Use GaugeLM** / **Use the
+downloaded model** to choose the writer, and **Train GaugeLM for N minutes**, which resumes each time. When
+the downloaded model is running, pressing Train first has it answer a few of Gauge's tasks (distillation),
+so the big model teaches the small one while it carries on doing the writing. The switch
+`native.after_chapter_minutes` trains GaugeLM a little after every chapter. See
+[installer/README.md](../installer/README.md).
+
 ## Using it as the writer
 
 ```powershell
