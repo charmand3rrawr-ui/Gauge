@@ -171,6 +171,7 @@ def _fake_tkinter(picked_folder):
     box = types.ModuleType("tkinter.messagebox")
     box.showinfo = lambda *a, **k: shown.append(("info", a))
     box.showerror = lambda *a, **k: shown.append(("error", a))
+    box.askyesno = lambda *a, **k: (shown.append(("ask", a)), True)[1]
     dialog = types.ModuleType("tkinter.simpledialog")
     dialog.askstring = lambda *a, **k: None
     files = types.ModuleType("tkinter.filedialog")

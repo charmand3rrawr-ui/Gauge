@@ -58,6 +58,54 @@ and author-edit pairs, the distilled teacher answers, and the character school's
 a character; see [CHARACTER-SCHOOL.md](CHARACTER-SCHOOL.md)), de-duplicated, with instruction rows
 repeated `native.chat_weight` times and concentrated in the last third of training.
 
+## Growing the model
+
+A model's size is fixed when it is created; training only changes the values of its weights. Once a
+size has learned what it can, the way to more capacity used to be starting again. `gauge native grow`
+instead builds a larger model that gives **exactly the same answers** as the trained one, with the
+extra capacity switched off, and training carries on from the same step.
+
+```powershell
+.\gauge.bat native grow --plan            # what it is now, and what it would become; changes nothing
+.\gauge.bat native grow                   # the next size up (tiny -> small -> medium -> large)
+.\gauge.bat native grow --to medium       # or a named size
+.\gauge.bat native grow --layers 6        # or only deeper / --width 384 / --context 512
+.\gauge.bat native train --resume         # carry on; the new capacity fills in as it trains
+.\gauge.bat native grow --undo            # put back the model from before the last growth
+```
+
+How it stays the same model (`gauge/native/grow.py`):
+
+| grows | how |
+| --- | --- |
+| deeper | new layers start with zero output weights, so they add nothing yet; they are spread evenly between the old ones |
+| wider | the old model lives in the first dimensions and the new ones start empty; what is written into the stream is scaled up and the norm gains scaled down so the norms see exactly what they saw before |
+| more heads | the head size is kept, so a wider model has more heads; old heads keep their weights and still read the same key/value head (copied where the grouping gets tighter); new heads write zero |
+| feed-forward | new hidden units have zero output weights |
+| context | positions are rotary, so nothing is stored per position; the limit simply moves |
+
+The weights that read *into* the new parts are random, so gradients reach them from the first step.
+Before any file is replaced the grown model is run against the old one on the same input and the
+growth is refused if they differ; the old checkpoint is kept in `native/before-grow/`.
+
+What it cannot do: the **vocabulary** does not grow (the tokenizer is built with the first training run),
+the head size cannot change, a model cannot shrink, and the older GPT-style checkpoints cannot be
+grown. A bigger model is also slower. Measured on a 4-core test machine, going from tiny (3.9 million
+weights) to small (25.2 million with the same vocabulary) made training about 4.5 times slower per
+token and writing about 3 times slower; run `gauge native bench --size small` to measure yours first.
+
+A measured run on a small test model (trained 1,600 steps, then 400 more steps each way):
+
+| | training loss | held-out loss |
+| --- | --- | --- |
+| grown at step 1,600, then 400 steps | 3.53 | 4.230 |
+| not grown, 400 more steps | 3.63 | 4.238 |
+| a new model of the larger size, 400 steps from nothing | 4.60 | 4.831 |
+
+The loss was identical before and after the growth (5.63018 both ways in an earlier run), and growing
+was far ahead of starting over. On that small corpus the gain over not growing was modest: a bigger
+model needs more text as well as more steps to pull ahead.
+
 ## From Gauge Studio
 
 The Studio's **Teach Gauge** window has the same controls without a terminal: **Use GaugeLM** / **Use the
@@ -65,7 +113,7 @@ downloaded model** to choose the writer, and **Start training** / **Pause traini
 paused or for a set number of minutes, stops within a few seconds of a pause with everything saved, and
 carries on from that step next time. When the downloaded model is running, starting training first has
 it answer a few of Gauge's tasks (distillation), so the big model teaches the small one while it carries
-on doing the writing. Training respects the capacity limit (`gauge compute limit`). The switch
+on doing the writing. **Grow GaugeLM** and **Undo the last growth** are in the same window. Training respects the capacity limit (`gauge compute limit`). The switch
 `native.after_chapter_minutes` trains GaugeLM a little after every chapter. See
 [installer/README.md](../installer/README.md).
 
@@ -92,5 +140,6 @@ agent profile and short chapters.
 - `train.py`: corpus gathering and dedup, prose/instruction streams, curriculum, gradient
   accumulation, schedule, held-out evaluation, checkpoints, time budgets, `continue_training`.
 - `distill.py`: task-shaped prompts over corpus excerpts answered by the teacher model.
+- `grow.py`: function-preserving growth to a larger shape, checked before it replaces anything, with undo.
 - `evaluate.py`: presets table, benchmark, perplexity, instruction-shape probes.
 - `client.py`: the `NativeLLM` provider.

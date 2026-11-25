@@ -2538,6 +2538,57 @@ def native_continue(c: Ctx, steps, minutes) -> None:
     console.print_json(json.dumps(res))
 
 
+@native.command("grow")
+@click.option("--to", type=click.Choice(["small", "medium", "large"]), default=None, help="The size to grow into. Default: the next size up.")
+@click.option("--layers", type=int, default=None)
+@click.option("--width", type=int, default=None, help="A multiple of the head size (64 for the named sizes).")
+@click.option("--heads", type=int, default=None)
+@click.option("--kv-heads", type=int, default=None)
+@click.option("--context", type=int, default=None, help="How many tokens it reads at once.")
+@click.option("--plan", "plan_only", is_flag=True, help="Show what would happen and change nothing.")
+@click.option("--undo", is_flag=True, help="Put back the model from before the last growth.")
+@click.pass_obj
+def native_grow(c: Ctx, to, layers, width, heads, kv_heads, context, plan_only, undo) -> None:
+    """Grow GaugeLM into a bigger model without losing what it learned.
+
+    The grown model gives exactly the same answers as before; the extra capacity is empty until it
+    trains. The old model is kept so the growth can be undone. The vocabulary does not change."""
+    from .native import grow as g
+
+    d = c.cfg.native_dir
+    try:
+        if undo:
+            res = g.undo_grow(d)
+            g.apply_to_config(c.cfg, res["config"])
+            c.cfg.save()
+            console.print(f"[green]{res['message']}[/]")
+            return
+        info = g.can_grow(d)
+        if "now" in info:
+            console.print(f"now:   {info['now']}")
+        shape = {"layers": layers, "width": width, "heads": heads, "kv_heads": kv_heads, "context": context}
+        if plan_only:
+            from .native import GaugeLM
+
+            if "config" not in info:
+                console.print(f"[red]{info['reason']}[/]")
+                sys.exit(1)
+            new = g.target_config(GaugeLM.load(d).cfg, to, **shape)
+            console.print(f"after: {g.describe(new)}")
+            console.print("Nothing was changed. Run without --plan to grow. `gauge native bench` shows how fast a size trains here.")
+            return
+        res = g.grow_checkpoint(d, to, **shape)
+    except g.GrowError as e:
+        console.print(f"[red]{e}[/]")
+        sys.exit(1)
+    g.apply_to_config(c.cfg, res["to"])
+    c.cfg.save()
+    console.print(f"after: {res['after']}")
+    console.print(f"[green]{res['message']}[/]")
+    console.print(f"The model from before is kept in {res['backup_path']}; `gauge native grow --undo` puts it back.")
+    console.print("Carry on with: gauge native train --resume")
+
+
 @native.command("status")
 @click.pass_obj
 def native_status(c: Ctx) -> None:

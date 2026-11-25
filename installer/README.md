@@ -173,6 +173,20 @@ writer to GaugeLM once its text reads well enough for you.
 Only text that is safe to train on is used: what you added yourself, public-domain books, the chapters
 written for you, and the examples made on your own machine.
 
+### Growing GaugeLM
+
+GaugeLM's size is fixed when it is first trained, and more training only improves it up to what that
+size can hold. In **Change the AI**, the line above the **Grow GaugeLM** button says how big it is now
+and what it would become. Press **Grow GaugeLM** to move it to the next size.
+
+- It keeps everything it has learned. Gauge checks that the bigger model gives the same answers as
+  the smaller one before it replaces anything.
+- The extra room is empty until it trains, so press **Start training** afterwards.
+- A bigger model is slower. On a test machine, going from tiny to small made training about 4.5
+  times slower and writing about 3 times slower.
+- **Undo the last growth** puts the smaller model back. Training done after growing is lost.
+- Pause training before growing or undoing.
+
 ## How much of the computer Gauge uses
 
 Gauge uses at most **20%** of each device: this computer, and any other computers you have linked to it.
