@@ -54,6 +54,31 @@ Type what your story is about in the big box. Press **START MY STORY**. Then pre
 themselves. **Save story as one file** makes one document you can print or share. **Switches** opens
 every setting as checkboxes and sliders, with a warning on the ones that matter.
 
+## Teaching Gauge with your own material
+
+Press **Teach Gauge** to give it books or your own writing to learn from.
+
+1. *(Optional)* choose how good the material is, 1 to 5 stars. Ratings teach Gauge your taste.
+2. Press **Add files...** (each file is one book: `.txt .md .docx .epub .html`) or **Add a folder...**
+   (a folder of chapter files is one book; a folder of books is a whole library).
+3. Press **Learn from the library now**. This can take several minutes.
+
+What learning does: Gauge studies the library, keeps the strongest passages as examples for the writer
+to imitate, and learns craft techniques from the chapters. Both are used every time it writes. With 30
+or more chapters, and star ratings or reader numbers on several books, it also builds a model of what
+makes a chapter work.
+
+What it does not do: it does not rebuild the downloaded AI model itself. That model stays as it is and
+is steered by what was learned. (Only GaugeLM, the built-in model, is trained on your text directly;
+see [docs/NATIVE.md](../docs/NATIVE.md).)
+
+Use only writing that is yours or that you have the right to use, such as your own work or
+public-domain books. Everything stays on your computer. Adding the same book again updates it rather
+than duplicating it.
+
+The same thing from the command line: `gauge.bat import "C:\path\to\folder"`, then `gauge.bat train`
+and `gauge.bat absorb`.
+
 ## Choosing for yourself
 
 | you want | Windows | macOS / Linux |

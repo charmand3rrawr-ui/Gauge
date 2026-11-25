@@ -78,8 +78,8 @@ downloads Gauge and installs everything it needs: Python, Ollama (the local AI e
 models. It looks at your computer first and picks a model that fits its memory and graphics card. Then
 it asks the AI a real test question, shows a checklist of what worked, puts a **Gauge Studio** shortcut
 on the Desktop and opens it: one big box for your idea, **START MY STORY**, **WRITE THE NEXT CHAPTER**,
-click a chapter to read, **Talk to a character**. No git, no accounts, no keys; nothing leaves the
-computer.
+click a chapter to read, **Talk to a character**, and **Teach Gauge** to add books or your own writing
+for it to learn from. No git, no accounts, no keys; nothing leaves the computer.
 
 **macOS and Linux.** One line in a terminal does the same:
 

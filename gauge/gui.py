@@ -18,6 +18,17 @@ from .db import Database
 
 log = logging.getLogger(__name__)
 
+# What "Teach Gauge" can read.
+MATERIAL_EXTS = {".txt", ".md", ".markdown", ".html", ".htm", ".docx", ".epub"}
+TEACH_INTRO = ("Give Gauge books or your own writing to learn from. It studies them, keeps the strongest passages "
+               "as examples and learns craft techniques from them, then uses both every time it writes. "
+               "Everything stays on this computer.\n\n"
+               "Add files: each file is one book (.txt .md .docx .epub .html). Add a folder: a folder of chapter "
+               "files is one book; a folder of books is a whole library.\n\n"
+               "Use only writing that is yours or that you have the right to use, such as your own work or "
+               "public-domain books. This teaches Gauge what to aim for; it does not rebuild the downloaded AI "
+               "model itself.")
+
 
 class StudioController:
     """Everything the window can do, as plain methods returning plain data."""
@@ -108,6 +119,115 @@ class StudioController:
         self._pipe = None  # the next job picks up the new settings
         return v
 
+    # ---- teaching: add material, then learn from it ----------------------------------
+    def library(self) -> list[dict[str, Any]]:
+        """Every book Gauge has to learn from: title, where it came from, chapters, your star rating."""
+        rows = []
+        for n in self.db.novels():
+            rows.append({"key": n.key, "title": n.title, "source": n.source,
+                         "chapters": len(self.db.chapter_hashes(n.key)), "stars": n.user_rating})
+        return sorted(rows, key=lambda r: (r["source"] != "local", r["title"].lower()))
+
+    @staticmethod
+    def library_line(row: dict[str, Any]) -> str:
+        stars = f"  ({row['stars']:g} stars)" if row.get("stars") else ""
+        where = "yours" if row["source"] == "local" else row["source"]
+        return f"{row['title']}  -  {row['chapters']} chapter{'' if row['chapters'] == 1 else 's'}, {where}{stars}"
+
+    def add_material(self, paths: list[str], stars: Optional[float] = None) -> dict[str, Any]:
+        """Add books or your own writing to the library. Each path is a book file (.txt .md .docx .epub
+        .html), a folder of chapter files (one book), or a folder of books. One bad file never stops
+        the rest. `stars` is your own 1-5 verdict on this material; it teaches Gauge your taste."""
+        from .ingest import IngestRunner
+
+        if stars is not None and not 1 <= float(stars) <= 5:
+            raise ValueError("Stars go from 1 to 5.")
+        override = {"user_rating": float(stars)} if stars is not None else None
+        runner = IngestRunner(self.cfg, self.db)
+        added: list[dict[str, Any]] = []
+        problems: list[str] = []
+        for raw in paths:
+            path = Path(raw)
+            if not path.exists():
+                problems.append(f"{path.name}: not found")
+                continue
+            if path.is_file() and path.suffix.lower() not in MATERIAL_EXTS:
+                problems.append(f"{path.name}: not a kind of file Gauge can read ({', '.join(sorted(MATERIAL_EXTS))})")
+                continue
+            try:
+                got = runner.import_local(str(path), meta_override=override)
+            except Exception as e:  # a broken book must not stop the others
+                log.warning("could not import %s: %s", path, e)
+                problems.append(f"{path.name}: {e}")
+                continue
+            if not got:
+                problems.append(f"{path.name}: nothing readable found in it")
+            added.extend(got)
+        chapters = sum(int(r["chapters"]) for r in added)
+        new = sum(int(r["new"]) + int(r["changed"]) for r in added)
+        if added:
+            msg = (f"Added {len(added)} book{'' if len(added) == 1 else 's'} ({chapters} chapters, {new} new or changed). "
+                   "Press 'Learn from the library now' so Gauge studies them.")
+        else:
+            msg = "Nothing was added."
+        if problems:
+            msg += "  Could not read: " + "; ".join(problems[:4]) + ("; ..." if len(problems) > 4 else "")
+        return {"books": len(added), "chapters": chapters, "new": new, "problems": problems, "message": msg,
+                "titles": [str(r["title"]) for r in added]}
+
+    def learn(self) -> dict[str, Any]:
+        """Study the library and keep what it teaches, so the next chapter is written with it.
+
+        Three things come out of it, and the writer uses all of them in every prompt:
+        example passages (the strongest chapters, to imitate), craft techniques (moves worth reusing,
+        which need the story engine to read the chapters), and, when enough books carry reader numbers or
+        your star ratings, a model of what makes a chapter work. It does not rebuild the downloaded AI
+        model itself; that model stays as it is and is steered by what was learned."""
+        from .learn import Trainer
+
+        total = self.db.total_chapters()
+        if total == 0:
+            return {"chapters": 0, "examples": 0, "techniques": 0, "model": False,
+                    "message": "There is nothing to learn from yet. Add a book or a folder of your writing first."}
+        trainer = Trainer(self.cfg, self.db)
+        res = trainer.cycle()
+        need = self.cfg.learn.min_chapters_for_training
+        if "exemplars" in res:
+            examples = int(res["exemplars"])  # type: ignore[arg-type]
+        else:
+            # Below the size needed for the full cycle, the examples are still worth keeping: a small
+            # library of the author's own choosing is exactly what they want the writer to imitate.
+            examples = len(trainer.build_exemplars().items)
+        model = isinstance(res.get("model"), dict)
+        techniques, technique_note = 0, ""
+        if self.cfg.learn.absorb_per_cycle > 0:
+            from .llm import make_llm
+
+            fast = make_llm(self.cfg.llm, "fast")
+            if fast.available():
+                from .learn.techniques import Absorber
+
+                got = Absorber(self.db, fast, trainer.embedder, self.cfg.models_dir,
+                               self.cfg.learn.target).run(self.cfg.learn.absorb_per_cycle)
+                techniques = int(got.get("techniques_total", 0))
+                technique_note = f" Learned craft techniques from {got.get('chapters_absorbed', 0)} more chapters ({techniques} in total)."
+            else:
+                technique_note = " The story engine is off, so craft techniques were skipped; open the Ollama app and learn again to get them."
+        self._pipe = None  # the next chapter is written with what was just learned
+        books = len(self.db.novels())
+        msg = (f"Studied {total} chapters from {books} book{'' if books == 1 else 's'}. "
+               f"Kept {examples} example passage{'' if examples == 1 else 's'} for the writer to imitate.{technique_note}")
+        if model:
+            msg += " Built a model of what makes a chapter work."
+        elif total < need:
+            msg += f" With {need} or more chapters Gauge can also measure what makes chapters work (you have {total})."
+        else:
+            msg += " To also learn what makes chapters work, give several books a star rating when you add them."
+        if self.cfg.llm.provider == "native":
+            msg += " The built-in model is trained separately: run 'gauge native train' (it takes hours)."
+        return {"chapters": total, "books": books, "examples": examples, "techniques": techniques, "model": model,
+                "message": msg}
+
     def export_story(self, name: str) -> Path:
         """One readable Markdown file of the whole story so far."""
         from .write.project import Project
@@ -167,7 +287,8 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     reader = scrolledtext.ScrolledText(right, font=("Georgia", 14), wrap="word", padx=16, pady=16)
     reader.pack(fill="both", expand=True)
     reader.insert("1.0", "Your chapters will appear here.\n\n1. Type your idea on the left.\n2. Press START MY STORY.\n"
-                         "3. Press WRITE THE NEXT CHAPTER whenever you want more.\n4. Click a chapter to read it.")
+                         "3. Press WRITE THE NEXT CHAPTER whenever you want more.\n4. Click a chapter to read it.\n\n"
+                         "Want Gauge to learn from books or your own writing? Press Teach Gauge.")
     buttons: list[Any] = []
 
     def set_busy(flag: bool, msg: str = "") -> None:
@@ -272,6 +393,86 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         if state["project"]:
             messagebox.showinfo("Gauge", f"Saved the whole story to:\n{ctl.export_story(state['project'])}")
 
+    def on_teach() -> None:
+        """Add books or your own writing to the library, then have Gauge learn from them."""
+        from tkinter import filedialog
+
+        win = tk.Toplevel(root)
+        win.title("Teach Gauge")
+        win.geometry("780x660")
+        frame = ttk.Frame(win, padding=16)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Teach Gauge", font=huge).pack(anchor="w")
+        ttk.Label(frame, text=TEACH_INTRO, wraplength=730, font=("Segoe UI", 11)).pack(anchor="w", pady=(4, 10))
+        rate_row = ttk.Frame(frame)
+        rate_row.pack(fill="x")
+        ttk.Label(rate_row, text="How good is what you are adding? (optional)", font=("Segoe UI", 11)).pack(side="left")
+        stars_var = tk.StringVar(value="not rated")
+        ttk.Combobox(rate_row, textvariable=stars_var, values=["not rated", "1", "2", "3", "4", "5"], state="readonly",
+                     width=10).pack(side="left", padx=8)
+        teach_buttons = ttk.Frame(frame)
+        teach_buttons.pack(fill="x", pady=(10, 4))
+        ttk.Label(frame, text="In the library", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(8, 0))
+        lib_box = tk.Listbox(frame, font=("Segoe UI", 11), height=9)
+        lib_box.pack(fill="both", expand=True, pady=6)
+        teach_status = tk.StringVar(value="")
+        ttk.Label(frame, textvariable=teach_status, wraplength=730, font=("Segoe UI", 11)).pack(anchor="w")
+
+        def alive() -> bool:
+            try:
+                return bool(win.winfo_exists())
+            except tk.TclError:
+                return False
+
+        def refresh_library() -> None:
+            if not alive():
+                return
+            lib_box.delete(0, "end")
+            rows = ctl.library()
+            for r in rows:
+                lib_box.insert("end", ctl.library_line(r))
+            if not rows:
+                lib_box.insert("end", "(nothing yet: add a book, or a folder of your writing)")
+
+        def chosen_stars() -> Optional[float]:
+            v = stars_var.get()
+            return float(v) if v.isdigit() else None
+
+        def start(work: Callable[[], Any], msg: str) -> None:
+            if state["busy"]:
+                teach_status.set("Gauge is busy. Wait for the current job to finish, then try again.")
+                return
+            teach_status.set(msg)
+
+            def done(res: dict[str, Any]) -> None:
+                if alive():
+                    teach_status.set(res["message"])
+                    refresh_library()
+
+            run_bg(work, done, msg)
+
+        def add(paths: Any) -> None:
+            picked = [str(x) for x in (paths or []) if x]
+            if picked:
+                stars = chosen_stars()
+                start(lambda: ctl.add_material(picked, stars), "Reading your files...")
+
+        def on_files() -> None:
+            add(filedialog.askopenfilenames(parent=win, title="Choose books or documents",
+                                            filetypes=[("Books and documents", "*.txt *.md *.docx *.epub *.html *.htm"),
+                                                       ("All files", "*.*")]))
+
+        def on_folder() -> None:
+            folder = filedialog.askdirectory(parent=win, title="Choose a folder of chapters or books")
+            add([folder] if folder else [])
+
+        def on_learn() -> None:
+            start(ctl.learn, "Studying your library... this can take several minutes.")
+
+        for text, cmd in (("Add files...", on_files), ("Add a folder...", on_folder), ("Learn from the library now", on_learn)):
+            ttk.Button(teach_buttons, text=text, style="Big.TButton", command=cmd).pack(side="left", padx=(0, 8))
+        refresh_library()
+
     def on_switches() -> None:
         """A window of every switch, grouped, built from the catalog. Changes save immediately."""
         win = tk.Toplevel(root)
@@ -335,10 +536,17 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         ttk.Button(left, text="Talk to a character", style="Big.TButton", command=on_chat),
         ttk.Button(left, text="Open another story", style="Big.TButton", command=on_open),
         ttk.Button(left, text="Save story as one file", style="Big.TButton", command=on_export),
-        ttk.Button(left, text="Switches", style="Big.TButton", command=on_switches),
     ])
     for b in buttons:
         b.pack(fill="x", pady=4)
+    # Two half-width buttons on one row, so the new one costs no extra height.
+    last_row = ttk.Frame(left)
+    last_row.pack(fill="x", pady=4)
+    teach_btn = ttk.Button(last_row, text="Teach Gauge", style="Big.TButton", command=on_teach)
+    teach_btn.pack(side="left", fill="x", expand=True, padx=(0, 4))
+    switches_btn = ttk.Button(last_row, text="Switches", style="Big.TButton", command=on_switches)
+    switches_btn.pack(side="left", fill="x", expand=True, padx=(4, 0))
+    buttons.extend([teach_btn, switches_btn])
     chapters_box.bind("<<ListboxSelect>>", on_pick)
 
     def check_engine() -> None:
