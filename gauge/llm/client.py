@@ -505,8 +505,15 @@ class FakeLLM:
                                    "favorite_moves": ["open on dialogue", "end on a sound stopping", "repeat a word under stress"],
                                    "sentence_music": "short, then one long run", "register": "clipped street-level", "never": ["purple weather"]})
             if "running story summary" in low:
-                return json.dumps({"summary": "Rin rewound time and saw her own name on a wall.",
-                                   "open_threads": ["Who wrote her name?", "Why tomorrow's date?"]})
+                m = re.search(r"NEW CHAPTER (\d+)", prompt)
+                num = int(m.group(1)) if m else 1
+                return json.dumps({"summary": "Rin, a courier, discovered she can rewind ten seconds. Someone wrote her name on the wall.",
+                                   "open_threads": ["Who wrote her name?", "Why tomorrow's date?"],
+                                   "chapter": f"In chapter {num} Rin runs with the bag and finds her name on the wall.",
+                                   "facts": [{"subject": "Rin", "attribute": "trade", "value": "courier", "lasting": True, "quote": "the courier bag"},
+                                             {"subject": "Jun", "attribute": "sister", "value": "Rin", "lasting": True, "quote": "her sister"},
+                                             {"subject": "Rin", "attribute": "location", "value": f"the alley in chapter {num}", "lasting": False,
+                                              "quote": "the footsteps stopped"}]})
             if "outline chapters" in low:
                 m = re.search(r"outline chapters (\d+) to (\d+)", low)
                 start, end = (int(m.group(1)), int(m.group(2))) if m else (1, 3)

@@ -54,6 +54,9 @@ class ProjectState(BaseModel):
     continued_from: str = ""  # path of an imported manuscript this project continues
 
 
+OLD_PLANS = "outline_archive.jsonl"
+
+
 class Project:
     def __init__(self, root: Path, name: str):
         self.name = name
@@ -61,6 +64,9 @@ class Project:
         self.chapters_dir = self.dir / "chapters"
         self.state_path = self.dir / "project.json"
         self.state = ProjectState(name=name)
+        self._plans: Optional[dict[int, ChapterPlan]] = None      # plans by chapter number (see plan_for)
+        self._plans_size = -1
+        self._old_plans: Optional[dict[int, ChapterPlan]] = None
         if self.state_path.exists():
             self.state = ProjectState(**json.loads(self.state_path.read_text(encoding="utf-8")))
 
@@ -194,7 +200,55 @@ class Project:
         return self.state.written + 1
 
     def plan_for(self, n: int) -> Optional[ChapterPlan]:
-        return next((c for c in self.state.outline if c.number == n), None)
+        """The plan for chapter n: looked up by number, not searched for, so a long outline costs nothing.
+        Plans of chapters written long ago are kept in a file beside the story and read from there."""
+        if self._plans is None or self._plans_size != len(self.state.outline):
+            self._plans = {c.number: c for c in self.state.outline}
+            self._plans_size = len(self.state.outline)
+        got = self._plans.get(n)
+        if got is None and (self.dir / OLD_PLANS).exists():
+            if self._old_plans is None:
+                self._old_plans = {}
+                for line in (self.dir / OLD_PLANS).read_text(encoding="utf-8").splitlines():
+                    try:
+                        c = ChapterPlan(**json.loads(line))
+                        self._old_plans[c.number] = c
+                    except (ValueError, TypeError):
+                        continue
+            got = self._old_plans.get(n)
+        return got
+
+    def put_away_old_plans(self, keep: int = 200) -> int:
+        """Move the plans of chapters written more than `keep` chapters ago out of the working file, so that
+        saving the story stays quick however long it gets. Returns how many were moved."""
+        cut = self.state.written - keep
+        old = [c for c in self.state.outline if c.number <= cut]
+        if len(old) < 100:                       # not worth a write until there is a batch
+            return 0
+        with (self.dir / OLD_PLANS).open("a", encoding="utf-8") as fh:
+            for c in old:
+                fh.write(c.model_dump_json() + "\n")
+        self.state.outline = [c for c in self.state.outline if c.number > cut]
+        if self._old_plans is not None:
+            self._old_plans.update({c.number: c for c in old})
+        self._plans = None
+        return len(old)
+
+    def story_so_far(self, words: int = 600) -> str:
+        """Everything before the next chapter. With a chronicle that is the layered history (sagas, volumes,
+        arcs, recent chapters) followed by where things stand now; without one, the single running summary."""
+        from .chronicle import DB, Chronicle
+
+        now = self.state.running_summary
+        if not (self.dir / DB).exists():
+            return now
+        try:
+            past = Chronicle.at(self.dir).story_so_far(self.next_chapter_number(), words)
+        except Exception:
+            return now
+        if not past:
+            return now
+        return past + (f"\n\nWHERE THINGS STAND NOW:\n{now}" if now else "")
 
     # ---- rendering ---------------------------------------------------------
     def bible_markdown(self) -> str:

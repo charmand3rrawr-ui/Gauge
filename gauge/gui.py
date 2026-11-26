@@ -563,6 +563,7 @@ class StudioController:
         info = {"number": res.number, "title": res.title, "score": round(res.score, 2), "path": str(res.path),
                 "seconds": round(res.timings.get("total", 0.0)), "gaugelm": "", "words": res.words,
                 "words_asked": res.words_asked}
+        info["record"] = self.record_line(name, res.number)
         # GaugeLM keeps learning while another model writes: the chapter just written is new material for it.
         after = self.cfg.native.after_chapter_minutes
         if after > 0:
@@ -574,14 +575,46 @@ class StudioController:
                 info["gaugelm"] = "GaugeLM could not be trained this time."
         return info
 
+    def record_line(self, name: str, chapter: int = 0) -> str:
+        """A sentence about the story's record: any contradiction the chapter just written made with what
+        was established earlier, however long ago."""
+        from .write.chronicle import DB, Chronicle
+        from .write.project import Project
+
+        try:
+            p = Project(self.cfg.projects_dir, name)
+            if not (p.dir / DB).exists():
+                return ""
+            waiting = [c for c in Chronicle.at(p.dir).open_conflicts(5) if not chapter or c["chapter"] == chapter]
+        except Exception as e:
+            log.warning("could not read the story's record: %s", e)
+            return ""
+        if not waiting:
+            return ""
+        c = waiting[0]
+        more = f" (and {len(waiting) - 1} more)" if len(waiting) > 1 else ""
+        return (f"The story's record found a contradiction{more}: {c['subject']}, {c['attribute']} was '{c['was']}' in chapter "
+                f"{c['was_chapter']} but this chapter says '{c['now']}'.")
+
     def chapters(self, name: str) -> list[tuple[int, str]]:
         from .write.project import Project
 
         p = Project(self.cfg.projects_dir, name)
+        titles: dict[int, str] = {}
+        try:                                     # the story's record has every title in one read, however many there are
+            from .write.chronicle import DB, Chronicle
+
+            if (p.dir / DB).exists():
+                titles = Chronicle.at(p.dir).titles()
+        except Exception as e:
+            log.warning("could not read chapter titles from the chronicle: %s", e)
         out = []
         for n in range(1, p.state.written + 1):
-            plan = p.plan_for(n)
-            out.append((n, plan.title if plan else f"Chapter {n}"))
+            title = titles.get(n)
+            if title is None:
+                plan = p.plan_for(n)
+                title = plan.title if plan else f"Chapter {n}"
+            out.append((n, title))
         return out
 
     def read(self, name: str, n: int) -> str:
@@ -630,7 +663,7 @@ class StudioController:
             last = p.read_chapter(st.written) if st.written else None
             parts = [f"STORY: {st.name}", truncate_to_tokens(p.bible_markdown(), max(100, room // 3)),
                      f"CHAPTERS WRITTEN: {st.written}",
-                     "WHAT HAS HAPPENED SO FAR: " + (st.running_summary or "(nothing yet)")]
+                     "WHAT HAS HAPPENED SO FAR: " + (p.story_so_far(350) or "(nothing yet)")]
             if st.open_threads:
                 parts.append("STILL UNRESOLVED: " + "; ".join(st.open_threads[:8]))
             cast = self.characters(name)
@@ -1149,7 +1182,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             show_chapter(info["number"])
             show_direction()                    # the instruction was for that chapter; it is used up now
             status_var.set(f"Chapter {info['number']} done in {info['seconds']}s: {info['words']:,} words (asked for "
-                           f"{info['words_asked']:,}), score {info['score']}. {info.get('gaugelm', '')}".strip())
+                           f"{info['words_asked']:,}), score {info['score']}. {info.get('record', '')} {info.get('gaugelm', '')}".strip())
 
         run_bg(lambda: ctl.write_next(state["project"], asked), done,
                f"Writing the next chapter, about {asked:,} words... this takes a few minutes.")

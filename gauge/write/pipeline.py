@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from ..config import GaugeConfig
 from ..db import Database
@@ -309,7 +310,7 @@ class WritePipeline:
             notes = self.council(project).plan_notes(project)
         except Exception as e:
             log.warning("council plan notes failed: %s", e)
-        d = self.muse.choose(project.bible_markdown(), project.state.running_summary, project.state.open_threads,
+        d = self.muse.choose(project.bible_markdown(), project.story_so_far(400), project.state.open_threads,
                              project.state.past_directions, self.cfg.write.muse_directions)
         if d is None:
             return notes
@@ -556,6 +557,10 @@ class WritePipeline:
             ctx.cast_text, ctx.world_text = cast_text, world_text
             t0 = time.monotonic()
             council_text = council.brief(ctx) if council.agents else ""
+            record = self._chronicle_brief(project, n, plan, cast_names)
+            if record:
+                council_text = ("FROM THE STORY'S RECORD (established in earlier chapters; do not contradict it):\n"
+                                f"{record}\n\n{council_text}").strip()
             asked = project.state.author_direction.strip()
             if asked:
                 council_text = (f"THE AUTHOR ASKED FOR THIS IN THIS CHAPTER (do it; it outranks the plan and every other note): "
@@ -616,7 +621,7 @@ class WritePipeline:
             promotable = [f.tag for f in world_state.promotable()]
             if promotable:
                 log.info("recurring extras worth promoting to characters: %s (gauge world promote)", ", ".join(promotable))
-        self._update_memory(project, n, plan.title, best_text)
+        self._update_memory(project, n, plan.title, best_text, roster)
         if council.agents:
             # Re-run the cheap deterministic parts on the accepted text so memories match what was saved.
             council.remember(best_text, ctx)
@@ -655,6 +660,14 @@ class WritePipeline:
             "resumed": resumed, "seconds": round(time.monotonic() - t_all, 1),
         }
         path = project.write_chapter(n, plan.title, best_text, meta)
+        if self.cfg.write.chronicle:
+            try:                                 # the title may have been improved since the chapter was filed
+                from .chronicle import DB, Chronicle
+
+                if (project.dir / DB).exists():
+                    Chronicle.at(project.dir).retitle(n, plan.title)
+            except Exception as e:
+                log.warning("could not update chapter %d's title in the chronicle: %s", n, e)
         project.clear_checkpoint(n)
         project.state.author_direction = ""  # it was for this chapter; the next one starts clean
         project.save()
@@ -737,6 +750,17 @@ class WritePipeline:
             if cs is not None:
                 w = council.weight
                 crit.score = (1 - w) * crit.score + w * cs
+        if ctx is not None and self.cfg.write.chronicle:
+            try:                                 # the story's record: someone who died long ago must not walk in
+                from .chronicle import DB, Chronicle
+
+                if (ctx.project.dir / DB).exists():
+                    found = Chronicle.at(ctx.project.dir).check(text, n=n)
+                    if found:
+                        crit.measured_issues = found + list(crit.measured_issues)
+                        crit.score = max(0.0, crit.score - 0.12 * len(found))
+            except Exception as e:
+                log.warning("chronicle check failed for ch %d: %s", n, e)
         return crit, reviews, wrev, nov, agent_revs
 
     @staticmethod
@@ -745,11 +769,14 @@ class WritePipeline:
             return []
         return [f"world rule broken at \"{v['quote']}\": {v['rule']}. Fix: {v['fix']}" for v in wrev.violations[:3]]
 
-    def _update_memory(self, project: Project, n: int, title: str, text: str) -> None:
+    def _update_memory(self, project: Project, n: int, title: str, text: str, roster: Optional[Roster] = None) -> None:
+        """After a chapter: bring the running summary up to date, and file the chapter in the chronicle (its
+        own digest, its facts, who was in it), which is what lets chapter 10,000 still know chapter 3."""
         prompt = prompts.SUMMARY_PROMPT.format(summary=project.state.running_summary or "(none)", number=n,
                                                title=title, text=text)
+        data: dict[str, Any] = {}
         try:
-            data = generate_json(self.fast_llm, prompt, schema=schema_of(SummaryOut), temperature=0.2, max_tokens=600,
+            data = generate_json(self.fast_llm, prompt, schema=schema_of(SummaryOut), temperature=0.2, max_tokens=1100,
                                  purpose="summary")
             if data.get("summary"):
                 project.state.running_summary = str(data["summary"])
@@ -759,6 +786,86 @@ class WritePipeline:
         except Exception as e:
             log.warning("summary update failed: %s; appending raw tail", e)
             project.state.running_summary = (project.state.running_summary + f"\nCh {n}: " + " ".join(text.split()[:60]))[-2000:]
+        if self.cfg.write.chronicle:
+            try:
+                self._file_in_chronicle(project, n, title, text, data, roster)
+            except Exception as e:  # the record is a help; a chapter is never lost over it
+                log.warning("could not file chapter %d in the chronicle: %s", n, e)
+        moved = project.put_away_old_plans()
+        if moved:
+            log.info("put away the plans of %d old chapters", moved)
+
+    def _file_in_chronicle(self, project: Project, n: int, title: str, text: str, data: dict[str, Any],
+                           roster: Optional[Roster]) -> None:
+        from .chronicle import Chronicle, digest_from
+
+        chron = Chronicle.at(project.dir)
+        summary, facts = digest_from(data if isinstance(data, dict) else {})
+        cast: set[str] = set()
+        memories: dict[str, list[str]] = {}
+        if roster is not None:
+            for c in roster.ordered():
+                cast.update(w for w in c.name.split() if len(w) >= 3)
+                if c.state.memories and c.state.memories[-1].chapter == n:
+                    memories[c.name] = list(c.state.memories[-1].events)
+
+        def summarise(parts: list[str], first: int, last: int) -> str:
+            listing = "\n".join(f"{i}. {p}" for i, p in enumerate(parts, 1))
+            return self.fast_llm.generate(prompts.ROLLUP_PROMPT.format(first=first, last=last, parts=listing),
+                                          temperature=0.2, max_tokens=320, purpose="summary:rollup").strip()
+
+        got = chron.record(n, title, text, summary, facts, known_names=cast, summarise=summarise, memories=memories)
+        for c in got["conflicts"]:
+            log.warning("ch %d contradicts ch %d: %s / %s was '%s', now '%s'", n, c["was_chapter"], c["subject"], c["attribute"],
+                        c["was"], c["now"])
+        if got["rolled_up"]:
+            log.info("chronicle: summarised %s", ", ".join(got["rolled_up"]))
+
+    def rebuild_chronicle(self, project: Project, quick: bool = False, progress: Any = None) -> dict[str, Any]:
+        """File every chapter already written, for a story that began before the chronicle existed. With
+        `quick` no model is used: each chapter gets its opening and closing lines as its digest and its
+        names are indexed, but no facts are drawn out. Otherwise the fast model reads each chapter."""
+        from .chronicle import Chronicle
+
+        chron = Chronicle.at(project.dir)
+        roster = self.roster(project)
+        done = 0
+        for n in range(1, project.state.written + 1):
+            text = project.read_chapter(n)
+            if not text:
+                continue
+            body = re.sub(r"^#[^\n]*\n+", "", text)
+            plan = project.plan_for(n)
+            title = plan.title if plan else str(project.read_meta(n).get("title") or f"Chapter {n}")
+            data: dict[str, Any] = {}
+            if not quick:
+                try:
+                    data = generate_json(self.fast_llm, prompts.SUMMARY_PROMPT.format(summary="(not needed here)", number=n,
+                                                                                    title=title, text=body),
+                                         schema=schema_of(SummaryOut), temperature=0.2, max_tokens=1100, purpose="summary")
+                except Exception as e:
+                    log.warning("could not digest chapter %d: %s", n, e)
+            self._file_in_chronicle(project, n, title, body, data, roster)
+            done += 1
+            if progress:
+                progress({"chapter": n, "of": project.state.written})
+        return {"filed": done, **chron.stats()}
+
+    def _chronicle_brief(self, project: Project, n: int, plan, cast_names: list[str]) -> str:
+        """What the story's record says that matters to this chapter, sized to the model's reading length."""
+        if not self.cfg.write.chronicle:
+            return ""
+        try:
+            from .chronicle import DB, Chronicle
+
+            if not (project.dir / DB).exists():
+                return ""
+            plan_text = " ".join([plan.title, plan.goal, plan.hook, plan.turn, plan.cliffhanger, " ".join(plan.beats)])
+            room = max(60, min(450, int(self.llm.context_window() * 0.06)))
+            return Chronicle.at(project.dir).brief(n, plan_text, cast_names, words=room)
+        except Exception as e:
+            log.warning("no brief from the chronicle for ch %d: %s", n, e)
+            return ""
 
     def write_many(self, project: Project, count: int, fresh: bool = False) -> list[ChapterResult]:
         out = []

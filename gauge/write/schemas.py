@@ -47,9 +47,19 @@ class CriticOut(BaseModel):
     notes: str = ""
 
 
+class FactOut(BaseModel):
+    subject: str = ""
+    attribute: str = ""
+    value: str = ""
+    lasting: bool = False
+    quote: str = ""
+
+
 class SummaryOut(BaseModel):
     summary: str = ""
     open_threads: list[str] = Field(default_factory=list)
+    chapter: str = ""
+    facts: list[FactOut] = Field(default_factory=list)
 
 
 class MatrixOut(BaseModel):

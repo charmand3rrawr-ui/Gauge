@@ -131,7 +131,19 @@ NEW CHAPTER {number} ("{title}"):
 {text}
 
 Respond with ONLY JSON: {{"summary": "<= 250 words, present tense, facts only",
-"open_threads": ["short unresolved question or promise", ...up to 8]}}"""
+"open_threads": ["short unresolved question or promise", ...up to 8],
+"chapter": "<= 60 words: what happened in THIS chapter only, naming who did what",
+"facts": [{{"subject": "who or what", "attribute": "short and reusable: 'eye colour', 'sister', 'location', 'status', 'owns', 'knows'",
+  "value": "the fact", "lasting": true if it should never change (a name, a parent, a scar, a death, a rule of the world) or false if it can (where someone is, what they carry, what they know),
+  "quote": "<= 12 words from the text"}}, ...6 to 12 facts a later chapter could contradict; a death is always recorded as attribute "status", value "dead"]}}"""
+
+ROLLUP_PROMPT = """These are summaries of consecutive parts of a long serial, chapters {first} to {last}, in order.
+
+{parts}
+
+Write ONE summary of chapters {first}-{last} in at most 120 words, present tense. Keep what a writer thousands of chapters
+later would still need: what changed for good, who died, left or joined, what was promised and what was paid off, and where
+the main people stand at the end. Leave out scene detail. Prose only."""
 
 
 # ------------------------------------------------------------------------------ characters

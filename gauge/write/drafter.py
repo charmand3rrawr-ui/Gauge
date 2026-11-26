@@ -97,7 +97,7 @@ class Drafter:
         # Priority order: previous tail (continuity) > bible > summary > cast > exemplars.
         prev_tail = budget.fit("prev_tail", tail(prev_text, 250) if prev_text else "(there is no previous chapter)")
         bible = budget.fit("bible", project.bible_markdown(), min_tokens=200)
-        summary = budget.fit("summary", project.state.running_summary or "(this is the first chapter)")
+        summary = budget.fit("summary", project.story_so_far() or "(this is the first chapter)")
         cast_text = budget.fit("cast", cast or "(no profiled characters in this scene)", min_tokens=150)
         world_text = budget.fit("world", world or "(no world state yet)", min_tokens=120)
         council_text = budget.fit("council", council or "(no notes)", min_tokens=120)

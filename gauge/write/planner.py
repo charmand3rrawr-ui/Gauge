@@ -67,7 +67,7 @@ class Planner:
             project.state.current_direction = direction
         prompt = prompts.OUTLINE_PROMPT.format(
             start=start, end=end, bible=project.bible_markdown(), direction=direction or "(author's choice: keep escalating)",
-            summary=project.state.running_summary or "(nothing yet - this is the beginning)",
+            summary=project.story_so_far() or "(nothing yet - this is the beginning)",
             threads="\n".join(f"- {t}" for t in project.state.open_threads) or "(none)",
             ending_exemplars=self._ending_exemplars(project, exemplar_k),
         )

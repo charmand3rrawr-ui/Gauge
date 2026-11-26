@@ -1078,6 +1078,75 @@ def character_add(c: Ctx, project: str, sheet: str, replace: bool) -> None:
     console.print(f"[green]Added[/] {ch.name} to {project}")
 
 
+# ---------------------------------------------------------------------------- the chronicle
+@main.command("chronicle")
+@click.argument("project")
+@click.option("--about", default=None, help="Everything on record about a person, place or thing.")
+@click.option("--so-far", "so_far", is_flag=True, help="The layered story so far, as the writer is given it.")
+@click.option("--brief", "brief_for", default=None, help="What the writer would be told before a chapter about this (a plan, or names).")
+@click.option("--conflicts", is_flag=True, help="Contradictions waiting for your ruling.")
+@click.option("--settle", type=int, default=None, help="Rule on a contradiction by its number: the earlier value stands.")
+@click.option("--keep-new", is_flag=True, help="With --settle: the later value replaces the earlier one.")
+@click.option("--rebuild", is_flag=True, help="File every chapter already written (for stories begun before the chronicle).")
+@click.option("--quick", is_flag=True, help="With --rebuild: no model; index names and keep opening and closing lines only.")
+@click.pass_obj
+def chronicle_cmd(c: Ctx, project: str, about, so_far, brief_for, conflicts, settle, keep_new, rebuild, quick) -> None:
+    """The story's permanent record: what keeps a very long serial consistent."""
+    from .write.chronicle import Chronicle
+    from .write.project import Project
+
+    if not Project.exists(c.cfg.projects_dir, project):
+        console.print(f"[red]no project named {project!r}[/]")
+        sys.exit(1)
+    p = Project(c.cfg.projects_dir, project)
+    chron = Chronicle.at(p.dir)
+    if rebuild:
+        from .write import WritePipeline
+
+        pipe = WritePipeline(c.cfg, c.db)
+        if not quick and not pipe.fast_llm.available():
+            console.print("[red]the model is not reachable[/]; add --quick to rebuild without one")
+            sys.exit(1)
+        res = pipe.rebuild_chronicle(pipe.open_project(project), quick=quick,
+                                     progress=lambda r: console.print(f"  filed chapter {r['chapter']} of {r['of']}") if r["chapter"] % 25 == 0 else None)
+        console.print(f"[green]Filed {res['filed']} chapters[/]: {res['current_facts']} facts, {res['people']} names, {res['rollups']} roll-ups.")
+        return
+    if settle is not None:
+        chron.settle(settle, keep_new=keep_new)
+        console.print(f"[green]Settled {settle}[/]: the {'later' if keep_new else 'earlier'} value stands.")
+    if about:
+        who = chron.person(about)
+        if who:
+            console.print(f"[bold]{who['name']}[/]: first seen chapter {who['first']}, last seen chapter {who['last']}, in {who['chapters']} chapters.")
+        for f in chron.history(about):
+            state = "now" if f["replaced_at"] is None else f"until chapter {f['replaced_at']}"
+            console.print(f"  ch {f['chapter']:>5}  {f['attribute']}: {f['value']}  ({'lasting, ' if f['lasting'] else ''}{state})")
+        return
+    if so_far:
+        click.echo(chron.story_so_far(p.next_chapter_number(), 700) or "(nothing filed yet)")
+        return
+    if brief_for:
+        click.echo(chron.brief(p.next_chapter_number(), brief_for, [w for w in brief_for.replace(",", " ").split() if w[:1].isupper()], 400)
+                   or "(the record has nothing on that)")
+        return
+    st = chron.stats()
+    console.print(f"[bold]{p.state.name}[/]: {st['chapters']:,} chapters on record ({st['words']:,} words), {st['current_facts']:,} facts "
+                  f"in force ({st['facts']:,} with history), {st['people']:,} names, {st['rollups']:,} roll-ups, "
+                  f"{st['bytes'] / 1e6:.1f} MB.")
+    waiting = chron.open_conflicts(50)
+    if conflicts or waiting:
+        if not waiting:
+            console.print("No contradictions are waiting.")
+        for w in waiting:
+            console.print(f"  [yellow]{w['id']}[/]  {w['subject']}, {w['attribute']}: '{w['was']}' (ch {w['was_chapter']}) "
+                          f"against '{w['now']}' (ch {w['chapter']})")
+        if waiting:
+            console.print("Rule on one with: gauge chronicle PROJECT --settle NUMBER [--keep-new]")
+    if st["chapters"] < p.state.written:
+        console.print(f"[yellow]{p.state.written - st['chapters']} written chapters are not on record yet.[/] "
+                      "File them with: gauge chronicle PROJECT --rebuild")
+
+
 # ---------------------------------------------------------------------------- world
 @main.group()
 def world() -> None:

@@ -67,6 +67,27 @@ class Archivist(StoryAgent):
                     if a and b and a != b and a not in b and b not in a:
                         out.append({"subject": nf.subject, "attribute": nf.attribute, "was": of.value, "was_chapter": of.chapter,
                                     "now": nf.value, "quote": nf.quote})
+        # The ledger above holds the latest facts only. The chronicle holds every fact the story has
+        # established, so a lasting fact from thousands of chapters ago is still checked.
+        try:
+            from ..chronicle import DB, Chronicle
+            from ..chronicle import _norm as norm
+
+            if (self.dir.parent / DB).exists():
+                chron = Chronicle.at(self.dir.parent)
+                seen = {(c["subject"], c["attribute"]) for c in out}
+                for nf in new:
+                    if (nf.subject, nf.attribute) in seen:
+                        continue
+                    for old in chron.history(nf.subject, nf.attribute):
+                        if old["replaced_at"] is None and old["lasting"] and old["chapter"] < nf.chapter:
+                            a, b = old["nv"], norm(nf.value)
+                            if a != b and a not in b and b not in a:
+                                out.append({"subject": nf.subject, "attribute": nf.attribute, "was": old["value"],
+                                            "was_chapter": old["chapter"], "now": nf.value, "quote": nf.quote})
+                                break
+        except Exception:
+            pass
         return out
 
     def _extract(self, op: str, text: str, number: int) -> list[Fact]:

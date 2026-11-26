@@ -87,6 +87,23 @@ within about a tenth of the number you typed. Chapters can be from 100 to 20,000
 take proportionally longer. The switch **Write chapters to the asked length** turns the carrying-on
 off.
 
+## Staying consistent in a very long story
+
+No AI remembers a long story; it only sees what is put in front of it for each chapter. Gauge now
+keeps a permanent record of every story: a short digest of every chapter, every fact that was
+established (who is whose sister, who has died, what the rules are), and who appeared where. Before
+each chapter it gives the writer the layered story so far and everything on record about the people
+in that chapter, including anyone who has not appeared for a long time. After each chapter it checks
+what was written against the record.
+
+If a chapter contradicts something established earlier, however long ago, the line under the buttons
+says so. A character who has died cannot speak or act again unless the passage is a memory, a dream
+or a ghost; such a draft is sent back to be rewritten.
+
+For a story you began before this update, file its chapters once from a Command Prompt in the Gauge
+folder: `gauge.bat chronicle "Your Story" --rebuild`. More in
+[docs/LONGFORM.md](../docs/LONGFORM.md).
+
 ## Several attempts, the best one kept
 
 A small model's writing varies a lot from one attempt to the next: one attempt invents people your
