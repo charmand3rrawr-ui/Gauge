@@ -171,6 +171,48 @@ class StudioController:
                 msg += " It is not answering: open the Ollama app."
         return {**eng, "message": msg}
 
+    # ---- a stronger writer, and more thinking -------------------------------------------
+    def stronger_model(self) -> dict[str, Any]:
+        """Could this computer run a stronger writing model than the one in use?"""
+        from .llm import advisor
+        from .llm.client import OllamaLLM
+
+        if self.cfg.llm.provider == "native":
+            return {"better": False, "best": None, "message": "GaugeLM is writing. Switch to the downloaded model to use a stronger one."}
+        if self.cfg.llm.provider != "ollama":
+            return {"better": False, "best": None, "message": f"Gauge is writing with {self.cfg.llm.provider}; this advice is for Ollama models."}
+        installed = OllamaLLM(self.cfg.llm, self.cfg.llm.model or "x").models()
+        hw = advisor.hardware()
+        return advisor.advise(self.cfg.llm.model, hw["vram_gb"], hw["ram_gb"], installed)
+
+    def get_stronger_model(self) -> dict[str, Any]:
+        """Download the strongest model this computer can run, and write with it from now on."""
+        from .llm import advisor
+
+        adv = self.stronger_model()
+        if not adv.get("better"):
+            return {"changed": False, "message": adv["message"]}
+        if adv.get("needs_download"):
+            res = advisor.fetch(adv["best"])
+            if not res["ok"]:
+                return {"changed": False, "message": res["message"]}
+        self.cfg.llm.model = adv["best"]
+        self.cfg.save()
+        self._pipe = None
+        return {"changed": True, "model": adv["best"], "message": f"Gauge now writes with {adv['best']}."}
+
+    def effort(self, level: Optional[str] = None) -> dict[str, Any]:
+        """The thinking-effort dial: what it is set to, and (with `level`) setting it."""
+        from .write import effort
+
+        if level:
+            res = effort.apply(self.cfg, level)
+            self.cfg.save()
+            self._pipe = None
+            return res
+        now = effort.current(self.cfg)
+        return {"level": now, "message": f"Thinking effort is {now}" + (f": {effort.SAYS[now]}." if now in effort.SAYS else ".")}
+
     # ---- the device switch -------------------------------------------------------------
     def devices(self, refresh: bool = False) -> dict[str, Any]:
         """The devices this computer has, which are switched on, and a sentence saying what that means."""
@@ -1515,6 +1557,16 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         ttk.Combobox(train, textvariable=minutes_var, values=[UNTIL_PAUSED, "10", "30", "60", "120", "240", "480"],
                      state="readonly", width=14).pack(side="left", padx=4)
         ttk.Label(train, text="(minutes)", font=small).pack(side="left")
+        def on_stronger() -> None:
+            adv = ctl.stronger_model()
+            if not adv.get("better"):
+                note.set(adv["message"])
+                return
+            if messagebox.askyesno("A stronger writer", adv["message"] + "\n\nGet it and write with it from now on? "
+                                   "A bigger model writes better and is slower.", parent=win):
+                start(ctl.get_stronger_model, f"Getting {adv['best']}... a large download can take a long time.", refresh)
+
+        ttk.Button(choose, text="Find a stronger model", style="Mid.TButton", command=on_stronger).pack(side="left", padx=(8, 0))
         ttk.Button(train, text="How well does it understand?", style="Mid.TButton",
                    command=lambda: start(ctl.understanding, "Measuring how GaugeLM uses context...")).pack(side="left", padx=(10, 0))
         for row, pair in ((grow_row, (("Grow GaugeLM", on_grow), ("Grow the vocabulary", on_vocab))),

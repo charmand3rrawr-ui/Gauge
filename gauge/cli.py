@@ -1078,6 +1078,67 @@ def character_add(c: Ctx, project: str, sheet: str, replace: bool) -> None:
     console.print(f"[green]Added[/] {ch.name} to {project}")
 
 
+# ---------------------------------------------------------------------------- effort and the writing model
+@main.command("effort")
+@click.argument("level", required=False, type=click.Choice(["quick", "normal", "deep", "maximum"]))
+@click.pass_obj
+def effort_cmd(c: Ctx, level: Optional[str]) -> None:
+    """How hard Gauge works on each chapter: quick, normal, deep or maximum. More effort takes longer."""
+    from .write import effort
+
+    if level:
+        res = effort.apply(c.cfg, level)
+        c.cfg.save()
+        console.print(f"[green]{res['message']}[/]")
+        return
+    now = effort.current(c.cfg)
+    console.print(f"Thinking effort is [bold]{now}[/]." + ("" if now != "custom" else " (The settings were changed by hand since it was set.)"))
+    for name in effort.ORDER:
+        console.print(f"  {name:<8} {effort.SAYS[name]}  (about {effort.LEVELS[name]['cost']:g}x the time)")
+
+
+@main.command("model")
+@click.option("--get", "get", is_flag=True, help="Download the strongest model this computer can run and write with it.")
+@click.option("--use", "use", default=None, help="Write with this model (it must already be downloaded).")
+@click.pass_obj
+def model_cmd(c: Ctx, get: bool, use: Optional[str]) -> None:
+    """Which model writes, and whether this computer could run a stronger one."""
+    from .llm import advisor
+    from .llm.client import OllamaLLM
+
+    if c.cfg.llm.provider not in ("ollama",) and not use:
+        console.print(f"Gauge is writing with {c.cfg.llm.provider}. This advice is for models served by Ollama.")
+    base = c.cfg.llm if c.cfg.llm.provider == "ollama" else c.cfg.llm.model_copy(update={"provider": "ollama"})
+    installed = OllamaLLM(base, base.model or "x").models()
+    if use:
+        if installed and use not in installed and f"{use}:latest" not in installed:
+            console.print(f"[red]{use} is not downloaded.[/] Downloaded: {', '.join(installed) or 'none'}")
+            sys.exit(1)
+        c.cfg.llm.provider, c.cfg.llm.model = "ollama", use
+        c.cfg.save()
+        console.print(f"[green]Gauge now writes with {use}.[/]")
+        return
+    hw = advisor.hardware()
+    adv = advisor.advise(c.cfg.llm.model if c.cfg.llm.provider == "ollama" else "", hw["vram_gb"], hw["ram_gb"], installed)
+    console.print(f"Graphics memory {hw['vram_gb']:g} GB, memory {hw['ram_gb']:g} GB.")
+    console.print(adv["message"])
+    if not get:
+        if adv["better"]:
+            console.print("Get it and switch to it with: gauge model --get")
+        return
+    if not adv["better"]:
+        return
+    if adv["needs_download"]:
+        console.print(f"Downloading {adv['best']} ... this is large and can take a long time.")
+        res = advisor.fetch(adv["best"])
+        if not res["ok"]:
+            console.print(f"[red]{res['message']}[/]")
+            sys.exit(1)
+    c.cfg.llm.provider, c.cfg.llm.model = "ollama", adv["best"]
+    c.cfg.save()
+    console.print(f"[green]Gauge now writes with {adv['best']}.[/]")
+
+
 # ---------------------------------------------------------------------------- the chronicle
 @main.command("chronicle")
 @click.argument("project")

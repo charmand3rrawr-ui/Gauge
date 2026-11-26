@@ -35,6 +35,7 @@ SWITCHES: list[Switch] = [
     Switch("write.realism_weight", "Reward realism", "float", "Share of the score from sensory grounding and show-dont-tell. 0 = off. Realism can trade against pace.", minimum=0, maximum=0.5),
     Switch("write.ab_titles", "A/B chapter titles", "bool", "Generate several titles per chapter and keep the best-scoring one; choices are logged."),
     Switch("write.ab_hooks", "A/B opening hooks", "bool", "Generate several opening lines and offer the strongest in the draft brief."),
+    Switch("write.effort", "Thinking effort", "choice", "How hard Gauge works on each chapter: quick is one attempt with no revision; normal is the usual care; deep and maximum make more attempts, revise more and consider more directions. More effort takes proportionally longer.", "Writing", choices=["quick", "normal", "deep", "maximum"]),
     Switch("write.chronicle", "Keep the story's record", "bool", "File every chapter's digest, facts and cast in a permanent record, and tell the writer what it says before each chapter. This is what keeps a very long serial consistent.", "Writing"),
     Switch("write.best_of", "Attempts to choose between", "int", "Write each piece of a chapter this many times and keep the attempt that invents the fewest names, repeats least and fits the length. Costs that many times the writing; worth it with GaugeLM, which is fast and uneven. 1 = write once.", "Writing", 1, 8),
     Switch("write.reach_length", "Write chapters to the asked length", "bool", "If a chapter stops short of the number of words asked for, carry it on from its last lines until it is about that long."),
@@ -175,6 +176,10 @@ def set_value(cfg: GaugeConfig, key: str, value: Any, save: bool = True) -> Any:
     setattr(obj, parts[-1], v)
     if key == "native.device":
         cfg.llm.native_device = v
+    if key == "write.effort":                # one dial over several settings
+        from .write import effort
+
+        effort.apply(cfg, v)
     if key == "compute.capacity_percent":  # takes effect at once, not at the next start
         from . import limit
 

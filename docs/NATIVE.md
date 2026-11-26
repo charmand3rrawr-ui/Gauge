@@ -218,6 +218,53 @@ passage only 0.5% better with its own card than with another passage's card: it 
 card. Like the context drills, this needs a model that already uses context, which a small one
 barely does (see the table above). It is not in Gauge.
 
+### A stronger writer, and more thinking
+
+Two controls raise the quality of what Gauge writes without training anything.
+
+**The strongest model this computer can run.** The biggest single step in how well Gauge writes is
+the model doing the writing. The installer picks a safe one and stops at a mid-sized model; a
+computer with a large graphics card can run a stronger one.
+
+```powershell
+.\gauge.bat model          # what this computer could run, compared with what is in use
+.\gauge.bat model --get    # download the strongest that fits and write with it
+```
+
+In the Studio: **Change the AI**, **Find a stronger model**. A model fits when it fits in the
+graphics card's memory; without a suitable card nothing larger than mid-sized is suggested, because
+it would be too slow. The sizes are approximate, and a bigger model is slower as well as better.
+
+**Thinking effort.** The same model does better work with more attempts, more rounds of criticism
+and more alternatives to choose from. One dial sets them together (`gauge/write/effort.py`):
+
+| level | what it does | time |
+| --- | --- | --- |
+| quick | one attempt, no revision, no alternatives | about 0.4x |
+| normal | revise up to twice, three directions considered, the scene played out first | 1x |
+| deep | two attempts at each piece, three revisions, five directions, titles and openings tested | about 2.5x |
+| maximum | three attempts, five revisions, six directions, a higher bar before a chapter passes | about 5x |
+
+```powershell
+.\gauge.bat effort deep
+```
+
+In the Studio it is the switch **Thinking effort**. It raises the floor (fewer bad chapters) more
+than the ceiling: it cannot make a model know what it does not know. The time figures are rough, and
+the gain has not been measured with a real model on the build machine.
+
+### What this is not
+
+None of this is superintelligence, and no change to Gauge would make it so. What a model can do is
+set by how large it is, how much it was trained on and how much computing that took. GaugeLM at its
+largest setting has about 300 million weights; the models that lead the field are thousands of times
+larger and were trained on thousands of times more text, on machines no home has. What Gauge can do
+is get the most out of what a home computer can run: the strongest local model that fits, more
+thinking per chapter, a permanent memory of the story, and a small model of its own that keeps
+learning. Gauge's limits on what it will learn from and write (text you have the right to use, no
+real-world how-to for harm) are not what holds its ability back; removing them would not make it
+cleverer.
+
 ### What makes it stronger, in order
 
 Everything measured here points the same way. A small GaugeLM improves quickly at guessing the next

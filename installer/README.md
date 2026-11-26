@@ -225,6 +225,18 @@ writer to GaugeLM once its text reads well enough for you.
 Only text that is safe to train on is used: what you added yourself, public-domain books, the chapters
 written for you, and the examples made on your own machine.
 
+### A stronger writer, and more thinking
+
+- **Find a stronger model** (in **Change the AI**) checks whether your computer could run a better
+  writing model than the one it has, and offers to download it and switch. A bigger model writes
+  better and is slower, and the download is large.
+- **Thinking effort** (in **Switches**) sets how hard Gauge works on each chapter: *quick*, *normal*,
+  *deep* or *maximum*. More effort means more attempts and more rounds of revision, and takes
+  proportionally longer (deep about two and a half times, maximum about five).
+
+These get the most out of your computer. They do not make a home computer into one of the giant AI
+systems; nothing can.
+
 ### Who teaches GaugeLM
 
 At the start of each training session the free models on your computer teach GaugeLM before it studies

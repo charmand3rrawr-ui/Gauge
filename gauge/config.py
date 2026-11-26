@@ -150,6 +150,7 @@ class WriteConfig(BaseModel):
     reach_length: bool = True  # carry a chapter on until it is about as long as asked (models tend to stop short)
     best_of: int = 1  # write each piece of a chapter this many times and keep the best (no-model judging); 1 = once
     chronicle: bool = True  # keep the story's permanent record (digests, facts, who appeared where) and brief the writer from it
+    effort: str = "normal"  # quick | normal | deep | maximum: one dial over attempts, revisions and alternatives (write/effort.py)
     max_revisions: int = 2
     min_acceptable_score: float = 0.62
     exemplars_in_prompt: int = 4
