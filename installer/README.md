@@ -242,6 +242,18 @@ on its own. **Change the AI** says who is teaching and how it is doing.
 To make it learn faster, the biggest step is the capacity limit in **Switches**: at 50% instead of
 20% it should train roughly two and a half times as fast.
 
+### The starter lessons
+
+Gauge comes with a small set of ready-made lessons for GaugeLM: 36 very short scenes, worked
+examples of each writing task, and ten words explained. They give it well-formed examples from its
+first training session, before any teacher model has run. They are a seed, not a library; most of
+what it learns still comes from your books and your teacher models.
+
+They are **off until you switch them on** (**Switches**, **Use the starter lessons**). They were
+written for this project by Claude, an AI model made by Anthropic, and Anthropic's terms limit using
+Claude's output to train AI models that compete with its services. Whether your own small story
+model is within those terms is for you to decide, which is why Gauge does not decide it for you.
+
 ### How well GaugeLM understands
 
 A language model has no dictionary. It learns what a word means from the words around it, over many

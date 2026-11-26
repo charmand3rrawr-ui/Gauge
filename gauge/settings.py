@@ -85,6 +85,7 @@ SWITCHES: list[Switch] = [
     Switch("library.finder", "Find novels online by itself", "bool", "Let Gauge search Project Gutenberg for out-of-copyright novels that fit your stories and add them to its library, about once a day, when a training session starts. It only ever talks to that catalogue.", "Learning"),
     Switch("library.finder_books", "Novels to add each time", "int", "How many novels the finder adds per run.", "Learning", 1, 10),
     Switch("library.finder_max_mb", "Most text the finder may add (MB)", "float", "A ceiling on how much the finder downloads in total.", "Learning", 10, 5000),
+    Switch("native.seed_data", "Use the starter lessons", "bool", "Train GaugeLM on the small starter set that ships with Gauge: original scenes and worked examples of Gauge's own tasks, written for this project by Claude, an AI model made by Anthropic. Anthropic's terms limit using Claude's output to train AI models that compete with its services; whether your use is within them is your decision.", "Model"),
     Switch("native.tutor", "Tutor GaugeLM", "bool", "At the start of a training session, have a teacher model mark and correct GaugeLM's own attempts, and practise most what it is marked lowest on.", "Model"),
     Switch("native.device", "GaugeLM device", "choice", "auto picks a GPU when one is usable.", "Model", choices=["auto", "cuda", "cpu"]),
     Switch("compute.auto_device", "Switch to a GPU when one appears", "bool", "The daemon re-scans every cycle.", "Model"),

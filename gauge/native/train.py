@@ -94,7 +94,7 @@ def instruction_rows(datasets_dir: Optional[Path]) -> list[tuple[str, str]]:
     if not datasets_dir or not datasets_dir.exists():
         return rows
     for name in ("sft.jsonl", "self_preference.jsonl", "author_edits.jsonl", "distill.jsonl", "characters.jsonl",
-                 "tutor.jsonl", "lessons.jsonl", "words.jsonl"):
+                 "tutor.jsonl", "lessons.jsonl", "words.jsonl", "seed.jsonl"):
         f = datasets_dir / name
         if not f.exists():
             continue

@@ -107,6 +107,38 @@ GaugeLM improves depends on the teachers and has not been measured here; the rep
 model's opinion, useful as a trend rather than a measurement. A teacher is only ever shown text that
 is permitted for training (your own writing, public-domain books, your Gauge chapters).
 
+### The starter set
+
+Gauge ships with a small set of training rows written by hand (`gauge/native/seed_lessons.py`): 70
+rows, about 4,800 words.
+
+| rows | what they are |
+| --- | --- |
+| 36 practice scenes | very short, complete scenes on the school's own subjects, each ending on a hook |
+| 24 worked answers | each of Gauge's eight tasks (continue, open, end, title, score, outline, brief, dialogue) three times, on passages from eight kinds of story |
+| 10 word-study rows | a word in a sentence, what it means there, and three other uses |
+
+Every prompt is built from the same templates the school uses, so the shapes match exactly what
+teachers are asked and what GaugeLM is asked when it writes. It is a seed for before any teacher has
+run: it shapes behaviour and is far too small to be a corpus. Volume comes from your local teachers
+(`gauge native teach --rows 500`) and the book finder.
+
+**Where it came from, and why it is off by default.** The rows were written for this project by
+Claude, an AI model made by Anthropic. They are original; nothing is copied from any book.
+Anthropic's terms limit using Claude's output to train AI models that compete with its services.
+Whether a small story model of your own falls under that is your decision, so the set is not used
+until you switch it on, every row is labelled with its source, and it lives in its own file
+(`datasets/seed.jsonl`) that is removed again when you switch it off.
+
+```powershell
+.\gauge.bat native seed                # what is in it, and whether it is in use
+.\gauge.bat native seed --show 3       # read some of it
+.\gauge.bat native seed --use on       # train GaugeLM on it from the next session
+.\gauge.bat native seed --use off
+```
+
+In the Studio it is the switch **Use the starter lessons**.
+
 ### What it understands: word meaning and context
 
 A language model has no dictionary. It learns what a word means from the company the word keeps, and
@@ -362,6 +394,7 @@ agent profile and short chapters.
 - `distill.py`: task-shaped prompts over corpus excerpts answered by the teacher model.
 - `school.py`: the pool of teachers, the tutor and its marks, graded practice scenes, word study, the report card.
 - `understand.py`: how much it uses context, the words it is most lost on, the words it treats as alike.
+- `seed_lessons.py`: the hand-written starter rows, off until switched on.
 - `grow.py`: function-preserving growth to a larger shape, vocabulary growth, shrinking by cutting down and
   teaching, each checked or measured before it replaces anything, with undo.
 - `evaluate.py`: presets table, benchmark, perplexity, instruction-shape probes.

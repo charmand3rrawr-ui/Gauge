@@ -68,6 +68,9 @@ class NativeConfig(BaseModel):
     # them, so none is used unless listed here with "terms_ok": true: {"name", "base_url", "model", "api_key_env"}.
     outside_teachers: list[dict] = Field(default_factory=list)
     tutor: bool = True  # have a teacher mark and correct GaugeLM's own attempts, and drill what it is worst at
+    # The starter rows written for Gauge by Claude (see native/seed_lessons.py). Off until you switch it on:
+    # whether training on an AI provider's output suits your use is your decision.
+    seed_data: bool = False
 
 
 class ComputeConfig(BaseModel):

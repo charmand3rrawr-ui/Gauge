@@ -440,6 +440,12 @@ class StudioController:
             self.school().export_training()
         except Exception as e:
             log.warning("could not write the character lessons: %s", e)
+        try:  # the starter rows are there only while their switch is on
+            from .native import seed_lessons
+
+            seed_lessons.sync(datasets, self.cfg.native.seed_data)
+        except Exception as e:
+            log.warning("could not set out the starter lessons: %s", e)
         docs = dedup(prose + instruction_rows(datasets))
         examples = sum(1 for kind, _ in docs if kind.startswith("chat:"))
         n = self.cfg.native

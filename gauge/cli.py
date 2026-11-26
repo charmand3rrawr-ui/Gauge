@@ -2554,7 +2554,9 @@ def native() -> None:
 
 
 def _native_docs(c: Ctx, since: Optional[str] = None):
-    from .native import gather_texts
+    from .native import gather_texts, seed_lessons
+
+    seed_lessons.sync(c.cfg.models_dir / "datasets", c.cfg.native.seed_data)     # there only while its switch is on
 
     return gather_texts(c.db, c.cfg.projects_dir, c.cfg.models_dir / "datasets", since=since)
 
@@ -2917,6 +2919,30 @@ def native_report(c: Ctx) -> None:
     k = card["counts"]
     console.print(f"Collected so far: {k['answers']} worked answers, {k['tutor']} corrections, {k['lessons']} practice scenes, "
                   f"over {card['sessions']} session(s).")
+
+
+@native.command("seed")
+@click.option("--use", type=click.Choice(["on", "off"]), default=None, help="Train GaugeLM on the starter rows, or stop.")
+@click.option("--show", type=int, default=0, help="Print this many of the rows.")
+@click.pass_obj
+def native_seed(c: Ctx, use: Optional[str], show: int) -> None:
+    """The starter training rows that ship with Gauge: original scenes and worked examples of its tasks.
+
+    Written for this project by Claude, an AI model made by Anthropic. Off until you switch it on."""
+    from .native import seed_lessons
+
+    if use:
+        c.cfg.native.seed_data = use == "on"
+        c.cfg.save()
+    n = seed_lessons.sync(c.cfg.models_dir / "datasets", c.cfg.native.seed_data)
+    info = seed_lessons.summary()
+    console.print(f"{info['rows']} starter rows, {info['words']:,} words: " + ", ".join(f"{k} {v}" for k, v in sorted(info["by_task"].items())))
+    console.print(f"Source: {info['source']}. Anthropic's terms limit using Claude's output to train AI models that compete with "
+                  "its services; whether your use is within them is your decision.")
+    console.print(f"[green]In use[/]: {n} rows will be part of GaugeLM's training." if c.cfg.native.seed_data
+                  else "Not in use. Switch on with: gauge native seed --use on")
+    for r in seed_lessons.rows()[:max(0, show)]:
+        console.print(f"\n[bold]{r['task']}[/]  {r['prompt'][:160]}\n{r['response']}")
 
 
 @native.command("understand")
