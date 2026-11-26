@@ -144,6 +144,12 @@ training another model:
 `terms_ok` is your statement that you have read that provider's terms and they allow it. The key is
 read from the environment variable you name, not stored in the settings.
 
+**Claude as the lead teacher.** Anthropic's Claude can lead the school: a far stronger teacher than any
+model a home computer runs, but paid, and outside your computer. It is used only after you connect
+your own API key, switch its teaching on and answer the question about cost, privacy and Anthropic's
+terms, and only up to a daily spending limit; then the free teachers carry on. See
+[CLAUDE.md](CLAUDE.md).
+
 **What is and is not measured.** The mechanics are tested with a stand-in teacher. How much faster
 GaugeLM improves depends on the teachers and has not been measured here; the report card is a teacher
 model's opinion, useful as a trend rather than a measurement. A teacher is only ever shown text that

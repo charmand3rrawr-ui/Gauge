@@ -77,7 +77,7 @@ SWITCHES: list[Switch] = [
            "Learning", warning="Turning this off means fetching from sites whose robots.txt says no. Your call, not the software's."),
     Switch("research.fact_check", "Fact-check drafts", "bool", "Verify up to three real-world claims per chapter.", "Learning"),
     # ---- model & compute --------------------------------------------------------------------
-    Switch("llm.provider", "Model provider", "choice", "ollama (default), openai-compatible server, or native GaugeLM.", "Model", choices=["ollama", "openai", "native", "fake"]),
+    Switch("llm.provider", "Model provider", "choice", "ollama (default), openai-compatible server, native GaugeLM, or claude (paid; set it up in Change the AI, Claude).", "Model", choices=["ollama", "openai", "native", "claude", "fake"]),
     Switch("llm.model", "Writer model", "text", "Ollama model name for prose (e.g. llama3.1:8b, qwen2.5:14b).", "Model"),
     Switch("compute.capacity_percent", "Capacity limit (% of each device)", "int", "The most of this computer, and of every linked device, that Gauge may use. Gauge pins itself to that share of the processor cores, tells the AI engine to use that many threads, and spaces its requests so a graphics card is busy at most that share of the time. Lower is gentler on the machine and proportionally slower; 100 removes the limit. A loaded model still needs its full memory whatever this says.", "Model", 1, 100),
     Switch("native.after_chapter_minutes", "Train GaugeLM after each chapter (minutes)", "int", "In Gauge Studio, train GaugeLM, Gauge's own model, for this many minutes after every chapter, whichever model wrote it. This is how GaugeLM keeps learning while the downloaded model does the writing. 0 turns it off.", "Model", 0, 120),

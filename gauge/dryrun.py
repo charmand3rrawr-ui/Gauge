@@ -10,6 +10,7 @@ command path can bypass it:
 * self-modification         (code.selfmod.apply)  -> the proposal stays unapplied
 * restoring a backup        (ops.backup)          -> verified, nothing written
 * daemon chapter writes and scheduled bots (daemon) -> skipped
+* paid requests to Claude   (llm.claude)          -> not sent
 
 What still runs: reading, analysis, training, drafting into local queues, and anything the author runs
 explicitly that only writes inside the data directory. Each held action is recorded so the CLI can say
@@ -29,7 +30,7 @@ _TRUE = {"1", "true", "yes", "on"}
 _held: list[dict[str, str]] = []
 
 HELD_ACTIONS = ("social posting", "newsletter sending", "newsdesk publishing", "self-modification",
-                "backup restore", "daemon chapter writes", "scheduled bots")
+                "backup restore", "daemon chapter writes", "scheduled bots", "paid Claude requests")
 
 
 def is_dry_run() -> bool:

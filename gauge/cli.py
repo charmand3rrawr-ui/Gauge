@@ -1202,6 +1202,140 @@ def model_cmd(c: Ctx, get: bool, use: Optional[str]) -> None:
     console.print(f"[green]Gauge now writes with {adv['best']}.[/]")
 
 
+# ---------------------------------------------------------------------------- Claude
+@main.group("claude")
+def claude_group() -> None:
+    """Claude, Anthropic's model: a paid teacher for GaugeLM and an optional writer (docs/CLAUDE.md)."""
+
+
+def _claude_ctl(c: Ctx):  # the same controller Studio uses, so both say and do the same
+    from .gui import StudioController
+
+    return StudioController(c.cfg, c.db)
+
+
+@claude_group.command("status")
+@click.option("--check", is_flag=True, help="Also ask Anthropic whether the key and the model work (free).")
+@click.pass_obj
+def claude_status(c: Ctx, check: bool) -> None:
+    """Is Claude connected, is it teaching, and what it has cost."""
+    from .llm import claude
+
+    st = _claude_ctl(c).claude_status(check=check)
+    console.print(st["line"])
+    console.print(st["spent_line"])
+    console.print(st["lessons_line"])
+    total = st["total"]
+    if total["calls"]:
+        console.print(f"In all: about {claude.money(total['usd'])} over {total['calls']} requests on {total['days']} day(s). "
+                      "These are estimates from list prices; your Anthropic invoice is the truth.")
+    table = Table(title="Claude models")
+    for col in ("model", "name", "$ per million tokens in / out", "about one lesson", ""):
+        table.add_column(col)
+    for mid, info in claude.MODELS.items():
+        table.add_row(mid + (" *" if mid == st["model"] else ""), info["name"], f"{info['price'][0]:g} / {info['price'][1]:g}",
+                      claude.money(claude.lesson_estimate(mid)), info["says"])
+    console.print(table)
+
+
+@claude_group.command("connect")
+@click.pass_obj
+def claude_connect(c: Ctx) -> None:
+    """Install Anthropic's library if needed, save your API key, and check it works.
+
+    The key is typed at a hidden prompt, never as an argument (arguments end up in the shell history).
+    Leave the prompt empty to use ANTHROPIC_API_KEY from the environment or an `ant auth login` profile."""
+    from .llm import claude
+
+    key = click.prompt(f"Anthropic API key (make one at {claude.KEYS_URL}; leave empty to use the environment)",
+                       default="", hide_input=True, show_default=False)
+    res = _claude_ctl(c).claude_connect(key)
+    console.print(("[green]" if res["ok"] else "[red]") + res["message"] + "[/]")
+    if not res["ok"]:
+        sys.exit(1)
+
+
+@claude_group.command("disconnect")
+@click.pass_obj
+def claude_disconnect(c: Ctx) -> None:
+    """Delete the saved key and stop using Claude for teaching and writing."""
+    console.print(_claude_ctl(c).claude_disconnect()["message"])
+
+
+@claude_group.command("set")
+@click.option("--model", default=None, help="claude-opus-5-5 | claude-sonnet-5-5 | claude-haiku-5-5 | claude-fable-5-2")
+@click.option("--limit", "limit", default=None, help="The most to spend on Claude per day, in dollars (0 = no limit).")
+@click.option("--effort", default=None, help="How hard it thinks when it writes: low | medium | high | xhigh | max")
+@click.option("--teach-effort", default=None, help="How hard it thinks when it teaches.")
+@click.pass_obj
+def claude_set(c: Ctx, model: Optional[str], limit: Optional[str], effort: Optional[str], teach_effort: Optional[str]) -> None:
+    """Choose the Claude model, the daily spending limit, and how hard it thinks."""
+    console.print(_claude_ctl(c).claude_set(model=model, daily_usd=limit, effort=effort, teach_effort=teach_effort)["message"])
+
+
+@claude_group.command("teach")
+@click.argument("switch", type=click.Choice(["on", "off"]))
+@click.option("--yes", is_flag=True, help="Answer yes to the question about cost, privacy and Anthropic's terms.")
+@click.pass_obj
+def claude_teach(c: Ctx, switch: str, yes: bool) -> None:
+    """Switch Claude's teaching of GaugeLM on or off."""
+    from .gui import CLAUDE_TEACH_ASK
+    from .llm import claude
+
+    ctl = _claude_ctl(c)
+    if switch == "off":
+        console.print(ctl.claude_teach(False)["message"])
+        return
+    st = ctl.claude_status()
+    ask = CLAUDE_TEACH_ASK.format(limit=claude.money(st["limit"]) + " a day" if st["limit"] > 0 else "none set",
+                                  name=st["name"], per=claude.money(claude.lesson_estimate(st["model"])))
+    if not yes:
+        console.print(ask.rsplit("\n\n", 1)[0], markup=False)
+    ok = yes or click.confirm("Switch Claude's teaching on?", default=False)
+    console.print(ctl.claude_teach(True, terms_ok=ok)["message"])
+
+
+@claude_group.command("lesson")
+@click.option("--rows", type=int, default=8, show_default=True, help="How many short lessons to ask for.")
+@click.pass_obj
+def claude_lesson(c: Ctx, rows: int) -> None:
+    """A school session now, led by Claude. Train afterwards: gauge native train --resume"""
+    console.print(_claude_ctl(c).claude_lesson(rows)["message"])
+
+
+@claude_group.command("write")
+@click.argument("switch", type=click.Choice(["on", "off"]))
+@click.option("--yes", is_flag=True, help="Answer yes to the question about cost and privacy.")
+@click.pass_obj
+def claude_write(c: Ctx, switch: str, yes: bool) -> None:
+    """Make Claude the writer of your stories (on), or go back to the downloaded model (off)."""
+    from .gui import CLAUDE_WRITE_ASK
+    from .llm import claude
+
+    ctl = _claude_ctl(c)
+    if switch == "off":
+        console.print(ctl.use_claude(False)["message"])
+        return
+    limit = c.cfg.claude.daily_usd
+    if not yes:
+        console.print(CLAUDE_WRITE_ASK.format(limit=claude.money(limit) + " a day" if limit > 0 else "none set").rsplit("\n\n", 1)[0],
+                      markup=False)
+        if not click.confirm("Use Claude as the writer?", default=False):
+            console.print("Left as it was.")
+            return
+    console.print(ctl.use_claude(True)["message"])
+
+
+@claude_group.command("forget")
+@click.option("--yes", is_flag=True, help="Do not ask first.")
+@click.pass_obj
+def claude_forget(c: Ctx, yes: bool) -> None:
+    """Remove every lesson Claude wrote from what GaugeLM trains on."""
+    if not yes and not click.confirm("Remove every lesson Claude wrote?", default=False):
+        return
+    console.print(_claude_ctl(c).claude_forget()["message"])
+
+
 # ---------------------------------------------------------------------------- the chronicle
 @main.command("chronicle")
 @click.argument("project")

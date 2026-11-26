@@ -6,6 +6,7 @@ Gauge never talks to a paid API by default. It expects a local server:
 * Any **OpenAI-compatible** server (LM Studio, llama.cpp ``llama-server``, vLLM, text-gen-webui).
 * ``FakeLLM`` for tests and for running the analysis pipeline on machines with no GPU.
 * **GaugeLM** (``provider = "native"``): Gauge's own numpy model, see ``gauge/native``.
+* **Claude** (``provider = "claude"``): Anthropic's paid API, only once you connect a key; see ``claude.py``.
 
 Every client: sets the context window explicitly (``num_ctx``), retries transient failures,
 supports JSON-schema constrained output with automatic fallback, keeps the model warm, and
@@ -630,11 +631,15 @@ def make_llm(cfg: LLMConfig, role: str = "main", calls: Optional[CallLog] = None
 
         base = NativeLLM(cfg, Path(cfg.native_dir) if getattr(cfg, "native_dir", None) else Path("data/models/native"), calls,
                          device=getattr(cfg, "native_device", "cpu") or "cpu")
+    elif p == "claude":
+        from .claude import ClaudeLLM
+
+        base = ClaudeLLM(cfg, model, calls)
     else:
         raise ValueError(f"unknown llm provider: {cfg.provider}")
     from .. import limit
 
-    if limit.percent() < 100 and p != "fake":
+    if limit.percent() < 100 and p not in ("fake", "claude"):   # Claude runs on Anthropic's computers, not this one
         # Inside the capacity limit: one call at a time, spaced so the device stays at its share. A model
         # running inside this process is already pinned to its cores; an outside engine is paced as a whole.
         from .governed import GovernedLLM

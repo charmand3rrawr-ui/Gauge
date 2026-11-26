@@ -65,7 +65,33 @@ ENGINE_NOTE = ("GaugeLM is Gauge's own small model. It has to be trained before 
                "stories, and from the downloaded model, which teaches it worked examples each time training starts. "
                "So it keeps learning while the downloaded model does the writing. Training takes hours in total: "
                "Start training whenever you like, Pause training when you need the computer, and it carries on from "
-               "where it stopped.")
+               "where it stopped. Press Claude... to let Anthropic's Claude teach it as well (paid, and optional).")
+CLAUDE_NOTE = ("Claude is Anthropic's model. It is far stronger than any model this computer can run, so it makes a much "
+               "better teacher for GaugeLM, and it can write for Gauge too. It is also the one part of Gauge that is not free "
+               "and not private: every request is paid for from your Anthropic account, and whatever is in a request is sent "
+               "to Anthropic. You need an API key from console.anthropic.com (Settings, API keys). Gauge keeps the key in a "
+               "file in your user folder, not with your stories, and never shows it again.")
+CLAUDE_TEACH_ASK = ("Let Claude teach GaugeLM?\n\n"
+                    "At the start of each training session Claude will write practice scenes, answer Gauge's writing tasks about "
+                    "passages from your library, correct GaugeLM's own attempts, and explain the words it is lost on. GaugeLM "
+                    "then trains on those answers.\n\n"
+                    "Three things to know before you say yes:\n\n"
+                    "1. It costs money. Gauge stops asking Claude once today's estimated spending reaches your daily limit "
+                    "({limit}). A lesson is short: with {name} it is roughly {per} each.\n\n"
+                    "2. Passages from your library and GaugeLM's attempts are sent to Anthropic.\n\n"
+                    "3. Anthropic's terms do not allow using Claude to build a competing product or service, including "
+                    "training competing AI models. Whether a small personal model like GaugeLM counts is for you to judge "
+                    "from the terms themselves (anthropic.com/legal); Gauge cannot decide that for you. Claude is told plainly "
+                    "what its answers are used for, and if it declines, Gauge does not try to get round that.\n\n"
+                    "Every lesson is labelled as Claude's, so you can remove them all later with one button.\n\n"
+                    "Switch Claude's teaching on?")
+CLAUDE_WRITE_ASK = ("Write your stories with Claude?\n\n"
+                    "Claude will do everything the downloaded model does now: planning, drafting, reviewing and revising. "
+                    "The writing will be much better. It is also paid for: one chapter is many requests, and with the full "
+                    "writing room a 2,000-word chapter can cost a dollar or more. Gauge stops when today's limit ({limit}) is "
+                    "reached, which can be in the middle of a chapter; the chapter is then finished the next day or after you "
+                    "raise the limit.\n\nYour story's notes and chapters are sent to Anthropic as part of each request.\n\n"
+                    "Use Claude as the writer?")
 NOT_TRAINED = ("GaugeLM has not been trained yet. Press Teach Gauge and add books or your own writing, "
                "then press Change the AI and Start training.")
 UNTIL_PAUSED = "until I pause"
@@ -123,6 +149,12 @@ class StudioController:
         from .llm import make_llm
 
         ready = make_llm(self.cfg.llm).available()
+        if self.cfg.llm.provider == "claude":
+            from .llm import claude
+
+            name = claude.MODELS.get(self.cfg.llm.model, {}).get("name", self.cfg.llm.model)
+            return {"provider": "claude", "is_gaugelm": False, "is_claude": True, "ready": ready, "steps": 0,
+                    "label": f"{name}, Anthropic's model, over the internet (paid)"}
         return {"provider": self.cfg.llm.provider, "is_gaugelm": False, "ready": ready, "steps": 0,
                 "label": f"the downloaded model {self.cfg.llm.model}"}
 
@@ -138,6 +170,8 @@ class StudioController:
 
         llm, memo = self.cfg.llm, self._engine_memo()
         if on:
+            if llm.provider == "claude":
+                self._restore_engine()               # so what is remembered is the downloaded model, not Claude
             if llm.provider != "native":
                 memo.write_text(json.dumps({"provider": llm.provider, "model": llm.model, "fast_model": llm.fast_model,
                                             "num_ctx": llm.num_ctx, "profile": self.cfg.agents.profile,
@@ -149,20 +183,8 @@ class StudioController:
                 self.cfg.agents.profile = "lean"
                 self.cfg.write.target_chapter_words = min(self.cfg.write.target_chapter_words, 800)
                 self.cfg.write.best_of = max(self.cfg.write.best_of, 4)   # it is fast and uneven: write four, keep the best
-        elif llm.provider == "native":
-            prev: dict[str, Any] = {}
-            if memo.exists():
-                try:
-                    prev = json.loads(memo.read_text(encoding="utf-8-sig"))
-                except ValueError:
-                    prev = {}
-            llm.provider = prev.get("provider") or "ollama"
-            llm.model = prev.get("model") or "llama3.1:8b"
-            llm.fast_model = prev.get("fast_model", "")
-            llm.num_ctx = int(prev.get("num_ctx") or 8192)
-            self.cfg.agents.profile = prev.get("profile") or "full"
-            self.cfg.write.target_chapter_words = int(prev.get("words") or 2200)
-            self.cfg.write.best_of = int(prev.get("best_of") or 1)
+        else:
+            self._restore_engine()
         self.cfg.save()
         self._pipe = None
         eng = self.engine()
@@ -175,6 +197,206 @@ class StudioController:
                 msg += " It is not answering: open the Ollama app."
         return {**eng, "message": msg}
 
+    def _restore_engine(self) -> None:
+        """Back to the downloaded model, with the settings it had before GaugeLM or Claude took over."""
+        import json
+
+        llm, memo = self.cfg.llm, self._engine_memo()
+        if llm.provider not in ("native", "claude"):
+            return
+        prev: dict[str, Any] = {}
+        if memo.exists():
+            try:
+                prev = json.loads(memo.read_text(encoding="utf-8-sig"))
+            except ValueError:
+                prev = {}
+        llm.provider = prev.get("provider") or "ollama"
+        llm.model = prev.get("model") or "llama3.1:8b"
+        llm.fast_model = prev.get("fast_model", "")
+        llm.num_ctx = int(prev.get("num_ctx") or 8192)
+        self.cfg.agents.profile = prev.get("profile") or "full"
+        self.cfg.write.target_chapter_words = int(prev.get("words") or 2200)
+        self.cfg.write.best_of = int(prev.get("best_of") or 1)
+
+    # ---- Claude: a paid teacher and writer, only when connected ---------------------------
+    def claude_status(self, check: bool = False) -> dict[str, Any]:
+        """Is Claude connected, is it teaching, and what has it cost today."""
+        from .llm import claude
+        from .native import school
+
+        st = claude.status(self.cfg, check=check)
+        st["lessons"] = school.rows_by(self.cfg.models_dir / "datasets", "claude")
+        st["lessons_line"] = (f"GaugeLM has {st['lessons']} lesson{'' if st['lessons'] == 1 else 's'} from Claude to train on."
+                              if st["lessons"] else "GaugeLM has no lessons from Claude yet.")
+        st["message"] = st["line"] + " " + st["spent_line"]
+        return st
+
+    def claude_connect(self, key: str = "") -> dict[str, Any]:
+        """Install Anthropic's library if it is missing, keep the key (when one is given) and try it.
+        A key that Anthropic does not accept is not kept."""
+        from .llm import claude
+
+        res = claude.setup()
+        if not res["ok"]:
+            return {**self.claude_status(), "ok": False, "message": res["message"]}
+        before = claude.saved_key()
+        key = "".join(str(key or "").split())
+        if key:
+            claude.save_key(key)
+        chk = claude.ClaudeLLM(self.cfg.llm, self.cfg.claude.model).check()
+        if not chk["ok"] and key:
+            if before:
+                claude.save_key(before)
+            else:
+                claude.forget_key()
+        msg = chk["message"]
+        if chk["ok"]:
+            source = claude.key_source()
+            msg += f" Gauge is using {source}." if source else " Gauge is using the sign-in Anthropic's own tools set up."
+            msg += " Nothing is sent to Claude until you switch its teaching on or choose it as the writer."
+        elif not key and not claude.key_source():
+            msg = "No key was given and Gauge found none. Give your Anthropic API key, then connect again."
+        self._pipe = None
+        return {**self.claude_status(), "ok": chk["ok"], "message": msg}
+
+    def claude_disconnect(self) -> dict[str, Any]:
+        """Delete the saved key and stop using Claude for anything."""
+        import os
+
+        from .llm import claude
+
+        had = claude.forget_key()
+        self.cfg.claude.teach = False
+        if self.cfg.llm.provider == "claude":
+            self._restore_engine()
+        self.cfg.save()
+        self._pipe = None
+        msg = "Claude is disconnected" + (": the saved key was deleted." if had else ": there was no saved key.")
+        msg += " Its teaching is off and Gauge no longer writes with it. The lessons it already wrote are kept."
+        if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+            msg += (" A key is still set in this computer's environment variables, so Claude can be switched on again "
+                    "without pasting one; remove that variable to prevent it.")
+        return {**self.claude_status(), "message": msg}
+
+    def claude_set(self, model: Optional[str] = None, daily_usd: Any = None, effort: Optional[str] = None,
+                   teach_effort: Optional[str] = None) -> dict[str, Any]:
+        """Change which Claude model is used, the daily spending limit, or how hard it thinks."""
+        from .llm import claude
+
+        cl, said = self.cfg.claude, []
+        if model:
+            model = model.strip().split()[0]
+            if not model.startswith("claude"):
+                return {**self.claude_status(), "changed": False, "message": f"'{model}' is not a Claude model."}
+            cl.model = model
+            if self.cfg.llm.provider == "claude":
+                self.cfg.llm.model = model
+            info = claude.MODELS.get(model)
+            said.append(f"Claude model: {info['name']} ({info['says']})." if info else f"Claude model: {model}.")
+        if daily_usd is not None and str(daily_usd).strip() != "":
+            try:
+                limit = float(str(daily_usd).replace("$", "").replace(",", ".").strip())
+            except ValueError:
+                return {**self.claude_status(), "changed": False, "message": f"'{daily_usd}' is not an amount. Type a number of dollars, such as 2."}
+            if limit < 0:
+                return {**self.claude_status(), "changed": False, "message": "The limit cannot be less than nothing."}
+            cl.daily_usd = limit
+            said.append(f"Daily limit: {claude.money(limit)}." if limit > 0 else "No daily limit: Claude is asked as often as Gauge wants.")
+        for name, value in (("effort", effort), ("teach_effort", teach_effort)):
+            if value:
+                if value not in claude.EFFORTS:
+                    return {**self.claude_status(), "changed": False, "message": f"Effort is one of: {', '.join(claude.EFFORTS)}."}
+                setattr(cl, name, value)
+                said.append(("Thinking when it writes: " if name == "effort" else "Thinking when it teaches: ") + value + ".")
+        self.cfg.save()
+        self._pipe = None
+        return {**self.claude_status(), "changed": bool(said), "message": " ".join(said) or "Nothing was changed."}
+
+    def claude_teach(self, on: bool, terms_ok: bool = False) -> dict[str, Any]:
+        """Switch Claude's teaching on or off. Switching it on needs `terms_ok`: the author's own yes to
+        the cost, to passages leaving the computer, and to the decision under Anthropic's terms."""
+        from .llm import claude
+
+        cl = self.cfg.claude
+        if not on:
+            cl.teach = False
+            self.cfg.save()
+            return {**self.claude_status(), "message": "Claude no longer teaches GaugeLM. The free models carry on. "
+                                                       "The lessons Claude already wrote are kept until you remove them."}
+        if not terms_ok:
+            return {**self.claude_status(), "message": "Claude's teaching was left off."}
+        if not claude.installed():
+            return {**self.claude_status(), "message": "Connect Claude first."}
+        chk = claude.ClaudeLLM(self.cfg.llm, cl.model).check()
+        if not chk["ok"]:
+            return {**self.claude_status(), "message": chk["message"]}
+        cl.teach, cl.terms_ok = True, True
+        self.cfg.save()
+        limit = f"up to {claude.money(cl.daily_usd)} a day" if cl.daily_usd > 0 else "with no daily limit"
+        return {**self.claude_status(), "message": f"Claude now leads GaugeLM's school, {limit}. It teaches at the start of each "
+                                                   "training session; press 'Have a lesson now' to start with one straight away."}
+
+    def claude_lesson(self, rows: int = 8) -> dict[str, Any]:
+        """One school session now, led by Claude, without training afterwards."""
+        from .learn.corpus import permitted_texts
+        from .native import NativeTrainer, school
+
+        pool = school.teachers(self.cfg)
+        if not pool or not pool[0].lead:
+            st = self.claude_status()
+            why = ("Claude's teaching is switched off." if not st["teaching"] else
+                   "today's spending limit has been reached." if st["left"] == 0 else "Claude is not answering.")
+            return {**st, "rows": 0, "message": "No lesson was given: " + why}
+        texts = [t for _, t in permitted_texts(self.db, self.cfg.projects_dir)]
+        before = self.claude_status()["today"]["usd"]
+        got = school.session(self.cfg, texts, max(1, int(rows)), should_stop=self._pause.is_set, pool=pool, student=self._student(),
+                             step=int(NativeTrainer(self.cfg.native_dir).status().get("step", 0) or 0))
+        st = self.claude_status()
+        from .llm import claude
+
+        msg = str(got["message"]) + f" That cost about {claude.money(max(0.0, st['today']['usd'] - before))}."
+        if got["rows"]:
+            msg += " GaugeLM learns from these the next time it trains."
+        return {**st, "rows": int(got["rows"]), "message": msg}
+
+    def claude_forget(self) -> dict[str, Any]:
+        """Remove every lesson Claude wrote from what GaugeLM trains on."""
+        from .native import school
+
+        gone = sum(school.forget_teacher(self.cfg.models_dir / "datasets", "claude").values())
+        msg = (f"Removed {gone} lesson{'' if gone == 1 else 's'} written by Claude. GaugeLM will not train on them again; "
+               "what it already learned from them stays in it." if gone else "There were no lessons from Claude to remove.")
+        return {**self.claude_status(), "removed": gone, "message": msg}
+
+    def use_claude(self, on: bool = True) -> dict[str, Any]:
+        """Make Claude the writer (on), or go back to the downloaded model (off)."""
+        import json
+
+        from .llm import claude
+
+        llm, memo = self.cfg.llm, self._engine_memo()
+        if not on:
+            return self.use_gaugelm(False)
+        if not claude.installed():
+            return {**self.engine(), "message": "Connect Claude first."}
+        chk = claude.ClaudeLLM(llm, self.cfg.claude.model).check()
+        if not chk["ok"]:
+            return {**self.engine(), "message": chk["message"]}
+        if llm.provider == "native":
+            self._restore_engine()
+        if llm.provider != "claude":
+            memo.write_text(json.dumps({"provider": llm.provider, "model": llm.model, "fast_model": llm.fast_model,
+                                        "num_ctx": llm.num_ctx, "profile": self.cfg.agents.profile,
+                                        "words": self.cfg.write.target_chapter_words,
+                                        "best_of": self.cfg.write.best_of}), encoding="utf-8")
+            llm.provider, llm.model, llm.fast_model = "claude", self.cfg.claude.model, ""
+            llm.num_ctx = max(int(llm.num_ctx), 32768)       # it can read far more; this bound keeps each request's cost sane
+        self.cfg.save()
+        self._pipe = None
+        eng = self.engine()
+        limit = f"Today's limit is {claude.money(self.cfg.claude.daily_usd)}." if self.cfg.claude.daily_usd > 0 else "No daily limit is set."
+        return {**eng, "message": f"Gauge now writes with {eng['label']}. Every request is paid for. {limit}"}
+
     # ---- a stronger writer, and more thinking -------------------------------------------
     def stronger_model(self) -> dict[str, Any]:
         """Could this computer run a stronger writing model than the one in use?"""
@@ -183,6 +405,8 @@ class StudioController:
 
         if self.cfg.llm.provider == "native":
             return {"better": False, "best": None, "message": "GaugeLM is writing. Switch to the downloaded model to use a stronger one."}
+        if self.cfg.llm.provider == "claude":
+            return {"better": False, "best": None, "message": "Claude is writing, and it is stronger than any model this computer can run."}
         if self.cfg.llm.provider != "ollama":
             return {"better": False, "best": None, "message": f"Gauge is writing with {self.cfg.llm.provider}; this advice is for Ollama models."}
         installed = OllamaLLM(self.cfg.llm, self.cfg.llm.model or "x").models()
@@ -442,17 +666,29 @@ class StudioController:
 
     def school_line(self) -> str:
         """Who teaches GaugeLM and how it is doing, in a sentence or two."""
+        from .native import school
+
         try:
-            names = [t.split("  -  ")[0] for t in self.teachers()]
+            pool = school.teachers(self.cfg)
         except Exception:
-            names = []
+            pool = []
+        names = [t.name for t in pool if not t.lead]
+        card = self.report_card()
+        if pool and pool[0].lead:
+            from .llm import claude
+
+            limit = float(self.cfg.claude.daily_usd or 0)
+            who = (f"Taught by Claude ({pool[0].name}) at the start of each training session"
+                   + (f", up to {claude.money(limit)} a day" if limit > 0 else "") + ". ")
+            who += ("After that " + " and ".join(names[:2]) + (" and others" if len(names) > 2 else "") + " carry on for free."
+                    if names else "No free teacher is running to carry on after that.")
+            return who + (" " + card["line"] if card["rows"] else "")
         if not names:
             who = "No teacher model is running, so GaugeLM studies on its own. Open the Ollama app and it will be taught as well."
         elif len(names) == 1:
             who = f"Taught by {names[0]} at the start of each training session. Install more models in Ollama and they take turns."
         else:
             who = "Taught by " + ", ".join(names[:-1]) + f" and {names[-1]}, taking turns at the start of each training session."
-        card = self.report_card()
         return who + (" " + card["line"] if card["rows"] else "")
 
     def _train_session(self, prose: list[tuple[str, str]], minutes: Optional[float],
@@ -1185,6 +1421,8 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             status_var.set("Story engine ready.")
         elif eng["is_gaugelm"]:
             status_var.set(NOT_TRAINED)
+        elif eng.get("is_claude"):
+            status_var.set("Claude is not answering. Check the internet connection, or press Change the AI, then Claude.")
         else:
             status_var.set("Story engine is OFF. Open the Ollama app (the llama icon), then restart Gauge Studio.")
 
@@ -1558,6 +1796,109 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     def on_pause_training() -> None:
         status_var.set(ctl.pause_training()["message"])
 
+    def on_claude(after: Optional[Callable[[], None]] = None) -> None:
+        """Connect Claude, let it teach GaugeLM, and see what it has cost."""
+        from .llm import claude as _claude
+
+        win, frame, alive, note, start = dialog("Claude", 780, 660)
+        ttk.Label(frame, text="Claude", font=huge).pack(anchor="w")
+        ttk.Label(frame, text=CLAUDE_NOTE, wraplength=720, font=small).pack(anchor="w", pady=(2, 8))
+        first = ctl.claude_status()
+        line_var = tk.StringVar(value=first["line"])
+        spent_var = tk.StringVar(value=first["spent_line"])
+        lessons_var = tk.StringVar(value=first["lessons_line"])
+        ttk.Label(frame, textvariable=line_var, wraplength=720, font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        ttk.Label(frame, textvariable=spent_var, wraplength=720, font=small).pack(anchor="w", pady=(2, 0))
+        ttk.Label(frame, textvariable=lessons_var, wraplength=720, font=small).pack(anchor="w", pady=(0, 8))
+        key_row = ttk.Frame(frame)
+        key_row.pack(fill="x", pady=(0, 6))
+        set_row = ttk.Frame(frame)
+        set_row.pack(fill="x", pady=(0, 6))
+        teach_row = ttk.Frame(frame)
+        teach_row.pack(fill="x", pady=(0, 6))
+        write_row = ttk.Frame(frame)
+        write_row.pack(fill="x", pady=(0, 6))
+        ttk.Label(frame, textvariable=note, wraplength=720, font=mid).pack(anchor="w", pady=(4, 0))
+        choices = [f"{mid_}   ({info['name']}: {info['says']})" for mid_, info in _claude.MODELS.items()]
+        now = next((c for c in choices if c.split()[0] == first["model"]), first["model"])
+        key_var = tk.StringVar(value="")
+        model_var = tk.StringVar(value=now)
+        limit_var = tk.StringVar(value=f"{first['limit']:g}")
+
+        def refresh() -> None:
+            if alive():
+                st = ctl.claude_status()
+                line_var.set(st["line"])
+                spent_var.set(st["spent_line"])
+                lessons_var.set(st["lessons_line"])
+            show_engine()
+            if after:
+                after()
+
+        def on_connect() -> None:
+            key = key_var.get() or ""
+            key_var.set("")                              # the key is not left on the screen
+            start(lambda: ctl.claude_connect(key), "Connecting to Claude... the first time, this installs Anthropic's library.", refresh)
+
+        def on_disconnect() -> None:
+            if messagebox.askyesno("Disconnect Claude", "Delete the saved key and stop using Claude for teaching and writing?"
+                                   "\n\nThe lessons it already wrote are kept.", parent=win):
+                note.set(ctl.claude_disconnect()["message"])
+                refresh()
+
+        def on_save() -> None:
+            note.set(ctl.claude_set(model=model_var.get(), daily_usd=limit_var.get())["message"])
+            refresh()
+
+        def on_teach_on() -> None:
+            st = ctl.claude_set(model=model_var.get(), daily_usd=limit_var.get())
+            if not st["installed"]:
+                note.set("Connect Claude first: paste your key and press Connect.")
+                return
+            ask = CLAUDE_TEACH_ASK.format(limit=_claude.money(st["limit"]) + " a day" if st["limit"] > 0 else "none set",
+                                          name=st["name"], per=_claude.money(_claude.lesson_estimate(st["model"])))
+            if messagebox.askyesno("Let Claude teach GaugeLM", ask, parent=win):
+                start(lambda: ctl.claude_teach(True, terms_ok=True), "Checking that Claude answers...", refresh)
+
+        def on_teach_off() -> None:
+            note.set(ctl.claude_teach(False)["message"])
+            refresh()
+
+        def on_lesson() -> None:
+            start(lambda: ctl.claude_lesson(8), "Claude is teaching GaugeLM: eight short lessons...", refresh)
+
+        def on_write() -> None:
+            st = ctl.claude_status()
+            limit = _claude.money(st["limit"]) + " a day" if st["limit"] > 0 else "none set"
+            if messagebox.askyesno("Write with Claude", CLAUDE_WRITE_ASK.format(limit=limit), parent=win):
+                start(lambda: ctl.use_claude(True), "Checking that Claude answers...", refresh)
+
+        def on_write_off() -> None:
+            note.set(ctl.use_claude(False)["message"])
+            refresh()
+
+        def on_forget() -> None:
+            if messagebox.askyesno("Remove Claude's lessons", "Remove every lesson Claude wrote from what GaugeLM trains on?"
+                                   "\n\nWhat GaugeLM already learned from them stays in it.", parent=win):
+                note.set(ctl.claude_forget()["message"])
+                refresh()
+
+        ttk.Label(key_row, text="API key", font=mid).pack(side="left")
+        ttk.Entry(key_row, textvariable=key_var, show="*", width=44).pack(side="left", padx=6)
+        ttk.Button(key_row, text="Connect", style="Mid.TButton", command=on_connect).pack(side="left", padx=(0, 6))
+        ttk.Button(key_row, text="Disconnect", style="Mid.TButton", command=on_disconnect).pack(side="left")
+        ttk.Label(set_row, text="Model", font=mid).pack(side="left")
+        ttk.Combobox(set_row, textvariable=model_var, values=choices, state="readonly", width=52).pack(side="left", padx=6)
+        ttk.Label(set_row, text="Daily limit $", font=mid).pack(side="left")
+        ttk.Entry(set_row, textvariable=limit_var, width=6).pack(side="left", padx=6)
+        ttk.Button(set_row, text="Save", style="Mid.TButton", command=on_save).pack(side="left")
+        for row, pairs_ in ((teach_row, (("Let Claude teach GaugeLM", on_teach_on), ("Stop Claude teaching", on_teach_off),
+                                         ("Have a lesson now", on_lesson))),
+                            (write_row, (("Write with Claude", on_write), ("Write with the downloaded model", on_write_off),
+                                         ("Remove Claude's lessons", on_forget)))):
+            for text, cmd in pairs_:
+                ttk.Button(row, text=text, style="Mid.TButton", command=cmd).pack(side="left", padx=(0, 8))
+
     def on_engine() -> None:
         """Choose which AI writes, and train Gauge's own."""
         win, frame, alive, note, start = dialog("Change the AI", 760, 720)
@@ -1655,6 +1996,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
                 start(ctl.get_stronger_model, f"Getting {adv['best']}... a large download can take a long time.", refresh)
 
         ttk.Button(choose, text="Find a stronger model", style="Mid.TButton", command=on_stronger).pack(side="left", padx=(8, 0))
+        ttk.Button(choose, text="Claude...", style="Mid.TButton", command=lambda: on_claude(refresh)).pack(side="left", padx=(8, 0))
         ttk.Button(train, text="How well does it understand?", style="Mid.TButton",
                    command=lambda: start(ctl.understanding, "Measuring how GaugeLM uses context...")).pack(side="left", padx=(10, 0))
         for row, pair in ((grow_row, (("Grow GaugeLM", on_grow), ("Grow the vocabulary", on_vocab))),

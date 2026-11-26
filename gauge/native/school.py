@@ -16,6 +16,10 @@ model taught, one way (`distill.py`: the downloaded model answers Gauge's tasks)
 * **Word study.** Gauge measures which words in your library GaugeLM is most surprised by, and the
   teacher explains each one in the sentence where your library uses it, then uses it three more ways.
 
+* **Claude, if you connect it.** Anthropic's model can lead the school (docs/CLAUDE.md). It is paid and
+  outside this computer, so it teaches only after you connect a key, switch its teaching on and accept
+  that decision, and only up to a daily spending limit. Then the free teachers carry on.
+
 Everything a teacher is shown comes from text that is permitted for training (your own writing,
 public-domain books, your Gauge chapters). Every row records which teacher wrote it and under what
 licence that model is published, so the training set stays auditable.
@@ -69,9 +73,13 @@ class Teacher:
     licence: str
     open_licence: bool
     where: str = "this computer"
+    lead: bool = False          # a lead teacher takes every session while it can; the others take turns when it cannot
 
     def line(self) -> str:
         return f"{self.name}  -  on {self.where}, {self.licence}"
+
+    def ask(self, prompt: str, **kw: Any) -> str:
+        return str(self.llm.generate(prompt, **kw)).strip()
 
 
 def _engine_config(cfg: Any) -> Any:
@@ -97,7 +105,9 @@ def teachers(cfg: Any, check: bool = True) -> list[Teacher]:
     base = _engine_config(cfg)
     out: list[Teacher] = []
     if base.provider == "fake":
-        return [Teacher("fake", make_llm(base, "main"), "test model", True)]
+        lead = claude_teacher(cfg)
+        return ([lead] if lead is not None and (not check or _answers(lead)) else []) + \
+            [Teacher("fake", make_llm(base, "main"), "test model", True)]
     names: list[str] = []
     if base.provider == "ollama":
         from ..llm.client import OllamaLLM
@@ -125,9 +135,69 @@ def teachers(cfg: Any, check: bool = True) -> list[Teacher]:
         out.append(Teacher(str(extra.get("name") or extra["model"]), make_llm(ecfg, "main"),
                            str(extra.get("licence") or "the provider's terms"), False,
                            where=re.sub(r"^https?://", "", str(extra["base_url"])).split("/")[0]))
+    lead = claude_teacher(cfg)
+    if lead is not None:
+        out.insert(0, lead)
     if check:
         out = [t for t in out if _answers(t)]
     return out
+
+
+def claude_teacher(cfg: Any) -> Optional[Teacher]:
+    """Claude as the lead teacher, when the author connected it, switched its teaching on and accepted that
+    decision (`claude.teach` and `claude.terms_ok`), and today's spending limit has not been reached."""
+    cl = getattr(cfg, "claude", None)
+    if cl is None or not (cl.teach and cl.terms_ok):
+        return None
+    from ..llm import claude
+
+    if not claude.installed():
+        return None
+    limit = float(cl.daily_usd or 0)
+    if limit > 0 and claude.Ledger(cfg.root).today()["usd"] >= limit:
+        return None
+    llm = claude.ClaudeLLM(cfg.llm, cl.model, effort=cl.teach_effort, system=claude.TEACHER_SYSTEM)
+    return Teacher(cl.model, llm, claude.LICENCE, False, where="Anthropic's computers", lead=True)
+
+
+def forget_teacher(datasets_dir: Path, name: str) -> dict[str, int]:
+    """Take out every row a teacher wrote (its name starts with `name`), from all the school's files.
+    What GaugeLM already learned from them stays in its weights; this removes them from future training."""
+    removed: dict[str, int] = {}
+    for kind, fname in FILES.items():
+        path = Path(datasets_dir) / fname
+        if not path.exists():
+            continue
+        keep, gone = [], 0
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                teacher = str(json.loads(line).get("teacher", ""))
+            except ValueError:
+                teacher = ""
+            if teacher.lower().startswith(name.lower()):
+                gone += 1
+            else:
+                keep.append(line)
+        if gone:
+            path.write_text("".join(k + "\n" for k in keep), encoding="utf-8")
+        removed[kind] = gone
+    return removed
+
+
+def rows_by(datasets_dir: Path, name: str) -> int:
+    """How many rows in the school's files were written by a teacher whose name starts with `name`."""
+    n = 0
+    for fname in FILES.values():
+        try:
+            with (Path(datasets_dir) / fname).open(encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        n += str(json.loads(line).get("teacher", "")).lower().startswith(name.lower())
+                    except ValueError:
+                        pass
+        except OSError:
+            pass
+    return n
 
 
 def _answers(t: Teacher) -> bool:
@@ -305,7 +375,10 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
         return {"rows": 0, "answers": 0, "tutored": 0, "lessons": 0, "teacher": "", "marks": [],
                 "message": "No teacher model is running, so GaugeLM studied on its own."}
     state = _load(datasets)
-    teacher = pool[state["sessions"] % len(pool)]
+    leads = [t for t in pool if t.lead]
+    others = [t for t in pool if not t.lead]
+    teacher = leads[0] if leads else pool[state["sessions"] % len(pool)]
+    first, notes, declined = teacher, [], 0
     rng = random.Random(1000 + state["sessions"])
     stop = should_stop or (lambda: False)
     made = {"answers": 0, "tutored": 0, "lessons": 0}
@@ -329,8 +402,8 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
                 seed = lesson_seed(idx)
                 level = level_for(step)
                 n, how = LEVELS[level]
-                text = teacher.llm.generate(LESSON_PROMPT.format(n=n, how=how, **seed), temperature=0.9,
-                                            max_tokens=int(n * 1.8) + 40, purpose="school:lesson").strip()
+                text = teacher.ask(LESSON_PROMPT.format(n=n, how=how, **seed), temperature=0.9,
+                                   max_tokens=int(n * 1.8) + 40, purpose="school:lesson")
                 state["lessons"] = idx + 1
                 if len(text.split()) >= 15:
                     _append(datasets / FILES["lessons"], {"task": "lesson", "level": level, "prompt": LESSON_TASK.format(**seed),
@@ -341,8 +414,8 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
                 if not hard:
                     continue
                 w = hard.pop(0)
-                answer = teacher.llm.generate(WORD_PROMPT.format(word=w["word"], sentence=w["sentence"]), temperature=0.6,
-                                              max_tokens=200, purpose="school:word").strip()
+                answer = teacher.ask(WORD_PROMPT.format(word=w["word"], sentence=w["sentence"]), temperature=0.6,
+                                     max_tokens=200, purpose="school:word")
                 state["words"][w["word"]] = w["surprise"]
                 if w["word"].lower() in answer.lower():
                     _append(datasets / FILES["words"], {"task": "word", "word": w["word"], "surprise": w["surprise"],
@@ -356,8 +429,7 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
             if kind == "answers":
                 task, template, max_words = TASKS[(_count(datasets / FILES["answers"]) + made["answers"]) % len(TASKS)]
                 prompt = template.format(excerpt=excerpt, n=max_words)
-                answer = teacher.llm.generate(prompt, temperature=0.8, max_tokens=int(max_words * 1.6) + 30,
-                                              purpose="distill").strip()
+                answer = teacher.ask(prompt, temperature=0.8, max_tokens=int(max_words * 1.6) + 30, purpose="distill")
                 if answer:
                     _append(datasets / FILES["answers"], {"task": task, "prompt": prompt, "response": answer,
                                                           "teacher": teacher.name, "licence": teacher.licence})
@@ -367,8 +439,8 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
             prompt = template.format(excerpt=excerpt, n=max_words)
             attempt = student.generate(prompt, temperature=0.8, max_tokens=int(max_words * 1.6) + 30,  # type: ignore[union-attr]
                                        purpose="school:attempt").strip()
-            reply = teacher.llm.generate(TUTOR_PROMPT.format(task=prompt, attempt=attempt or "(nothing)"), temperature=0.5,
-                                         max_tokens=int(max_words * 1.6) + 60, purpose="school:tutor").strip()
+            reply = teacher.ask(TUTOR_PROMPT.format(task=prompt, attempt=attempt or "(nothing)"), temperature=0.5,
+                                max_tokens=int(max_words * 1.6) + 60, purpose="school:tutor")
             mark, better = parse_marked(reply)
             if mark is not None:
                 _note_mark(state, task, mark, step)
@@ -379,20 +451,48 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
                 made["tutored"] += 1
         except Exception as e:
             log.warning("school: %s stumbled on a %s row (%s)", teacher.name, kind, e)
+            why = _lead_must_step_down(e, declined) if teacher.lead else ""
+            declined += 1 if type(e).__name__ == "ClaudeRefused" else 0
+            if why:                              # a paid teacher that has to stop: the free ones carry on, or the session ends
+                notes.append(why)
+                if not others:
+                    break
+                teacher = others[state["sessions"] % len(others)]
         finally:
             if progress:
                 progress({"teacher": teacher.name, **made})
     state["sessions"] += 1
-    state["last"] = {"teacher": teacher.name, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), **made}
+    state["last"] = {"teacher": first.name, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), **made}
     _save(datasets, state)
     rows = sum(made.values())
     parts = [f"{made['answers']} worked answer{'' if made['answers'] == 1 else 's'}" if made["answers"] else "",
              f"{made['tutored']} correction{'' if made['tutored'] == 1 else 's'} of its own attempts" if made["tutored"] else "",
              f"{made['lessons']} practice scene{'' if made['lessons'] == 1 else 's'}" if made["lessons"] else "",
              f"{made['words']} word{'' if made['words'] == 1 else 's'} it did not know, explained" if made["words"] else ""]
-    msg = (f"{teacher.name} taught it: " + ", ".join(p for p in parts if p) + ".") if rows else \
-        f"{teacher.name} was asked to teach but gave nothing usable."
+    who = first.name if teacher is first else f"{first.name}, then {teacher.name},"
+    msg = (f"{who} taught it: " + ", ".join(p for p in parts if p) + ".") if rows else \
+        f"{who} was asked to teach but gave nothing usable."
     if marks:
         msg += f" The tutor marked its attempts {sum(marks) / len(marks):.1f} out of 10."
-    return {"rows": rows, **made, "teacher": teacher.name, "licence": teacher.licence, "marks": marks,
-            "teachers": [t.name for t in pool], "message": msg}
+    if notes:
+        msg += " " + " ".join(notes)
+    return {"rows": rows, **made, "teacher": first.name, "licence": first.licence, "marks": marks,
+            "teachers": [t.name for t in pool], "notes": notes, "message": msg}
+
+
+def _lead_must_step_down(e: Exception, declined: int) -> str:
+    """Why a paid lead teacher stops for this session, or '' when the row is simply lost.
+
+    A reached spending limit ends its turn. So does a request declined because it is about training a
+    model: that is Anthropic saying no to this use, and Gauge does not rephrase a request to get round a
+    refusal. Other refusals (a dark excerpt, say) cost one row; three of them end its turn too."""
+    kind = type(e).__name__
+    if kind == "ClaudeLimit":
+        return "Claude reached today's spending limit, so it stopped teaching for today."
+    if kind == "ClaudeRefused":
+        if getattr(e, "category", "") == "frontier_llm":
+            return ("Claude declined to teach: Anthropic's safeguards judged this request to be about training another AI "
+                    "model. Gauge will not reword it to get round that. Switch Claude's teaching off, or ask Anthropic.")
+        if declined >= 2:
+            return "Claude declined three requests in this session, so it stopped teaching for now."
+    return ""

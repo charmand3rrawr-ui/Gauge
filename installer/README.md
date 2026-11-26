@@ -262,6 +262,23 @@ limit; the computer is.
 These get the most out of your computer. They do not make a home computer into one of the giant AI
 systems; nothing can.
 
+### Claude as a teacher (optional, paid)
+
+GaugeLM can also be taught by **Claude**, Anthropic's model, which is far stronger than anything your
+computer can run. This is the one part of Gauge that is not free and not private: you need your own
+Anthropic API key, every request is paid for, and passages from your library are sent to Anthropic.
+
+1. Make a key at console.anthropic.com (Settings, API keys).
+2. In Studio: **Change the AI**, then **Claude...**
+3. Paste the key, press **Connect**, choose a model and a daily limit, press **Save**.
+4. Press **Let Claude teach GaugeLM** and read the question before you answer it. It covers the cost,
+   what is sent, and Anthropic's terms about training other AI models, which are yours to judge.
+
+Gauge stops asking Claude once the day's limit is reached (2 dollars unless you change it), and the
+free teachers carry on. **Remove Claude's lessons** takes out everything it wrote; **Disconnect**
+deletes the saved key. The same window can make Claude the writer of your stories, which costs much
+more: roughly a dollar a chapter. Full details: [docs/CLAUDE.md](../docs/CLAUDE.md).
+
 ### Who teaches GaugeLM
 
 At the start of each training session the free models on your computer teach GaugeLM before it studies

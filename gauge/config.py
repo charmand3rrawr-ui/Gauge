@@ -10,15 +10,31 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 DEFAULT_DATA_DIR = Path(os.environ.get("GAUGE_DATA_DIR", "data"))
+
+
+class ClaudeConfig(BaseModel):
+    """Claude, Anthropic's model, reached over the internet with your own API key (docs/CLAUDE.md).
+
+    It is the one part of Gauge that costs money and sends text off this computer, so nothing here is
+    used until you connect a key, and teaching stays off until you switch it on yourself."""
+
+    model: str = "claude-opus-5-5"  # claude-opus-5-5 | claude-sonnet-5-5 | claude-haiku-5-5 | claude-fable-5-2
+    effort: str = "medium"  # how hard it thinks when it writes for Gauge: low | medium | high | xhigh | max
+    teach: bool = False  # Claude teaches GaugeLM: it leads the school until the day's limit is reached
+    teach_effort: str = "low"  # how hard it thinks when it teaches (lessons are short; low keeps them cheap)
+    terms_ok: bool = False  # you read Anthropic's terms on training models with Claude's output and take that decision
+    daily_usd: float = 2.0  # Gauge stops asking Claude once today's estimated spending reaches this; 0 = no limit
+    max_tokens: int = 16000  # the most one answer may run to, thinking included
+    fallbacks: bool = True  # let Anthropic re-run a declined request on the model it recommends for that case
 
 
 class LLMConfig(BaseModel):
     """Local LLM endpoint settings. Ollama is the default; any OpenAI-compatible server works."""
 
-    provider: str = "ollama"  # "ollama" | "openai" (LM Studio, llama.cpp server, vLLM...) | "fake"
+    provider: str = "ollama"  # "ollama" | "openai" (LM Studio, llama.cpp server, vLLM...) | "native" | "claude" | "fake"
     base_url: str = "http://localhost:11434"
     model: str = "llama3.1:8b"
     embed_model: str = "nomic-embed-text"
@@ -40,6 +56,8 @@ class LLMConfig(BaseModel):
     cache_dir: str = ""  # filled in by GaugeConfig.load
     native_device: str = "cpu"  # filled in by GaugeConfig.load from native.device
     use_gpu: bool = True  # filled in by GaugeConfig.load: false keeps the downloaded model on the processor
+    claude: Optional[ClaudeConfig] = Field(default=None, exclude=True)  # filled in by GaugeConfig.load: the claude settings
+    claude_dir: str = ""  # filled in by GaugeConfig.load: where the record of Claude spending is kept
 
 
 class NativeConfig(BaseModel):
@@ -335,6 +353,16 @@ class GaugeConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     logs: LogsConfig = Field(default_factory=LogsConfig)
     library: LibraryConfig = Field(default_factory=LibraryConfig)
+    claude: ClaudeConfig = Field(default_factory=ClaudeConfig)
+
+    @model_validator(mode="after")
+    def _share_claude_settings(self) -> GaugeConfig:
+        """The model factory is handed only `llm`, so it carries a reference to the Claude settings and to
+        the folder where Claude's spending is recorded."""
+        self.llm.claude = self.claude
+        if not self.llm.claude_dir:
+            self.llm.claude_dir = str(self.root)
+        return self
 
     @property
     def security_dir(self) -> Path:
@@ -414,4 +442,6 @@ class GaugeConfig(BaseModel):
         chosen = [str(k).lower() for k in cfg.compute.devices]
         cfg.llm.use_gpu = not chosen or any(k.startswith("gpu") for k in chosen)
         cfg.llm.cache_dir = str(cfg.models_dir / "llm_cache")
+        cfg.llm.claude = cfg.claude
+        cfg.llm.claude_dir = str(cfg.root)
         return cfg
