@@ -51,6 +51,9 @@ class ProjectState(BaseModel):
     past_directions: list[str] = Field(default_factory=list)  # pitches the muse already took
     current_direction: str = ""
     author_direction: str = ""  # what the author asked for in the next chapter (Studio chat prompt); cleared once written
+    planned_chapters: int = 0  # how long the whole novel is meant to be (0 = open-ended)
+    min_chapter_words: int = 0  # no chapter may be shorter than this (0 = no floor)
+    volumes: list[dict[str, Any]] = Field(default_factory=list)  # the whole-novel plan (see saga.py)
     continued_from: str = ""  # path of an imported manuscript this project continues
 
 

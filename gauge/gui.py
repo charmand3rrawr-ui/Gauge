@@ -51,6 +51,9 @@ FIND_ASK = ("Let Gauge go online and find novels?\n\n"
             "It searches Project Gutenberg, a library of books that are out of copyright, for novels in the genres of your "
             "stories, and adds a few it does not have. It only ever talks to that library; it cannot visit other sites. "
             "Nothing about you or your writing is sent: a search is a word such as 'adventure'.")
+NOVEL_NOTE = ("Gauge plans the whole novel in volumes, then writes chapter after chapter until the last one, without being asked "
+              "each time. It can take days. Stop it whenever you like: it finishes the chapter it is on, and Start carries on from "
+              "the next one. No chapter will be shorter than the number you give.")
 CHAT_HINT = ("Type below and press Ask Gauge to talk about your story: ideas, what a character would do, what is "
              "still unresolved. Or type what should happen and press 'Use for the next chapter'.\n")
 CHARACTER_INTRO = ("Teach Gauge how to build a character by showing it finished ones. Read the breakdown to see everything "
@@ -79,6 +82,7 @@ class StudioController:
         self._training: dict[str, Any] = {"running": False, "step": 0, "loss": None}
         self._chat: dict[str, list[tuple[str, str]]] = {}   # the conversation with Gauge, per story
         self._sensed: Any = None                             # the devices found on this computer (looked for once)
+        self._stop_novel = threading.Event()                 # set by stop_novel(); checked between chapters
 
     def status(self) -> dict[str, Any]:
         from .llm import make_llm
@@ -577,6 +581,37 @@ class StudioController:
         long = len(idea) >= 300
         p = self.pipeline().new_project(title, "" if long else idea, genres or ["Adventure"], premise_doc=idea if long else "")
         return p.state.name
+
+    # ---- a whole novel ---------------------------------------------------------------------
+    def novel_status(self, name: Optional[str]) -> dict[str, Any]:
+        from .write import saga
+        from .write.project import Project
+
+        if not name or not Project.exists(self.cfg.projects_dir, name):
+            return {"planned": 0, "written": 0, "left": 0, "line": "Start or open a story first."}
+        return saga.status(Project(self.cfg.projects_dir, name))
+
+    def write_novel(self, name: str, chapters: Any, min_words: Any = None,
+                    progress: Optional[Callable[[dict[str, Any]], None]] = None) -> dict[str, Any]:
+        """Write the whole novel, chapter after chapter, until its last chapter or `stop_novel()`. Run it
+        again to carry on. `chapters` and `min_words` are numbers or what was typed in their boxes."""
+        self._require_engine()
+        try:
+            total = int(str(chapters).replace(",", "").strip())
+        except ValueError:
+            raise ValueError("Type how many chapters the novel should have, as a number: for example 500.") from None
+        if not 1 <= total <= 100000:
+            raise ValueError("A novel can have from 1 to 100,000 chapters.")
+        floor = self.read_words(min_words) if min_words not in (None, "") else None
+        self._stop_novel.clear()
+        pipe = self.pipeline()
+        return pipe.write_novel(pipe.open_project(name), total, min_words=floor, should_stop=self._stop_novel.is_set,
+                                progress=progress)
+
+    def stop_novel(self) -> dict[str, Any]:
+        """Ask a running novel to stop after the chapter it is on."""
+        self._stop_novel.set()
+        return {"message": "It will stop after the chapter it is writing. Nothing is left half-written."}
 
     def chapter_words(self, name: Optional[str] = None) -> int:
         """How long chapters are asked to be: this story's own number, or the default for new stories."""
@@ -1235,6 +1270,59 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         run_bg(lambda: ctl.write_next(state["project"], asked), done,
                f"Writing the next chapter, about {asked:,} words... this takes a few minutes.")
 
+    def on_novel() -> None:
+        """Write the whole novel: how many chapters, how long each at least, then start and leave it."""
+        if not state["project"]:
+            messagebox.showinfo("Gauge", "Start a story first!")
+            return
+        win, frame, alive, note, _start = dialog("Write the whole novel", 700, 420)
+        ttk.Label(frame, text="Write the whole novel", font=huge).pack(anchor="w")
+        ttk.Label(frame, text=NOVEL_NOTE, wraplength=640, font=small).pack(anchor="w", pady=(2, 8))
+        row = ttk.Frame(frame)
+        row.pack(fill="x", pady=(0, 6))
+        st = ctl.novel_status(state["project"])
+        chapters_var = tk.StringVar(value=str(st["planned"] or 500))
+        floor_var = tk.StringVar(value=str(st.get("min_words") or 2000))
+        ttk.Label(row, text="Chapters in the novel:", font=mid).pack(side="left")
+        ttk.Entry(row, textvariable=chapters_var, width=7, font=big).pack(side="left", padx=(6, 16))
+        ttk.Label(row, text="Shortest a chapter may be (words):", font=mid).pack(side="left")
+        ttk.Entry(row, textvariable=floor_var, width=7, font=big).pack(side="left", padx=6)
+        note.set(st["line"])
+        buttons_row = ttk.Frame(frame)
+        buttons_row.pack(fill="x", pady=(4, 6))
+        ttk.Label(frame, textvariable=note, wraplength=640, font=mid).pack(anchor="w")
+
+        def show(r: dict[str, Any]) -> None:
+            def update() -> None:
+                refresh_chapters()
+                msg = (f"Chapter {r['chapter']} of {r['of']} written ({r['words']:,} words). About {r['hours_left']:g} hours left "
+                       "at this pace.")
+                status_var.set(msg)
+                if alive():
+                    note.set(msg)
+            root.after(0, update)
+
+        def on_go() -> None:
+            if state["busy"]:
+                note.set("Gauge is busy. Wait for the current job to finish, then try again.")
+                return
+            name = state["project"]
+            chapters, floor = chapters_var.get(), floor_var.get()
+
+            def done(res: dict[str, Any]) -> None:
+                refresh_chapters()
+                if alive():
+                    note.set(res["message"])
+                status_var.set(res["message"])
+
+            note.set("Planning the novel, then writing. You can close this window; it keeps going.")
+            run_bg(lambda: ctl.write_novel(name, chapters, floor, progress=show), done, "Writing the whole novel...")
+
+        ttk.Button(buttons_row, text="Start (or carry on)", style="Mid.TButton", command=on_go).pack(side="left", padx=(0, 8))
+        # Stop is not one of the buttons that go grey while Gauge is busy: it has to work during the run.
+        ttk.Button(buttons_row, text="Stop after this chapter", style="Mid.TButton",
+                   command=lambda: note.set(ctl.stop_novel()["message"])).pack(side="left")
+
     def on_pick(_evt: Any = None) -> None:
         sel = chapters_box.curselection()
         if sel and state["project"]:
@@ -1709,6 +1797,9 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     write_btn = ttk.Button(write_row, text="WRITE THE NEXT CHAPTER", style="Big.TButton", command=on_write)
     write_btn.pack(fill="x")
     buttons.extend([start_btn, write_btn])
+    novel_btn = ttk.Button(write_row, text="Write the whole novel...", style="Mid.TButton", command=on_novel)
+    novel_btn.pack(fill="x", pady=(3, 0))
+    buttons.append(novel_btn)
     pairs = [("Talk to a character", on_chat), ("Open another story", on_open),
              ("Teach Gauge", on_teach), ("Change the AI", on_engine),
              ("Switches", on_switches), ("Save story as one file", on_export)]
@@ -1721,7 +1812,8 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     # ---- the menu bar: the same actions, always visible whatever the window size
     menubar = tk.Menu(root)
     for title, entries in (
-        ("Story", [("Start my story", on_start), ("Write the next chapter", on_write), ("Open another story...", on_open),
+        ("Story", [("Start my story", on_start), ("Write the next chapter", on_write),
+                   ("Write the whole novel...", on_novel), ("Open another story...", on_open),
                    ("Ask Gauge...", lambda: chat_entry.focus_set()),
                    ("Talk to a character...", on_chat), ("Save story as one file", on_export)]),
         ("Teach", [("Add books or your own writing...", on_teach), ("Teach character building...", on_characters),

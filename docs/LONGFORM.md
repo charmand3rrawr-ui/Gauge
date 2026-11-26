@@ -77,6 +77,62 @@ as a contradiction until you say it happened.
 `--rebuild --quick` files an older story without a model: names and opening and closing lines, no
 facts.
 
+## Writing a whole novel of a set length
+
+Gauge plans five chapters at a time, which keeps a serial lively and lets it wander: with no end in
+sight a story neither builds toward anything nor finishes. For a novel of a set length
+(`gauge/write/saga.py`):
+
+```powershell
+.\gauge.bat novel "My Serial" --chapters 500 --min-words 2000 --plan   # plan the volumes and read the plan
+.\gauge.bat novel "My Serial" --chapters 500 --min-words 2000          # write it, start to finish
+.\gauge.bat novel "My Serial" --status                                 # how far along it is
+.\gauge.bat novel "My Serial" --stop                                   # from another window: stop after this chapter
+```
+
+In the Studio: **Write the whole novel...** under the write button.
+
+- **The plan.** The novel is divided into volumes of fifty chapters. One request gives each volume a
+  title, what it is about, its turning point and the state it must end in; the last volume resolves
+  the promise the story made. Without a model a plain structural plan is used, so a run never fails
+  for want of one.
+- **Where we are.** Before each stretch is outlined, the outliner is told which volume it is in, what
+  that volume must do, how many chapters are left in the volume and the novel, when a volume is
+  ending and what the next one is, and, in the last chapters, to pay everything off and write an
+  ending, not a cliffhanger. Nothing is outlined past the last chapter.
+- **A minimum length.** `--min-words 2000` means no chapter is shorter than 2,000 words. Gauge aims a
+  little past it and carries a chapter on from its own last lines until it is there, for as long as
+  the model keeps adding. A chapter that still falls short (a model that has dried up) is recorded as
+  short and counted in the summary.
+- **Unattended.** It writes chapter after chapter with no prompting. A chapter that fails is tried
+  again; three failures in a row stop the run with the reason. Ctrl+C, the Stop button or `--stop`
+  end it between chapters, never mid-chapter. Running the same command again carries on from the
+  next unwritten chapter, because the story holds the state, not the run.
+
+### The 500-chapter run
+
+This was run once in full through the real writing pipeline, with a stand-in model in place of a
+real one:
+
+| | result |
+| --- | --- |
+| chapters written | 500 of 500, and no 501st |
+| shortest chapter | 2,029 words (minimum asked: 2,000) |
+| total | 1,014,500 words |
+| stopped and resumed | stopped at chapter 200, resumed in a fresh program, finished |
+| time per chapter | flat from chapter 1 to chapter 500 |
+| outline requests carrying the novel plan | 166 of 167 (the one before the plan existed is now redone) |
+| the record | 500 digests, 55 roll-ups, no contradictions |
+
+The stand-in model returns the same passage every time, so this proves the machinery, not the prose:
+length, planning, stopping and resuming, the record, and constant cost. It says nothing about how
+good 500 chapters by a real model are.
+
+**How long it takes for real.** With a real local model the time per chapter is minutes, not
+fractions of a second, and depends on the model, the capacity limit and the thinking effort. The run
+prints its own estimate after every chapter. As a guide only: at ten minutes a chapter, 500 chapters
+is about three and a half days of continuous running.
+
 ## What was tested, and what was not
 
 A test files 10,000 made-up chapters in which people are away for thousands of chapters at a time,

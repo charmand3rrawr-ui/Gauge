@@ -501,7 +501,9 @@ class WritePipeline:
 
         plan = self.planner.ensure_plan(project, n)
         prev = project.read_chapter(n - 1) if n > 1 else None
-        words = project.state.target_chapter_words
+        floor = int(project.state.min_chapter_words or 0)
+        # Aim a little past the floor, so a chapter that lands slightly short of its target still clears it.
+        words = max(project.state.target_chapter_words, int(floor * 1.1))
         roster = self.roster(project) if self.cfg.write.characters_enabled else Roster(project.dir)
         world_state = self.world(project)
         previous_texts = project.previous_texts(n)
@@ -571,7 +573,7 @@ class WritePipeline:
             text = self.drafter.draft(project, plan, prev, words, cast=cast_text, world=world_text,
                                       techniques=self._technique_cards(plan), avoid=avoid_text, council=council_text)
             if self.cfg.write.reach_length:
-                text, carried = self.drafter.reach_length(text, words, project, plan)
+                text, carried = self.drafter.reach_length(text, words, project, plan, floor=floor)
                 if carried:
                     log.info("ch %d: carried on %d time(s) to reach %d words (now %d)", n, carried, words, len(text.split()))
             timings["draft"] = time.monotonic() - t0
@@ -642,14 +644,15 @@ class WritePipeline:
             except Exception as e:
                 log.warning("A/B titling failed for ch %d: %s", n, e)
 
-        if self.cfg.write.reach_length and len(best_text.split()) < words * 0.9:
+        if self.cfg.write.reach_length and len(best_text.split()) < max(words * 0.9, floor):
             # A revision can come back shorter than what it revised; the chapter is carried on once more.
-            best_text, _ = self.drafter.reach_length(best_text, words, project, plan, passes=2)
+            best_text, _ = self.drafter.reach_length(best_text, words, project, plan, passes=2, floor=floor)
         meta = {
             "title": plan.title, "score": round(best.score, 3), "measured": round(best.measured, 3),
             "judged": round(best.judged, 3), "rubric": best.rubric, "revisions": revisions,
             "words": len(best_text.split()), "words_asked": words, "written_at": utcnow().isoformat(),
             "best_of": self.drafter.best_of, "choices": self.drafter.choices[-12:],
+            "min_words": floor, "short": bool(floor and len(best_text.split()) < floor),
             "cast": cast_names, "character_consistency": round(self._consistency(best_reviews), 3),
             "world_consistency": round(best_wrev.consistency, 3) if best_wrev else None,
             "novelty": round(best_nov.score, 3) if best_nov else None,
@@ -866,6 +869,12 @@ class WritePipeline:
         except Exception as e:
             log.warning("no brief from the chronicle for ch %d: %s", n, e)
             return ""
+
+    def write_novel(self, project: Project, chapters: Optional[int] = None, **kw: Any) -> dict[str, Any]:
+        """Write the whole novel to its last chapter, unattended (see saga.write_novel)."""
+        from .saga import write_novel
+
+        return write_novel(self, project, chapters, **kw)
 
     def write_many(self, project: Project, count: int, fresh: bool = False) -> list[ChapterResult]:
         out = []

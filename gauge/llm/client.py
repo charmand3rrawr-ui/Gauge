@@ -504,6 +504,14 @@ class FakeLLM:
                                    "humor": "deflecting, dry, worst possible moment", "taboos": ["no epigraphs", "no dream sequences"],
                                    "favorite_moves": ["open on dialogue", "end on a sound stopping", "repeat a word under stress"],
                                    "sentence_music": "short, then one long run", "register": "clipped street-level", "never": ["purple weather"]})
+            if "plan the whole of a serial web novel" in low:
+                m = re.search(r"divided into (\d+) volumes", prompt)
+                k = int(m.group(1)) if m else 1
+                return json.dumps({"volumes": [{"title": f"The {['Debt', 'Wall', 'Name', 'Broker', 'Rewind'][i % 5]} {i + 1}",
+                                                "about": f"Rin pays for rewind number {i + 1} and learns who is counting.",
+                                                "turn": "a memory she needed is the one she loses",
+                                                "ends_with": "Jun found" if i == k - 1 else f"a harder debt than volume {i + 1} began with"}
+                                               for i in range(k)]})
             if "running story summary" in low:
                 m = re.search(r"NEW CHAPTER (\d+)", prompt)
                 num = int(m.group(1)) if m else 1

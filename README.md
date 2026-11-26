@@ -197,6 +197,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge serve [--host H] [--port P] [--token T]` | run headless with an HTTP API + web dashboard; on a server, VPS or container; see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `gauge gui` | open Gauge Studio (the big-button window) |
 | `gauge effort [quick|normal|deep|maximum]` / `gauge model [--get]` | how hard Gauge works on each chapter, and the strongest writing model this computer can run; see [docs/NATIVE.md](docs/NATIVE.md) |
+| `gauge novel NAME --chapters 500 --min-words 2000 [--plan] [--status] [--stop]` | write a whole novel of a set length, unattended: planned in volumes, a minimum length per chapter, resumable; see [docs/LONGFORM.md](docs/LONGFORM.md) |
 | `gauge chronicle NAME [--about X] [--so-far] [--conflicts] [--settle N] [--rebuild]` | the story's permanent record (digests, facts with history, who appeared where) that keeps a very long serial consistent; see [docs/LONGFORM.md](docs/LONGFORM.md) |
 | `gauge write NAME [--chapters N] [--words W] [--fresh] [--seed S]` | draft, carry on to the asked length, score, revise, save; resumes checkpointed drafts; `--seed` makes it reproducible |
 | `gauge bench` | measure model speed; estimate minutes per chapter |

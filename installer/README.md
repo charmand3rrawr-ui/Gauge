@@ -87,6 +87,23 @@ within about a tenth of the number you typed. Chapters can be from 100 to 20,000
 take proportionally longer. The switch **Write chapters to the asked length** turns the carrying-on
 off.
 
+## Writing a whole novel in one go
+
+Under **WRITE THE NEXT CHAPTER** there is **Write the whole novel...**. Type how many chapters the
+novel should have (for example 500) and the shortest a chapter may be (for example 2000 words), and
+press **Start (or carry on)**.
+
+- Gauge first plans the whole novel in volumes, so the story builds toward an ending and reaches it
+  at the last chapter.
+- Then it writes chapter after chapter without being asked. The line under the buttons shows which
+  chapter it is on and roughly how many hours are left.
+- No chapter will be shorter than the number you gave.
+- **Stop after this chapter** stops it cleanly; nothing is left half-written. **Start** carries on
+  from the next chapter, today or next week. You can close Gauge in between.
+
+This takes a long time. A chapter of 2,000 words can take many minutes on a home computer, so 500
+chapters is days of running. Raising the capacity limit in **Switches** makes it faster.
+
 ## Staying consistent in a very long story
 
 No AI remembers a long story; it only sees what is put in front of it for each chapter. Gauge now

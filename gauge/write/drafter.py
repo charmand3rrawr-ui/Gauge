@@ -124,20 +124,29 @@ class Drafter:
         return self._write(prompt, max_out, "draft", words)
 
     def reach_length(self, text: str, words: int, project: Project, plan: ChapterPlan, passes: int = 4,
-                     short_of: float = 0.9) -> tuple[str, int]:
+                     short_of: float = 0.9, floor: int = 0) -> tuple[str, int]:
         """Carry the chapter on until it is about `words` long. A model stops when it feels done, which is
         often well short of what was asked, and no single answer can be longer than its context allows;
         so the chapter is continued from its own last lines, a stretch at a time, until it is within
-        `short_of` of the target. Returns (text, passes used). A stretch that adds nothing ends it."""
+        `short_of` of the target. Returns (text, passes used).
+
+        `floor` is a length the chapter must not fall below, whatever it takes: with it, the carrying-on
+        does not stop at a fixed number of stretches but goes on for as long as each stretch adds
+        something. Two stretches in a row that add next to nothing end it, so a model that has dried up
+        cannot hold the run for ever."""
         used = 0
         # One stretch can be no longer than the model can write in one go.
         room = max(120, int((self.llm.context_window() * 0.5) / 1.8))
         passes = max(passes, min(40, -(-words // room) + 1))      # a long chapter on a small model needs more stretches
+        enough = max(int(words * short_of), int(floor))
+        if floor:
+            passes = max(passes, 80)
+        dry = 0
         while used < passes:
             have = len(text.split())
-            if have >= words * short_of or not text.strip():
+            if have >= enough or not text.strip():
                 break
-            more = words - have
+            more = max(words, int(floor * 1.05)) - have
             last = more <= room
             stretch = more if last else room
             prompt = prompts.CONTINUE_PROMPT.format(
@@ -153,7 +162,11 @@ class Drafter:
                 break
             used += 1
             if len(added.split()) < 20:
-                break
+                dry += 1
+                if dry >= 2 or not floor:
+                    break
+                continue
+            dry = 0
             text = text.rstrip() + "\n\n" + added
         return text, used
 

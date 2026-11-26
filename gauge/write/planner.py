@@ -53,6 +53,11 @@ class Planner:
     def extend_outline(self, project: Project, count: int = 5, exemplar_k: int = 3, direction: str = "") -> list[ChapterPlan]:
         start = (project.state.outline[-1].number + 1) if project.state.outline else 1
         end = start + count - 1
+        total = int(project.state.planned_chapters or 0)
+        if total:                                    # a novel of a set length is not outlined past its last chapter
+            if start > total:
+                return []
+            end = min(end, total)
         if not direction and self.direction_for is not None:
             try:
                 direction = self.direction_for(project) or ""
@@ -63,6 +68,11 @@ class Planner:
         if asked:  # what the author asked for outranks the muse and the writing room
             direction = (f"THE AUTHOR'S INSTRUCTION for chapter {start} (follow it; it outranks everything else): {asked}"
                          + (f"\n{direction}" if direction else ""))
+        from .saga import where
+
+        place = where(project, start)                # which volume this is, what it must do, how much is left
+        if place:
+            direction = place + (f"\n{direction}" if direction else "")
         if direction:
             project.state.current_direction = direction
         prompt = prompts.OUTLINE_PROMPT.format(

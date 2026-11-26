@@ -1081,6 +1081,66 @@ def character_add(c: Ctx, project: str, sheet: str, replace: bool) -> None:
     console.print(f"[green]Added[/] {ch.name} to {project}")
 
 
+# ---------------------------------------------------------------------------- a whole novel
+@main.command("novel")
+@click.argument("name")
+@click.option("--chapters", type=click.IntRange(1, 100000), default=None, help="How many chapters the whole novel has, e.g. 500.")
+@click.option("--min-words", type=click.IntRange(0, 20000), default=None, help="No chapter may be shorter than this, e.g. 2000.")
+@click.option("--words", type=click.IntRange(100, 20000), default=None, help="The length to aim for (default: a little over the minimum).")
+@click.option("--plan", "plan_only", is_flag=True, help="Plan the volumes and show them; write nothing.")
+@click.option("--status", "show_status", is_flag=True, help="How far along the novel is.")
+@click.option("--stop", "ask_stop", is_flag=True, help="Ask a run in another window to stop after its current chapter.")
+@click.pass_obj
+def novel_cmd(c: Ctx, name: str, chapters, min_words, words, plan_only, show_status, ask_stop) -> None:
+    """Write a whole novel of a set length, unattended: plan it in volumes, then chapter after chapter to the end.
+
+    Example: gauge novel "My Serial" --chapters 500 --min-words 2000
+
+    Stop it with Ctrl+C (it finishes nothing half-written) or `gauge novel NAME --stop` from another
+    window. Run the same command again to carry on from the next unwritten chapter."""
+    from .write import WritePipeline, saga
+    from .write.project import Project
+
+    if not Project.exists(c.cfg.projects_dir, name):
+        console.print(f"[red]no project named {name!r}[/]; start one with `gauge new`")
+        sys.exit(1)
+    if ask_stop:
+        p = Project(c.cfg.projects_dir, name)
+        (p.dir / saga.STOP_FILE).write_text("stop", encoding="utf-8")
+        console.print("Asked it to stop after the chapter it is writing.")
+        return
+    pipe = WritePipeline(c.cfg, c.db)
+    p = pipe.open_project(name)
+    if show_status:
+        console.print(saga.status(p)["line"])
+        return
+    if plan_only:
+        if not (chapters or p.state.planned_chapters):
+            console.print("[red]say how many chapters:[/] --chapters 500")
+            sys.exit(1)
+        if chapters or not p.state.volumes:
+            saga.plan_novel(p, pipe.fast_llm, chapters or p.state.planned_chapters)
+        click.echo(saga.plan_markdown(p))
+        return
+    if not pipe.llm.available():
+        console.print(f"[red]LLM not reachable[/] ({pipe.llm.describe()}). Run `gauge doctor`.")
+        sys.exit(1)
+
+    def progress(r: dict) -> None:
+        console.print(f"[green]Chapter {r['chapter']}[/] of {r['of']}  {r['title']}  {r['words']:,} words  {r['seconds']:.0f}s  "
+                      f"(volume {r['volume']}; about {r['hours_left']:g} hours left)")
+
+    try:
+        res = pipe.write_novel(p, chapters, words=words, min_words=min_words, progress=progress)
+    except KeyboardInterrupt:
+        console.print("[yellow]Stopped.[/] Run the same command again to carry on from the next unwritten chapter.")
+        return
+    except ValueError as e:
+        console.print(f"[red]{e}[/]: --chapters 500")
+        sys.exit(1)
+    console.print(("[green]" if res["finished"] else "[yellow]") + res["message"] + "[/]")
+
+
 # ---------------------------------------------------------------------------- effort and the writing model
 @main.command("effort")
 @click.argument("level", required=False, type=click.Choice(["quick", "normal", "deep", "maximum"]))
