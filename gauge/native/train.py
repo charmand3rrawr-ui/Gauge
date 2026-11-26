@@ -209,6 +209,9 @@ class NativeTrainer:
             st = self.status()
             step0 = int(st.get("step", 0))
         else:
+            from .sizing import ensure_fits
+
+            ensure_fits(mcfg, tcfg.device, training=True)      # a size this machine cannot hold is refused with the numbers
             tok = self.build_tokenizer(docs, mcfg.vocab_size)
             mcfg.vocab_size = tok.vocab_size
             model = GaugeLM(mcfg, seed=tcfg.seed, device=tcfg.device)

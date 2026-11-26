@@ -53,6 +53,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     "small": {"n_layer": 8, "n_head": 8, "n_embd": 512, "block_size": 512, "n_kv_head": 4, "vocab_size": 8192},
     "medium": {"n_layer": 12, "n_head": 12, "n_embd": 768, "block_size": 1024, "n_kv_head": 4, "vocab_size": 16384},
     "large": {"n_layer": 24, "n_head": 16, "n_embd": 1024, "block_size": 2048, "n_kv_head": 8, "vocab_size": 32000},
+    # Beyond what any home computer can hold. The arithmetic is the same; the machine is the limit (see sizing.py).
+    # Head size stays 64 and each step is at most ten times the last, so a model can be grown from one to the next.
+    "2b": {"n_layer": 32, "n_head": 40, "n_embd": 2560, "block_size": 4096, "n_kv_head": 20, "vocab_size": 32000},
+    "20b": {"n_layer": 48, "n_head": 96, "n_embd": 6144, "block_size": 8192, "n_kv_head": 48, "vocab_size": 32000},
+    "160b": {"n_layer": 96, "n_head": 192, "n_embd": 12288, "block_size": 16384, "n_kv_head": 96, "vocab_size": 65536},
+    "1t": {"n_layer": 192, "n_head": 384, "n_embd": 24576, "block_size": 32768, "n_kv_head": 192, "vocab_size": 65536},
+    "5t": {"n_layer": 256, "n_head": 640, "n_embd": 40960, "block_size": 32768, "n_kv_head": 320, "vocab_size": 131072},
+    "20t": {"n_layer": 424, "n_head": 1024, "n_embd": 65536, "block_size": 65536, "n_kv_head": 512, "vocab_size": 131072},
 }
 
 

@@ -180,7 +180,7 @@ type data\projects\ten-seconds\chapters\chapter_001.md
 | `gauge persona build/show/blend` | the author persona learned from your chapters |
 | `gauge character arc` | planned personality drift |
 | `gauge corpus stats/build/fetch/find` | compile the training library from text you may train on, licence-tracked; `find` goes online and adds out-of-copyright novels by itself; see [docs/CORPUS.md](docs/CORPUS.md) |
-| `gauge native presets/bench/train/grow/shrink/teachers/teach/seed/report/understand/alike/distill/eval/continue/status/sample/tokenizer` | GaugeLM, the built-in model; see [docs/NATIVE.md](docs/NATIVE.md) |
+| `gauge native presets/needs/bench/train/grow/shrink/teachers/teach/seed/report/understand/alike/distill/eval/continue/status/sample/tokenizer` | GaugeLM, the built-in model; see [docs/NATIVE.md](docs/NATIVE.md) |
 | `gauge compute scan/watch/token/discover/add/list/remove`, `gauge worker` | sense GPUs; pool the machines you own; see [docs/COMPUTE.md](docs/COMPUTE.md) |
 | `gauge bot new/list/run/test/schedule/remove` | bots: standalone programs written and tested by the Engineer; see [docs/BOTS.md](docs/BOTS.md) |
 | `gauge code cards/search/learn` | programming knowledge cards and your own notes |

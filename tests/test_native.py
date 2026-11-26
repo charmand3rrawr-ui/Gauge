@@ -238,7 +238,7 @@ def test_presets_legacy_load_and_decoding(tmp_path):
     from gauge.native import PRESETS, preset_config
     from gauge.native.evaluate import preset_table
 
-    assert set(PRESETS) == {"tiny", "small", "medium", "large"}
+    assert list(PRESETS)[:4] == ["tiny", "small", "medium", "large"]            # the home sizes; larger ones follow (test_sizing)
     cfg = preset_config("small", vocab_size=1000)
     assert cfg.n_layer == 8 and cfg.vocab_size == 1000 and cfg.kv_heads == 4 and cfg.arch == "llama"
     rows = {r["size"]: r for r in preset_table()}

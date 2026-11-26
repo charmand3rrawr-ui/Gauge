@@ -225,6 +225,14 @@ writer to GaugeLM once its text reads well enough for you.
 Only text that is safe to train on is used: what you added yourself, public-domain books, the chapters
 written for you, and the examples made on your own machine.
 
+### How big GaugeLM can be
+
+GaugeLM's sizes now go all the way up to twenty trillion weights (`20t`), and **Grow GaugeLM** steps
+from each size to the next. Before growing, Gauge checks that the bigger model fits in your
+computer's memory and tells you the numbers if it does not; a home computer stops at around `large`.
+The sizes above that are there for a machine that could hold them. Nothing about Gauge's code is the
+limit; the computer is.
+
 ### A stronger writer, and more thinking
 
 - **Find a stronger model** (in **Change the AI**) checks whether your computer could run a better

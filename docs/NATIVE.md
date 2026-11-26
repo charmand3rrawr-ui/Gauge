@@ -36,6 +36,48 @@ gauge native presets
 | medium | 12 | 768 | 12 (4) | 1024 | ~88M | GPU |
 | large | 24 | 1024 | 16 (8) | 2048 | ~310M | GPU, overnight |
 
+### Sizes beyond a home computer
+
+Nothing in GaugeLM's code limits its size; the arithmetic is the same at four million weights and at
+twenty trillion. The named sizes now run all the way up, and each can be grown into the next
+(`gauge native grow`), so a model could in principle be carried from tiny to the top without ever
+starting over:
+
+| size | layers | width | weights | memory to hold | memory to train | text worth training on |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2b | 32 | 2,560 | 2.4 billion | 9.6 GB | 38 GB | 48 billion tokens |
+| 20b | 48 | 6,144 | 20.1 billion | 80 GB | 322 GB | 403 billion tokens |
+| 160b | 96 | 12,288 | 160 billion | 641 GB | 2.6 TB | 3.2 trillion tokens |
+| 1t | 192 | 24,576 | 1.3 trillion | 5.1 TB | 20 TB | 26 trillion tokens |
+| 5t | 256 | 40,960 | 4.7 trillion | 19 TB | 76 TB | 95 trillion tokens |
+| 20t | 424 | 65,536 | 20.0 trillion | 80 TB | 321 TB | 401 trillion tokens |
+
+```powershell
+.\gauge.bat native presets       # every size and what it takes
+.\gauge.bat native needs 20t     # one size, in sentences, against this computer
+```
+
+Before a model of any size is created or grown, Gauge compares what it needs with the memory it can
+see and refuses with the numbers if it will not fit. On a machine whose memory Gauge cannot measure,
+switch the check off (`native.memory_check`, or **Check a size fits before building it** in
+Switches) and the run simply proceeds.
+
+What allowing a size does not do:
+
+- **It does not supply the machine.** The 20t size needs about 80 TB of memory to hold and about
+  320 TB to train. No single computer has that today.
+- **A quantum computer would not run it.** Quantum computers are not faster ordinary computers; they
+  speed up a few specific kinds of problem, and multiplying trillions of ordinary numbers together,
+  which is what training this model is, is not one of them. "A machine with unlimited ordinary
+  memory and speed" is the assumption that makes these sizes usable.
+- **It does not supply the text.** By the usual rule of thumb (about twenty tokens of text per
+  weight) the 20t size wants about 400 trillion tokens, which is several times more good text than is
+  thought to exist; that last figure is a rough estimate. Trained on a home library, a model this
+  size would memorise it rather than learn from it.
+- **It has never been run.** The largest size ever built on the machine this was written on is
+  `medium`. Above that, only the counting has been checked: the weights add up, and each size can be
+  grown into the next.
+
 `gauge native bench --size small` measures training and generation tokens per second on your
 machine and prints how many hours 2,000 steps would take. Run it before committing to a size.
 

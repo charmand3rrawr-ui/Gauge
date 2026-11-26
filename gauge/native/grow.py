@@ -57,11 +57,18 @@ from .model import PRESETS, GaugeLM, ModelConfig
 
 log = logging.getLogger(__name__)
 
-SIZES = ("tiny", "small", "medium", "large")
+SIZES = tuple(PRESETS)                       # smallest first: tiny ... large, then 2b ... 20t
+STEP_LIMIT = 10                              # the next size up is at most this many times the weights
 BACKUP_DIR = "before-grow"
 HISTORY = "growth.json"
 FILES = ("model.json", "weights.npz", "train_state.json", "tokenizer.json")
 TOLERANCE = 2e-3          # largest allowed difference between old and new answers (logits are of order 1-10)
+
+
+def _count(n: float) -> str:
+    from .sizing import count
+
+    return count(n)
 
 
 class GrowError(ValueError):
@@ -88,7 +95,7 @@ def n_params(cfg: ModelConfig) -> int:
 def describe(cfg: ModelConfig) -> str:
     name = size_name(cfg)
     return (f"{name + ': ' if name else ''}{cfg.n_layer} layers, {cfg.n_embd} wide, {cfg.n_head} heads, "
-            f"reads {cfg.block_size} tokens at once, {n_params(cfg) / 1e6:.1f} million weights")
+            f"reads {cfg.block_size} tokens at once, {_count(n_params(cfg))} weights")
 
 
 def head_layout(H: int, Hk: int, H2: int, Hk2: int) -> tuple[dict[int, int], list[Optional[int]]]:
@@ -173,7 +180,7 @@ def target_config(old: ModelConfig, to: Optional[str] = None, layers: Optional[i
         return new
     for name in SIZES:                           # the next size up that this model can reach
         cand = replace(old, **{k: v for k, v in PRESETS[name].items() if k != "vocab_size"})
-        if n_params(old) < n_params(cand) <= 8 * n_params(old):     # a step, not a leap (tiny to small is 6.4 times)
+        if n_params(old) < n_params(cand) <= STEP_LIMIT * n_params(old):     # a step, not a leap
             try:
                 check(old, cand)
                 return cand
@@ -389,6 +396,12 @@ def grow_checkpoint(model_dir: Path, to: Optional[str] = None, seed: int = 0, **
         raise GrowError("GaugeLM has not been trained yet. Train it first; it can be grown afterwards.")
     old = GaugeLM.load(model_dir, device="cpu")
     new_cfg = target_config(old.cfg, to, **shape)
+    from .sizing import SizeError, ensure_fits
+
+    try:
+        ensure_fits(new_cfg, "cpu", training=True)     # say so now, not after an hour of copying weights
+    except SizeError as e:
+        raise GrowError(str(e)) from None
     new = grow(old, new_cfg, seed=seed)
     diff = difference(old, new)
     if not diff <= TOLERANCE:                     # also catches NaN
@@ -405,7 +418,7 @@ def grow_checkpoint(model_dir: Path, to: Optional[str] = None, seed: int = 0, **
     log.info("grew GaugeLM from %s to %s (difference %.3g)", describe(old.cfg), describe(new_cfg), diff)
     return {**record, "before": describe(old.cfg), "after": describe(new_cfg), "size": size_name(new_cfg),
             "times": round(new.n_params() / max(1, old.n_params()), 1), "backup_path": str(backup),
-            "message": (f"GaugeLM grew from {old.n_params() / 1e6:.1f} to {new.n_params() / 1e6:.1f} million weights "
+            "message": (f"GaugeLM grew from {_count(old.n_params())} to {_count(new.n_params())} weights "
                         f"({describe(new_cfg)}). It kept everything it had learned: its answers are unchanged "
                         f"(checked, difference {diff:.1g}). The new capacity is empty until it trains, so start "
                         f"training again. A bigger model is slower to train and to write with.")}
@@ -644,7 +657,7 @@ def shrink_checkpoint(model_dir: Path, docs: list[tuple[str, str]], to: Optional
     worse = small_loss / big_loss - 1.0 if big_loss > 0 else float("nan")
     return {**record, "after": describe(small_cfg), "size": size_name(small_cfg), "backup_path": str(backup),
             "seconds": round(time.monotonic() - t0, 1),
-            "message": (f"GaugeLM shrank from {big.n_params() / 1e6:.1f} to {small.n_params() / 1e6:.1f} million weights "
+            "message": (f"GaugeLM shrank from {_count(big.n_params())} to {_count(small.n_params())} weights "
                         f"({describe(small_cfg)}). The bigger model taught it for {done} steps. "
                         + (f"It is about {worse:.0%} less sure of the text than the bigger model was: a smaller "
                            "model holds less. " if worse > 0.005

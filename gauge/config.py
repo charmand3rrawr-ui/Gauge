@@ -71,6 +71,7 @@ class NativeConfig(BaseModel):
     # The starter rows written for Gauge by Claude (see native/seed_lessons.py). Off until you switch it on:
     # whether training on an AI provider's output suits your use is your decision.
     seed_data: bool = False
+    memory_check: bool = True  # refuse a size that will not fit in the memory Gauge can see; off = let the machine decide
 
 
 class ComputeConfig(BaseModel):

@@ -87,6 +87,7 @@ SWITCHES: list[Switch] = [
     Switch("library.finder_books", "Novels to add each time", "int", "How many novels the finder adds per run.", "Learning", 1, 10),
     Switch("library.finder_max_mb", "Most text the finder may add (MB)", "float", "A ceiling on how much the finder downloads in total.", "Learning", 10, 5000),
     Switch("native.seed_data", "Use the starter lessons", "bool", "Train GaugeLM on the small starter set that ships with Gauge: original scenes and worked examples of Gauge's own tasks, written for this project by Claude, an AI model made by Anthropic. Anthropic's terms limit using Claude's output to train AI models that compete with its services; whether your use is within them is your decision.", "Model"),
+    Switch("native.memory_check", "Check a size fits before building it", "bool", "Refuse to create or grow GaugeLM to a size that will not fit in the memory Gauge can see. Switch off only on a machine whose memory Gauge cannot measure.", "Model"),
     Switch("native.tutor", "Tutor GaugeLM", "bool", "At the start of a training session, have a teacher model mark and correct GaugeLM's own attempts, and practise most what it is marked lowest on.", "Model"),
     Switch("native.device", "GaugeLM device", "choice", "auto picks a GPU when one is usable.", "Model", choices=["auto", "cuda", "cpu"]),
     Switch("compute.auto_device", "Switch to a GPU when one appears", "bool", "The daemon re-scans every cycle.", "Model"),
@@ -176,6 +177,10 @@ def set_value(cfg: GaugeConfig, key: str, value: Any, save: bool = True) -> Any:
     setattr(obj, parts[-1], v)
     if key == "native.device":
         cfg.llm.native_device = v
+    if key == "native.memory_check":
+        from .native import sizing
+
+        sizing.CHECK = bool(v)
     if key == "write.effort":                # one dial over several settings
         from .write import effort
 

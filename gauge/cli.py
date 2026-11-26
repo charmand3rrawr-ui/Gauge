@@ -52,6 +52,9 @@ def main(ctx: click.Context, data_dir: Optional[str], verbose: bool, dry_run: bo
     from .compute import devices as _devices
 
     _devices.apply_environment(ctx.obj.cfg)      # only the chosen graphics cards are visible to this program
+    from .native import sizing as _sizing
+
+    _sizing.CHECK = bool(ctx.obj.cfg.native.memory_check)
     if ctx.obj.cfg.logs.structured:
         from .ops.logs import remove_structured_log, setup_structured_log
 
@@ -2623,7 +2626,7 @@ def _native_docs(c: Ctx, since: Optional[str] = None):
 
 
 @native.command("train")
-@click.option("--size", type=click.Choice(["tiny", "small", "medium", "large"]), default=None, help="Preset architecture.")
+@click.option("--size", type=click.Choice(["tiny", "small", "medium", "large", "2b", "20b", "160b", "1t", "5t", "20t"]), default=None, help="Preset architecture.")
 @click.option("--steps", type=int, default=None)
 @click.option("--layers", type=int, default=None)
 @click.option("--embd", type=int, default=None)
@@ -2727,7 +2730,7 @@ def native_continue(c: Ctx, steps, minutes) -> None:
 
 
 @native.command("grow")
-@click.option("--to", type=click.Choice(["small", "medium", "large"]), default=None, help="The size to grow into. Default: the next size up.")
+@click.option("--to", type=click.Choice(["tiny", "small", "medium", "large", "2b", "20b", "160b", "1t", "5t", "20t"][1:]), default=None, help="The size to grow into. Default: the next size up.")
 @click.option("--layers", type=int, default=None)
 @click.option("--width", type=int, default=None, help="A multiple of the head size (64 for the named sizes).")
 @click.option("--heads", type=int, default=None)
@@ -2797,7 +2800,7 @@ def native_grow(c: Ctx, to, layers, width, heads, kv_heads, context, vocab, plan
 
 
 @native.command("shrink")
-@click.option("--to", type=click.Choice(["tiny", "small", "medium"]), default=None,
+@click.option("--to", type=click.Choice(["tiny", "small", "medium", "large", "2b", "20b", "160b", "1t", "5t", "20t"][:-1]), default=None,
               help="The size to shrink into. Default: the shape it had before it last grew, else the next size down.")
 @click.option("--layers", type=int, default=None)
 @click.option("--width", type=int, default=None)
@@ -2855,21 +2858,44 @@ def native_sample(c: Ctx, prompt: str, tokens: int, temperature: float) -> None:
 
 @native.command("presets")
 def native_presets() -> None:
-    """The preset sizes and their parameter counts."""
-    from .native.evaluate import preset_table
+    """Every named size, with what it takes to hold, to train, and to feed."""
+    from .native import sizing
 
-    table = Table(title="GaugeLM presets")
-    for col in ("size", "layers", "embd", "heads", "kv", "block", "vocab", "params (M)"):
+    table = Table(title="GaugeLM sizes")
+    for col in ("size", "layers", "width", "heads", "reads", "weights", "to hold", "to train", "text worth training on"):
         table.add_column(col)
-    for r in preset_table():
-        table.add_row(r["size"], str(r["n_layer"]), str(r["n_embd"]), str(r["n_head"]), str(r["n_kv_head"]), str(r["block_size"]),
-                      str(r["vocab_size"]), str(r["params_millions"]))
+    for r in sizing.ladder():
+        table.add_row(r["size"], str(r["layers"]), str(r["width"]), str(r["heads"]), f"{r['context']:,}", sizing.count(r["weights"]),
+                      sizing.memory(r["hold_bytes"]), sizing.memory(r["train_bytes"]), sizing.count(r["tokens"]) + " tokens")
     console.print(table)
-    console.print("tiny trains on a CPU in hours; small needs a day on CPU or an hour on a GPU; medium and large want a GPU (pip install cupy-cuda12x).")
+    console.print("tiny trains on a processor in hours; small wants a graphics card; medium and large need a good one. "
+                  "The sizes from 2b up are beyond any home computer: the code is the same, the machine is the limit.")
+    console.print("What one size takes, in a sentence: gauge native needs SIZE")
+
+
+@native.command("needs")
+@click.argument("size")
+def native_needs(size: str) -> None:
+    """What a size takes: memory to hold and train it, text worth training it on, and the work involved."""
+    from .native import PRESETS, ModelConfig, sizing
+
+    if size not in PRESETS:
+        console.print(f"[red]no size called {size!r}[/]; sizes: {', '.join(PRESETS)}")
+        sys.exit(1)
+    cfg = ModelConfig(**PRESETS[size])
+    n = sizing.needs(cfg)
+    console.print(f"[bold]{size}[/]: {cfg.n_layer} layers, {cfg.n_embd:,} wide, {cfg.n_head} heads, reads {cfg.block_size:,} tokens at once.")
+    console.print(n["line"])
+    console.print(f"Work to train it once through that text: about {n['operations']:.1e} operations.")
+    have = sizing.available_bytes("cpu")
+    if have:
+        fits = n["train_bytes"] <= have
+        console.print(f"This computer has {sizing.memory(have)}: " + ("enough to train it." if fits else
+                      f"about {n['train_bytes'] / have:,.0f} times too little to train it."))
 
 
 @native.command("bench")
-@click.option("--size", type=click.Choice(["tiny", "small", "medium", "large"]), default="tiny", show_default=True)
+@click.option("--size", type=click.Choice(["tiny", "small", "medium", "large", "2b", "20b", "160b", "1t", "5t", "20t"]), default="tiny", show_default=True)
 @click.option("--device", type=click.Choice(["auto", "cuda", "cpu"]), default=None)
 @click.option("--batch", type=int, default=4, show_default=True)
 @click.pass_obj
