@@ -262,6 +262,22 @@ limit; the computer is.
 These get the most out of your computer. They do not make a home computer into one of the giant AI
 systems; nothing can.
 
+### Free AI helpers (optional)
+
+Some companies let anyone with a free account send a limited number of requests a day to large AI
+models. Gauge can link to them so they **teach GaugeLM** and **check what it writes**.
+
+1. Make a free account and a key at one of them: Groq (console.groq.com), OpenRouter (openrouter.ai),
+   Google Gemini (aistudio.google.com) or Mistral (console.mistral.ai).
+2. In Studio: **Change the AI**, then **Free helpers...**
+3. Choose the helper, paste the key, press **Connect helper**, and answer the question it asks.
+
+They are free but not private: passages from your library and GaugeLM's writing are sent to them, and
+some free plans keep what you send. Gauge sends each one only a set number of requests a day and
+leaves it alone when it says it has had too many. After every chapter GaugeLM writes, a checker marks
+it and points at the faults; **Story > Check this chapter with another AI** does the same for any
+chapter. Full details: [docs/HELPERS.md](../docs/HELPERS.md).
+
 ### Claude as a teacher (optional, paid)
 
 GaugeLM can also be taught by **Claude**, Anthropic's model, which is far stronger than anything your

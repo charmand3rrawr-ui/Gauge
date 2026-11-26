@@ -145,7 +145,7 @@ def test_the_report_card_shows_marks_at_first_and_now(cfg):
     for _ in range(2):
         school.session(cfg, [TEXT], want=9, pool=[teacher], student=_Model("gaugelm", reply="try"))
     card = school.report_card(cfg.models_dir / "datasets")
-    assert card["sessions"] == 2 and card["counts"] == {"answers": 6, "tutor": 6, "lessons": 6, "words": 0}
+    assert card["sessions"] == 2 and card["counts"] == {"answers": 6, "tutor": 6, "lessons": 6, "words": 0, "checks": 0}
     assert "at first" in card["line"] and "Weakest:" in card["line"] and len(card["rows"]) >= 3
     assert all(r["first"] in (2.0, 8.0) and r["practised"] >= 1 for r in card["rows"])
 

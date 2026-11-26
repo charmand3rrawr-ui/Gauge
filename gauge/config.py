@@ -31,6 +31,19 @@ class ClaudeConfig(BaseModel):
     fallbacks: bool = True  # let Anthropic re-run a declined request on the model it recommends for that case
 
 
+class HelpersConfig(BaseModel):
+    """Free AI helpers: hosted models with a free allowance that can teach GaugeLM and check its work
+    (docs/HELPERS.md). None is used until you connect it and answer its question yourself."""
+
+    # id -> {"model": ..., "terms_ok": bool, "teach": bool, "check": bool, "daily": int, "base_url": (ones you added)}
+    providers: dict[str, dict] = Field(default_factory=dict)
+    daily_requests: int = 0  # the most requests per helper per day; 0 = each helper's own careful default
+    rest_minutes: int = 30  # how long a helper that says "too many requests" is left alone
+    check_after_chapter: bool = True  # when GaugeLM writes a chapter, have a checker read it (needs a helper or a local model)
+    check_pieces: int = 3  # how many passages of a chapter are checked
+    check_panel: int = 2  # how many different checkers read each passage, when there are that many
+
+
 class LLMConfig(BaseModel):
     """Local LLM endpoint settings. Ollama is the default; any OpenAI-compatible server works."""
 
@@ -354,6 +367,7 @@ class GaugeConfig(BaseModel):
     logs: LogsConfig = Field(default_factory=LogsConfig)
     library: LibraryConfig = Field(default_factory=LibraryConfig)
     claude: ClaudeConfig = Field(default_factory=ClaudeConfig)
+    helpers: HelpersConfig = Field(default_factory=HelpersConfig)
 
     @model_validator(mode="after")
     def _share_claude_settings(self) -> GaugeConfig:

@@ -131,8 +131,13 @@ Qwen (most sizes), Mistral and Phi are Apache-2.0 or MIT. Llama and Gemma have t
 for learning on your own computer, worth reading before you share a model trained with them.
 `gauge native teachers` shows this for whatever is installed. It is a guide, not legal advice.
 
-**Teachers that are not on your computer.** Free hosted models can teach too, through any
-OpenAI-compatible address, but they are never used unless you list them yourself, because excerpts of
+**Free hosted helpers.** Services with a free allowance (Groq, OpenRouter's free models, Google Gemini,
+Mistral, or any OpenAI-compatible address) can be connected from Studio or with `gauge helpers connect`.
+They take turns with the local teachers, check what GaugeLM writes, are sent only so many requests a
+day, and are never used until you connect them and answer their question. See [HELPERS.md](HELPERS.md).
+
+**Teachers listed by hand.** The older way still works: any OpenAI-compatible address in the settings,
+never used unless you list it yourself, because excerpts of
 your library are sent to them and because some providers do not allow their answers to be used for
 training another model:
 

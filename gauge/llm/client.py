@@ -369,6 +369,14 @@ class FakeLLM:
             w = m.group(1) if m else "word"
             return (f"Here \"{w}\" means the thing the passage is about.\n1. She did not trust the {w}.\n"
                     f"2. Nobody had seen a {w} like it.\n3. The {w} was gone by morning.")
+        if "a student writer wrote this passage of a story" in low:      # checking GaugeLM's work (native/checkwork.py)
+            passage = prompt.split("story:\n\n", 1)[-1].split("\n\nCheck it.", 1)[0]
+            words = passage.split()
+            return json.dumps({"marks": {"clarity": 5, "grammar": 6, "sense": 4, "interest": 5},
+                               "problems": [{"quote": " ".join(words[:3]), "problem": "The opening words do not say who is acting.",
+                                             "fix": "Name her first."},
+                                            {"quote": "words that are not in the passage at all", "problem": "Invented.", "fix": ""}],
+                               "corrected": "Rin moved first. " + " ".join(words[3:])})
         if "a student writer was set this task" in low:
             return "mark: 4\nThe seal was whole again. Rin did not wait to learn why; she ran, and the footsteps ran with her."
         if "the author says:" in low and not json_mode:

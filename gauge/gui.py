@@ -65,7 +65,14 @@ ENGINE_NOTE = ("GaugeLM is Gauge's own small model. It has to be trained before 
                "stories, and from the downloaded model, which teaches it worked examples each time training starts. "
                "So it keeps learning while the downloaded model does the writing. Training takes hours in total: "
                "Start training whenever you like, Pause training when you need the computer, and it carries on from "
-               "where it stopped. Press Claude... to let Anthropic's Claude teach it as well (paid, and optional).")
+               "where it stopped. Free helpers... connects free hosted models that teach it and check its writing; "
+               "Claude... lets Anthropic's Claude teach it as well (paid). Both are optional.")
+HELPERS_NOTE = ("Some companies let anyone with a free account send a limited number of requests a day to large AI models. "
+                "Gauge can use them to teach GaugeLM (they take turns with the models on this computer) and to check what "
+                "GaugeLM writes. They are free but not private: passages from your library and GaugeLM's writing are sent to "
+                "them. You get the key yourself from the provider's website. Gauge keeps each key in a file in your user "
+                "folder, sends each helper only a set number of requests a day, and leaves it alone when it says it has had "
+                "too many.")
 CLAUDE_NOTE = ("Claude is Anthropic's model. It is far stronger than any model this computer can run, so it makes a much "
                "better teacher for GaugeLM, and it can write for Gauge too. It is also the one part of Gauge that is not free "
                "and not private: every request is paid for from your Anthropic account, and whatever is in a request is sent "
@@ -367,6 +374,103 @@ class StudioController:
         msg = (f"Removed {gone} lesson{'' if gone == 1 else 's'} written by Claude. GaugeLM will not train on them again; "
                "what it already learned from them stays in it." if gone else "There were no lessons from Claude to remove.")
         return {**self.claude_status(), "removed": gone, "message": msg}
+
+    # ---- free AI helpers: hosted models with a free allowance -------------------------------
+    def helpers(self) -> list[dict[str, Any]]:
+        """Every free helper, connected or not, with a line saying where it stands."""
+        from .llm import helpers
+
+        return helpers.status(self.cfg)
+
+    def helper_models(self, pid: str) -> list[str]:
+        """The models a connected helper offers for free, Gauge's best guess first. Asking costs nothing."""
+        from .llm import helpers
+
+        key = helpers.key_for(pid, self.cfg)
+        return helpers.list_models(pid, key, self.cfg)["models"] if key else []
+
+    def helper_connect(self, pid: str, key: str = "", base_url: str = "", model: str = "") -> dict[str, Any]:
+        from .llm import helpers
+
+        try:
+            res = helpers.connect(self.cfg, pid, key, base_url=base_url, model=model)
+        except ValueError as e:
+            res = {"ok": False, "message": str(e)}
+        return {**res, "rows": self.helpers()}
+
+    def helper_question(self, pid: str) -> str:
+        from .llm import helpers
+
+        return helpers.ask_text(self.cfg, pid)
+
+    def helper_allow(self, pid: str, yes: bool) -> dict[str, Any]:
+        """The author's answer to the helper's question. Only a yes lets Gauge send it anything."""
+        from .llm import helpers
+
+        return {**helpers.allow(self.cfg, pid, yes), "rows": self.helpers()}
+
+    def helper_set(self, pid: str, teach: Optional[bool] = None, check: Optional[bool] = None, model: Optional[str] = None,
+                   daily: Optional[int] = None) -> dict[str, Any]:
+        from .llm import helpers
+
+        return {**helpers.set_role(self.cfg, pid, teach=teach, check=check, model=model, daily=daily), "rows": self.helpers()}
+
+    def helper_disconnect(self, pid: str) -> dict[str, Any]:
+        from .llm import helpers
+
+        return {**helpers.disconnect(self.cfg, pid), "rows": self.helpers()}
+
+    def helper_try(self, pid: str) -> dict[str, Any]:
+        """One short request, to see the helper answer. It counts as one of today's requests."""
+        from .llm import helpers
+
+        row = next((r for r in self.helpers() if r["id"] == pid), None)
+        if row is None or not row["connected"]:
+            return {"ok": False, "message": "Connect it first."}
+        if not row["on"]:
+            return {"ok": False, "message": f"{row['name']} is switched off. Switch it on first; nothing is sent to it before that."}
+        try:
+            said = helpers.HelperLLM(self.cfg, pid, row["model"]).generate(
+                "Write one sentence that could open a story about a lighthouse keeper.", max_tokens=60, purpose="helper:try")
+        except Exception as e:
+            return {"ok": False, "message": str(e)}
+        return {"ok": bool(said), "message": f"{row['name']} answered: {said[:240]}" if said else f"{row['name']} answered with nothing."}
+
+    def helper_forget(self, pid: str) -> dict[str, Any]:
+        """Remove every lesson a helper wrote from what GaugeLM trains on."""
+        from .native import school
+
+        gone = sum(school.forget_teacher(self.cfg.models_dir / "datasets", pid + ":").values())
+        return {"removed": gone, "message": f"Removed {gone} lesson{'' if gone == 1 else 's'} written by that helper."
+                if gone else "That helper has written no lessons."}
+
+    def check_chapter(self, name: Optional[str], n: Optional[int] = None) -> dict[str, Any]:
+        """Have a chapter checked by another model: marks, the faults it can point at, and corrections kept as lessons."""
+        from .native import NativeTrainer, checkwork
+        from .write.project import Project
+
+        if not name:
+            return {"ok": False, "message": "Open or start a story first."}
+        project = Project(self.cfg.projects_dir, name)
+        numbers = [c[0] for c in self.chapters(name)]
+        if not numbers:
+            return {"ok": False, "message": "There is no chapter to check yet."}
+        n = int(n) if n else numbers[-1]
+        text = project.read_chapter(n)
+        if not text:
+            return {"ok": False, "message": f"Chapter {n} has not been written yet."}
+        res = checkwork.check_text(self.cfg, text, source=f"{name} chapter {n}",
+                                   step=int(NativeTrainer(self.cfg.native_dir).status().get("step", 0) or 0))
+        if res["ok"]:
+            saved = checkwork.save_report(project.dir, n, res)
+            res["report"] = checkwork.report(res)
+            res["message"] = f"Chapter {n}. " + res["message"] + (f" The full check is in {saved}." if saved else "")
+        return res
+
+    def check_trend(self) -> str:
+        from .native import checkwork
+
+        return checkwork.trend(self.cfg.models_dir / "datasets")["line"]
 
     def use_claude(self, on: bool = True) -> dict[str, Any]:
         """Make Claude the writer (on), or go back to the downloaded model (off)."""
@@ -883,6 +987,13 @@ class StudioController:
                 "seconds": round(res.timings.get("total", 0.0)), "gaugelm": "", "words": res.words,
                 "words_asked": res.words_asked}
         info["record"] = self.record_line(name, res.number)
+        info["check"] = ""
+        if self.cfg.llm.provider == "native" and self.cfg.helpers.check_after_chapter:
+            try:  # GaugeLM cannot judge its own writing: another model reads it. A bonus; never lose the chapter over it.
+                checked = self.check_chapter(name, res.number)
+                info["check"] = checked["message"] if checked.get("ok") else ""
+            except Exception as e:
+                log.warning("could not have the chapter checked: %s", e)
         # GaugeLM keeps learning while another model writes: the chapter just written is new material for it.
         after = self.cfg.native.after_chapter_minutes
         if after > 0:
@@ -1433,6 +1544,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
                 chapters_box.insert("end", f"Chapter {n}: {title}")
 
     def show_chapter(n: int) -> None:
+        state["chapter"] = n
         reader.delete("1.0", "end")
         reader.insert("1.0", ctl.read(state["project"], n))
 
@@ -1503,7 +1615,8 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
             show_chapter(info["number"])
             show_direction()                    # the instruction was for that chapter; it is used up now
             status_var.set(f"Chapter {info['number']} done in {info['seconds']}s: {info['words']:,} words (asked for "
-                           f"{info['words_asked']:,}), score {info['score']}. {info.get('record', '')} {info.get('gaugelm', '')}".strip())
+                           f"{info['words_asked']:,}), score {info['score']}. {info.get('record', '')} {info.get('check', '')} "
+                           f"{info.get('gaugelm', '')}".strip())
 
         run_bg(lambda: ctl.write_next(state["project"], asked), done,
                f"Writing the next chapter, about {asked:,} words... this takes a few minutes.")
@@ -1796,6 +1909,134 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     def on_pause_training() -> None:
         status_var.set(ctl.pause_training()["message"])
 
+    def on_check() -> None:
+        """Have the chapter on screen checked by another model, and show what it found."""
+        name = state["project"]
+        if not name:
+            messagebox.showinfo("Gauge", "Open or start a story first.")
+            return
+
+        def done(res: dict[str, Any]) -> None:
+            status_var.set(res["message"])
+            if res.get("ok"):
+                view = tk.Toplevel(root)
+                view.title("The check")
+                view.geometry(_fit(root, 760, 520))
+                text = scrolledtext.ScrolledText(view, wrap="word", font=mid, padx=12, pady=10)
+                text.pack(fill="both", expand=True)
+                text.insert("1.0", res.get("report", res["message"]))
+                text.configure(state="disabled")
+
+        run_bg(lambda: ctl.check_chapter(name, state.get("chapter")), done, "Having the chapter checked by another model...")
+
+    def on_helpers(after: Optional[Callable[[], None]] = None) -> None:
+        """Connect free hosted models that teach GaugeLM and check its work."""
+        win, frame, alive, note, start = dialog("Free AI helpers", 800, 660)
+        ttk.Label(frame, text="Free AI helpers", font=huge).pack(anchor="w")
+        ttk.Label(frame, text=HELPERS_NOTE, wraplength=740, font=small).pack(anchor="w", pady=(2, 8))
+        box = tk.Listbox(frame, font=small, height=6)
+        box.pack(fill="x", pady=(0, 6))
+        trend_var = tk.StringVar(value=ctl.check_trend())
+        ttk.Label(frame, textvariable=trend_var, wraplength=740, font=small).pack(anchor="w", pady=(0, 6))
+        pick_row = ttk.Frame(frame)
+        pick_row.pack(fill="x", pady=(0, 6))
+        key_row = ttk.Frame(frame)
+        key_row.pack(fill="x", pady=(0, 6))
+        model_row = ttk.Frame(frame)
+        model_row.pack(fill="x", pady=(0, 6))
+        role_row = ttk.Frame(frame)
+        role_row.pack(fill="x", pady=(0, 6))
+        last_row = ttk.Frame(frame)
+        last_row.pack(fill="x", pady=(0, 6))
+        ttk.Label(frame, textvariable=note, wraplength=740, font=mid).pack(anchor="w", pady=(4, 0))
+        rows = ctl.helpers()
+        names = {r["name"]: r["id"] for r in rows}
+        pick_var = tk.StringVar(value=rows[0]["name"])
+        key_var = tk.StringVar(value="")
+        model_var = tk.StringVar(value=rows[0]["model"])
+        about_var = tk.StringVar(value="")
+        model_box = ttk.Combobox(model_row, textvariable=model_var, values=[], width=54)
+
+        def pid() -> str:
+            return names.get(pick_var.get(), str(pick_var.get()).strip().lower())
+
+        def refresh(_evt: Any = None) -> None:
+            if alive():
+                now = ctl.helpers()
+                box.delete(0, "end")
+                for r in now:
+                    box.insert("end", r["line"])
+                mine = next((r for r in now if r["id"] == pid()), None)
+                if mine:
+                    about_var.set(mine["free"] + " " + mine["keeps"] + (f" Get a key: {mine['keys']}" if mine["keys"] else ""))
+                    if mine["model"]:
+                        model_var.set(mine["model"])
+                trend_var.set(ctl.check_trend())
+            if after:
+                after()
+
+        def on_connect() -> None:
+            key, which = key_var.get() or "", pid()
+            key_var.set("")                              # the key is not left on the screen
+
+            def work() -> dict[str, Any]:
+                res = ctl.helper_connect(which, key)
+                if res.get("ok"):
+                    root.after(0, lambda: model_box.configure(values=res["models"]))
+                return res
+
+            def then() -> None:
+                refresh()
+                mine = next((r for r in ctl.helpers() if r["id"] == which), None)
+                if mine and mine["connected"] and not mine["on"]:
+                    note.set(ctl.helper_allow(which, messagebox.askyesno("Switch it on", ctl.helper_question(which), parent=win))["message"])
+                    refresh()
+
+            start(work, "Trying the key... this asks the provider which models it offers, which is free.", then)
+
+        def on_disconnect() -> None:
+            note.set(ctl.helper_disconnect(pid())["message"])
+            refresh()
+
+        def on_model() -> None:
+            note.set(ctl.helper_set(pid(), model=model_var.get())["message"])
+            refresh()
+
+        def on_role(job: str) -> None:
+            mine = next((r for r in ctl.helpers() if r["id"] == pid()), None)
+            if not mine or not mine["connected"]:
+                note.set("Connect it first: paste its key and press Connect.")
+                return
+            if not mine["on"]:
+                note.set(ctl.helper_allow(pid(), messagebox.askyesno("Switch it on", ctl.helper_question(pid()), parent=win))["message"])
+            else:
+                note.set(ctl.helper_set(pid(), **{job: not mine[job]})["message"])
+            refresh()
+
+        def on_forget() -> None:
+            if messagebox.askyesno("Remove its lessons", "Remove every lesson this helper wrote from what GaugeLM trains on?"
+                                   "\n\nWhat GaugeLM already learned from them stays in it.", parent=win):
+                note.set(ctl.helper_forget(pid())["message"])
+
+        ttk.Label(pick_row, text="Helper", font=mid).pack(side="left")
+        chooser = ttk.Combobox(pick_row, textvariable=pick_var, values=list(names), state="readonly", width=18)
+        chooser.pack(side="left", padx=6)
+        chooser.bind("<<ComboboxSelected>>", refresh)
+        ttk.Label(pick_row, textvariable=about_var, wraplength=520, font=small).pack(side="left", padx=(6, 0))
+        ttk.Label(key_row, text="Its key", font=mid).pack(side="left")
+        ttk.Entry(key_row, textvariable=key_var, show="*", width=44).pack(side="left", padx=6)
+        ttk.Button(key_row, text="Connect helper", style="Mid.TButton", command=on_connect).pack(side="left", padx=(0, 6))
+        ttk.Button(key_row, text="Disconnect helper", style="Mid.TButton", command=on_disconnect).pack(side="left")
+        ttk.Label(model_row, text="Model", font=mid).pack(side="left")
+        model_box.pack(side="left", padx=6)
+        ttk.Button(model_row, text="Use this model", style="Mid.TButton", command=on_model).pack(side="left")
+        for row, pairs_ in ((role_row, (("Teaching on / off", lambda: on_role("teach")), ("Checking on / off", lambda: on_role("check")),
+                                        ("Try it", lambda: start(lambda: ctl.helper_try(pid()), "Asking it for one sentence...", refresh)))),
+                            (last_row, (("Check the chapter I am reading", on_check), ("Remove its lessons", on_forget)))):
+            for text, cmd in pairs_:
+                ttk.Button(row, text=text, style="Mid.TButton", command=cmd).pack(side="left", padx=(0, 8))
+        refresh()
+
     def on_claude(after: Optional[Callable[[], None]] = None) -> None:
         """Connect Claude, let it teach GaugeLM, and see what it has cost."""
         from .llm import claude as _claude
@@ -1997,6 +2238,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
 
         ttk.Button(choose, text="Find a stronger model", style="Mid.TButton", command=on_stronger).pack(side="left", padx=(8, 0))
         ttk.Button(choose, text="Claude...", style="Mid.TButton", command=lambda: on_claude(refresh)).pack(side="left", padx=(8, 0))
+        ttk.Button(train, text="Free helpers...", style="Mid.TButton", command=lambda: on_helpers(refresh)).pack(side="left", padx=(10, 0))
         ttk.Button(train, text="How well does it understand?", style="Mid.TButton",
                    command=lambda: start(ctl.understanding, "Measuring how GaugeLM uses context...")).pack(side="left", padx=(10, 0))
         for row, pair in ((grow_row, (("Grow GaugeLM", on_grow), ("Grow the vocabulary", on_vocab))),
@@ -2157,9 +2399,10 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         ("Story", [("Start my story", on_start), ("Write the next chapter", on_write),
                    ("Write the whole novel...", on_novel), ("Open another story...", on_open),
                    ("Ask Gauge...", lambda: chat_entry.focus_set()),
-                   ("Talk to a character...", on_chat), ("Save story as one file", on_export)]),
+                   ("Talk to a character...", on_chat), ("Check this chapter with another AI", on_check),
+                   ("Save story as one file", on_export)]),
         ("Teach", [("Add books or your own writing...", on_teach), ("Teach character building...", on_characters),
-                   ("Change the AI that writes...", on_engine),
+                   ("Change the AI that writes...", on_engine), ("Free AI helpers...", on_helpers),
                    ("Start training GaugeLM", lambda: start_training(None, UNTIL_PAUSED)),
                    ("Pause training", on_pause_training)]),
         ("Settings", [("Switches...", on_switches), ("Devices (processor and graphics cards)...", on_switches)]),

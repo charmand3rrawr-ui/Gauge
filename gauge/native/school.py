@@ -16,6 +16,9 @@ model taught, one way (`distill.py`: the downloaded model answers Gauge's tasks)
 * **Word study.** Gauge measures which words in your library GaugeLM is most surprised by, and the
   teacher explains each one in the sentence where your library uses it, then uses it three more ways.
 
+* **Free hosted helpers, if you connect them.** Services with a free allowance (Groq, OpenRouter's free
+  models, Mistral, and others; docs/HELPERS.md) take turns with the local teachers. Each is asked only so
+  many times a day, and hands over when it says "too many requests".
 * **Claude, if you connect it.** Anthropic's model can lead the school (docs/CLAUDE.md). It is paid and
   outside this computer, so it teaches only after you connect a key, switch its teaching on and accept
   that decision, and only up to a daily spending limit. Then the free teachers carry on.
@@ -42,7 +45,8 @@ from .distill import TASKS
 log = logging.getLogger(__name__)
 
 STATE = "school_state.json"
-FILES = {"answers": "distill.jsonl", "tutor": "tutor.jsonl", "lessons": "lessons.jsonl", "words": "words.jsonl"}
+FILES = {"answers": "distill.jsonl", "tutor": "tutor.jsonl", "lessons": "lessons.jsonl", "words": "words.jsonl",
+         "checks": "checks.jsonl"}
 
 # Licence of the published weights, by the start of the model's name. "open" means a standard permissive
 # licence (Apache-2.0 or MIT). The others have their own terms: fine for learning on your own computer,
@@ -74,6 +78,8 @@ class Teacher:
     open_licence: bool
     where: str = "this computer"
     lead: bool = False          # a lead teacher takes every session while it can; the others take turns when it cannot
+    teach: bool = True          # its answers may be kept as lessons (false: it only checks GaugeLM's work)
+    helper: str = ""            # the id of the free hosted helper it is, when it is one
 
     def line(self) -> str:
         return f"{self.name}  -  on {self.where}, {self.licence}"
@@ -107,7 +113,7 @@ def teachers(cfg: Any, check: bool = True) -> list[Teacher]:
     if base.provider == "fake":
         lead = claude_teacher(cfg)
         return ([lead] if lead is not None and (not check or _answers(lead)) else []) + \
-            [Teacher("fake", make_llm(base, "main"), "test model", True)]
+            [Teacher("fake", make_llm(base, "main"), "test model", True)] + helper_teachers(cfg)
     names: list[str] = []
     if base.provider == "ollama":
         from ..llm.client import OllamaLLM
@@ -135,11 +141,27 @@ def teachers(cfg: Any, check: bool = True) -> list[Teacher]:
         out.append(Teacher(str(extra.get("name") or extra["model"]), make_llm(ecfg, "main"),
                            str(extra.get("licence") or "the provider's terms"), False,
                            where=re.sub(r"^https?://", "", str(extra["base_url"])).split("/")[0]))
+    out += helper_teachers(cfg)
     lead = claude_teacher(cfg)
     if lead is not None:
         out.insert(0, lead)
     if check:
         out = [t for t in out if _answers(t)]
+    return out
+
+
+def helper_teachers(cfg: Any, job: str = "teach") -> list[Teacher]:
+    """The free hosted helpers the author connected and switched on for a job ('teach' or 'check'), that can be
+    asked right now: not resting after 'too many requests', and with requests left in today's allowance."""
+    if getattr(cfg, "helpers", None) is None or not cfg.helpers.providers:
+        return []
+    from ..llm import helpers
+
+    out = []
+    for pid, llm in helpers.working(cfg, job):
+        info, mine = helpers.provider(pid, cfg), helpers.entry(cfg, pid)
+        out.append(Teacher(f"{pid}:{llm.model}", llm, f"{info['name']}'s terms and the model's licence (own terms)", False,
+                           where=info["name"], teach=bool(mine.get("teach")), helper=pid))
     return out
 
 
@@ -378,7 +400,7 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
     leads = [t for t in pool if t.lead]
     others = [t for t in pool if not t.lead]
     teacher = leads[0] if leads else pool[state["sessions"] % len(pool)]
-    first, notes, declined = teacher, [], 0
+    first, notes, declined, gone = teacher, [], 0, []
     rng = random.Random(1000 + state["sessions"])
     stop = should_stop or (lambda: False)
     made = {"answers": 0, "tutored": 0, "lessons": 0}
@@ -451,13 +473,15 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
                 made["tutored"] += 1
         except Exception as e:
             log.warning("school: %s stumbled on a %s row (%s)", teacher.name, kind, e)
-            why = _lead_must_step_down(e, declined) if teacher.lead else ""
+            why = _lead_must_step_down(e, declined) if teacher.lead else _helper_must_step_down(e)
             declined += 1 if type(e).__name__ == "ClaudeRefused" else 0
-            if why:                              # a paid teacher that has to stop: the free ones carry on, or the session ends
+            if why:                              # a teacher that has to stop: another carries on, or the session ends
                 notes.append(why)
-                if not others:
+                gone.append(teacher)
+                left = [t for t in others if all(t is not g for g in gone)]
+                if not left:
                     break
-                teacher = others[state["sessions"] % len(others)]
+                teacher = left[state["sessions"] % len(left)]
         finally:
             if progress:
                 progress({"teacher": teacher.name, **made})
@@ -478,6 +502,11 @@ def session(cfg: Any, texts: list[str], want: int = 8, should_stop: Optional[Cal
         msg += " " + " ".join(notes)
     return {"rows": rows, **made, "teacher": first.name, "licence": first.licence, "marks": marks,
             "teachers": [t.name for t in pool], "notes": notes, "message": msg}
+
+
+def _helper_must_step_down(e: Exception) -> str:
+    """A free helper that has had its day's requests, or asked for a pause, hands over to the next teacher."""
+    return str(e) if type(e).__name__ == "HelperBusy" else ""
 
 
 def _lead_must_step_down(e: Exception, declined: int) -> str:

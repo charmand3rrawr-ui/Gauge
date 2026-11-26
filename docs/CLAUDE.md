@@ -121,6 +121,10 @@ Studio and `gauge claude teach on` set them together when you answer yes.
 
 ## Who teaches when
 
+Free hosted helpers (`docs/HELPERS.md`) can teach and check as well, at no charge. While Claude's
+teaching is on it also takes part in checking GaugeLM's chapters; those requests are paid for and count
+toward the daily limit.
+
 While Claude's teaching is on and today's limit has not been reached, Claude takes every school
 session. When the limit is reached (even in the middle of a session) the free models on your computer
 carry on, taking turns as before. Every row records who wrote it (`"teacher": "claude-opus-5-5"`) and

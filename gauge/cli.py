@@ -1336,6 +1336,105 @@ def claude_forget(c: Ctx, yes: bool) -> None:
     console.print(_claude_ctl(c).claude_forget()["message"])
 
 
+# ---------------------------------------------------------------------------- free AI helpers
+@main.group("helpers")
+def helpers_group() -> None:
+    """Free hosted AI models that teach GaugeLM and check its work (docs/HELPERS.md)."""
+
+
+@helpers_group.command("list")
+@click.pass_obj
+def helpers_list(c: Ctx) -> None:
+    """Every helper Gauge knows, what its free plan is, and where each stands."""
+    ctl = _claude_ctl(c)
+    for row in ctl.helpers():
+        console.print(("[green]" if row["on"] else "") + row["line"] + ("[/]" if row["on"] else ""), highlight=False)
+        if not row["connected"]:
+            console.print(f"    {row['keeps']}", highlight=False)
+    console.print(ctl.check_trend())
+    console.print("Connect one with: gauge helpers connect NAME   (for a service not listed: --url https://.../v1)")
+
+
+@helpers_group.command("connect")
+@click.argument("name")
+@click.option("--url", default="", help="For a service Gauge does not list: its OpenAI-style address, ending in /v1.")
+@click.option("--model", default="", help="Use this model instead of Gauge's pick.")
+@click.option("--yes", is_flag=True, help="Answer yes to the question about what is sent and under whose terms.")
+@click.pass_obj
+def helpers_connect(c: Ctx, name: str, url: str, model: str, yes: bool) -> None:
+    """Connect a helper: its key is typed at a hidden prompt, tried for free, and kept in your user folder.
+
+    Leave the prompt empty to use a key already saved, or the provider's usual environment variable."""
+    ctl = _claude_ctl(c)
+    pid = name.strip().lower()
+    key = click.prompt(f"Key for {name} (leave empty to use one already saved or set in the environment)",
+                       default="", hide_input=True, show_default=False)
+    res = ctl.helper_connect(pid, key, base_url=url, model=model)
+    console.print(("[green]" if res["ok"] else "[red]") + res["message"] + "[/]", highlight=False)
+    if not res["ok"]:
+        sys.exit(1)
+    if len(res["models"]) > 1:
+        console.print("Others on offer: " + ", ".join(res["models"][1:8]) + (" ..." if len(res["models"]) > 8 else ""), highlight=False)
+    if not yes:
+        console.print(ctl.helper_question(pid), markup=False, highlight=False)
+    console.print(ctl.helper_allow(pid, yes or click.confirm("Switch it on?", default=False))["message"], highlight=False)
+
+
+@helpers_group.command("set")
+@click.argument("name")
+@click.option("--teach", type=click.Choice(["on", "off"]), default=None, help="May its answers be kept as lessons for GaugeLM.")
+@click.option("--check", "check_", type=click.Choice(["on", "off"]), default=None, help="May it check what GaugeLM writes.")
+@click.option("--model", default=None, help="Which of its models to use (see: gauge helpers models NAME).")
+@click.option("--daily", type=int, default=None, help="The most requests to send it in a day (0 = Gauge's careful default).")
+@click.pass_obj
+def helpers_set(c: Ctx, name: str, teach: Optional[str], check_: Optional[str], model: Optional[str], daily: Optional[int]) -> None:
+    """Change what a connected helper does, its model, or how many requests a day it is sent."""
+    res = _claude_ctl(c).helper_set(name.strip().lower(), teach=None if teach is None else teach == "on",
+                                    check=None if check_ is None else check_ == "on", model=model, daily=daily)
+    console.print(res["message"], highlight=False)
+
+
+@helpers_group.command("models")
+@click.argument("name")
+@click.pass_obj
+def helpers_models(c: Ctx, name: str) -> None:
+    """The models a connected helper offers for free, Gauge's best guess first."""
+    models = _claude_ctl(c).helper_models(name.strip().lower())
+    console.print("\n".join(models) if models else "Nothing to show: connect it first, or it is not answering.", highlight=False)
+
+
+@helpers_group.command("try")
+@click.argument("name")
+@click.pass_obj
+def helpers_try(c: Ctx, name: str) -> None:
+    """Send one short request to see the helper answer (it counts as one of today's requests)."""
+    console.print(_claude_ctl(c).helper_try(name.strip().lower())["message"], highlight=False)
+
+
+@helpers_group.command("check")
+@click.argument("project")
+@click.option("--chapter", type=int, default=None, help="Which chapter (default: the latest).")
+@click.pass_obj
+def helpers_check(c: Ctx, project: str, chapter: Optional[int]) -> None:
+    """Have a chapter checked by another model: marks, the faults it can point at, and corrections kept as lessons."""
+    res = _claude_ctl(c).check_chapter(project, chapter)
+    console.print(res.get("report") or res["message"], markup=False, highlight=False)
+    if res.get("ok"):
+        console.print(res["message"], markup=False, highlight=False)
+
+
+@helpers_group.command("disconnect")
+@click.argument("name")
+@click.option("--forget", is_flag=True, help="Also remove every lesson it wrote from what GaugeLM trains on.")
+@click.pass_obj
+def helpers_disconnect(c: Ctx, name: str, forget: bool) -> None:
+    """Delete a helper's saved key and stop using it."""
+    ctl = _claude_ctl(c)
+    console.print(ctl.helper_disconnect(name.strip().lower())["message"], highlight=False)
+    if forget:
+        console.print(ctl.helper_forget(name.strip().lower())["message"], highlight=False)
+
+
 # ---------------------------------------------------------------------------- the chronicle
 @main.command("chronicle")
 @click.argument("project")
