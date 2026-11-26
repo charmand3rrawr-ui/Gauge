@@ -87,6 +87,16 @@ within about a tenth of the number you typed. Chapters can be from 100 to 20,000
 take proportionally longer. The switch **Write chapters to the asked length** turns the carrying-on
 off.
 
+## Several attempts, the best one kept
+
+A small model's writing varies a lot from one attempt to the next: one attempt invents people your
+story has never heard of, another repeats itself. With GaugeLM as the writer, Gauge now writes each
+piece of a chapter four times and keeps the attempt that stays closest to your story: fewest
+invented names, least repetition, nearest the length you asked for. It takes four times as long to
+write, which GaugeLM can afford. The switch **Attempts to choose between** changes the number (1 to
+8); with the downloaded model it stays at 1 unless you raise it, because that model is slow and
+steadier.
+
 ## Asking Gauge, and saying what happens next
 
 At the bottom of the right-hand side there is a box to type in, with two buttons.

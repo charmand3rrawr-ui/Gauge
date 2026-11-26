@@ -382,6 +382,26 @@ class WritePipeline:
         project.save()
         return n
 
+    def _prepare_selection(self, project: Project, roster: Roster, previous_texts: list[str], plan) -> None:
+        """Write several, keep the best: tell the drafter how many attempts to make and what the story's
+        canon is, so it can judge them without a model (see selection.py)."""
+        from ..features import chapter_features
+        from ..models import ChapterRecord
+        from .selection import known_names
+
+        d = self.drafter
+        d.best_of = max(1, int(self.cfg.write.best_of))
+        d.choices = []
+        if d.best_of <= 1:
+            return
+        d.known_names = known_names(project, roster, previous_texts[-6:])
+
+        def measure(text: str) -> float:
+            feats = chapter_features(ChapterRecord(novel_key="draft", index=plan.number, title=plan.title, text=text))
+            return float(self.critic._measured(feats)[0])
+
+        d.measure = measure
+
     def sync_characters(self, project: Project) -> list[str]:
         """Create agents for every character named in the bible that has no sheet yet."""
         roster = self.roster(project)
@@ -541,6 +561,7 @@ class WritePipeline:
                 council_text = (f"THE AUTHOR ASKED FOR THIS IN THIS CHAPTER (do it; it outranks the plan and every other note): "
                                 f"{asked}\n{council_text}").strip()
             timings["council"] = time.monotonic() - t0
+            self._prepare_selection(project, roster, previous_texts, plan)
             t0 = time.monotonic()
             text = self.drafter.draft(project, plan, prev, words, cast=cast_text, world=world_text,
                                       techniques=self._technique_cards(plan), avoid=avoid_text, council=council_text)
@@ -623,6 +644,7 @@ class WritePipeline:
             "title": plan.title, "score": round(best.score, 3), "measured": round(best.measured, 3),
             "judged": round(best.judged, 3), "rubric": best.rubric, "revisions": revisions,
             "words": len(best_text.split()), "words_asked": words, "written_at": utcnow().isoformat(),
+            "best_of": self.drafter.best_of, "choices": self.drafter.choices[-12:],
             "cast": cast_names, "character_consistency": round(self._consistency(best_reviews), 3),
             "world_consistency": round(best_wrev.consistency, 3) if best_wrev else None,
             "novelty": round(best_nov.score, 3) if best_nov else None,

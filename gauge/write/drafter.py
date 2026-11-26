@@ -43,6 +43,35 @@ class Drafter:
         self.k = exemplars_in_prompt
         self.system = prompts.SYSTEM_AUTHOR.format(style_guide=style_guide or "(no data yet)")
         self.last_budget: Optional[PromptBudget] = None
+        # Write several, keep the best (see selection.py). Set per chapter by the pipeline; 1 = a single attempt.
+        self.best_of = 1
+        self.known_names: set[str] = set()
+        self.measure = None
+        self.choices: list[dict] = []             # what was chosen and why, for the chapter's record
+
+    def _write(self, prompt: str, max_tokens: int, purpose: str, target_words: int, **kw) -> str:
+        """One piece of prose. With `best_of` above 1 it is written that many times, at slightly different
+        temperatures, and the attempt that invents the fewest names, repeats least and fits the length is kept."""
+        if self.best_of <= 1:
+            return clean_prose(self.llm.generate(prompt, system=self.system, max_tokens=max_tokens, purpose=purpose, **kw))
+        from .selection import pick
+
+        base = float(kw.pop("temperature", 0.9))
+        tries: list[str] = []
+        for i in range(self.best_of):
+            try:
+                raw = self.llm.generate(prompt, system=self.system, max_tokens=max_tokens, purpose=purpose,
+                                        temperature=max(0.3, base - 0.1 + 0.1 * i), **kw)
+                tries.append(clean_prose(raw))
+            except Exception as e:
+                log.warning("attempt %d of %d failed: %s", i + 1, self.best_of, e)
+        if not tries:
+            raise RuntimeError("every attempt at this piece of the chapter failed")
+        best, verdicts = pick(tries, self.known_names, target_words, self.measure)
+        self.choices.append({"purpose": purpose, "of": len(tries), "kept": best, "verdict": verdicts[best].line(),
+                             "invented": verdicts[best].invented, "worst": min(v.score for v in verdicts),
+                             "best": verdicts[best].score})
+        return tries[best]
 
     def _exemplar_items(self, project: Project, plan: ChapterPlan, kind: str) -> list[str]:
         if not self.exemplars:
@@ -92,8 +121,7 @@ class Drafter:
     def draft(self, project: Project, plan: ChapterPlan, prev_text: Optional[str], words: int, cast: str = "",
               world: str = "", techniques: str = "", avoid: str = "", council: str = "") -> str:
         prompt, max_out = self.build_draft_prompt(project, plan, prev_text, words, cast, world, techniques, avoid, council)
-        raw = self.llm.generate(prompt, system=self.system, max_tokens=max_out, purpose="draft")
-        return clean_prose(raw)
+        return self._write(prompt, max_out, "draft", words)
 
     def reach_length(self, text: str, words: int, project: Project, plan: ChapterPlan, passes: int = 4,
                      short_of: float = 0.9) -> tuple[str, int]:
@@ -119,11 +147,10 @@ class Drafter:
                         if last else "The chapter is NOT finished after this stretch: do not wrap it up, keep the scene going."))
             prompt = truncate_to_tokens(prompt, max(200, self.llm.context_window() - output_tokens_for(stretch) - estimate_tokens(self.system) - 64))
             try:
-                raw = self.llm.generate(prompt, system=self.system, max_tokens=output_tokens_for(stretch), purpose="draft:continue")
+                added = self._write(prompt, output_tokens_for(stretch), "draft:continue", stretch)
             except Exception as e:
                 log.warning("could not carry the chapter on: %s", e)
                 break
-            added = clean_prose(raw)
             used += 1
             if len(added.split()) < 20:
                 break

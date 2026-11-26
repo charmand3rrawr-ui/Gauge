@@ -137,12 +137,14 @@ class StudioController:
             if llm.provider != "native":
                 memo.write_text(json.dumps({"provider": llm.provider, "model": llm.model, "fast_model": llm.fast_model,
                                             "num_ctx": llm.num_ctx, "profile": self.cfg.agents.profile,
-                                            "words": self.cfg.write.target_chapter_words}), encoding="utf-8")
+                                            "words": self.cfg.write.target_chapter_words,
+                                            "best_of": self.cfg.write.best_of}), encoding="utf-8")
                 llm.provider, llm.model, llm.fast_model = "native", "gaugelm", ""
                 llm.num_ctx = self.cfg.native.block_size
                 llm.native_dir = str(self.cfg.native_dir)
                 self.cfg.agents.profile = "lean"
                 self.cfg.write.target_chapter_words = min(self.cfg.write.target_chapter_words, 800)
+                self.cfg.write.best_of = max(self.cfg.write.best_of, 4)   # it is fast and uneven: write four, keep the best
         elif llm.provider == "native":
             prev: dict[str, Any] = {}
             if memo.exists():
@@ -156,6 +158,7 @@ class StudioController:
             llm.num_ctx = int(prev.get("num_ctx") or 8192)
             self.cfg.agents.profile = prev.get("profile") or "full"
             self.cfg.write.target_chapter_words = int(prev.get("words") or 2200)
+            self.cfg.write.best_of = int(prev.get("best_of") or 1)
         self.cfg.save()
         self._pipe = None
         eng = self.engine()

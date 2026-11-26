@@ -157,6 +157,53 @@ steps the model trained with them hesitated between 56 next pieces on real text 
 context less (5.5% against 10%), and answered the drills themselves barely above chance (15 of 120).
 At this size the time is better spent on real prose, so they are not in Gauge.
 
+### Several attempts, the best kept
+
+A small model is uneven: the same request gives a usable passage one time and a looping or
+off-story one the next. With GaugeLM as the writer every piece of a chapter (the draft and each
+stretch that carries it on) is written `write.best_of` times, four by default, at slightly different
+temperatures, and one is kept. The choice is made without a model (`gauge/write/selection.py`), so it
+costs only the extra writing:
+
+| judged on | why |
+| --- | --- |
+| invented names | names not in the bible, the cast or the chapters written so far; a new person in every chapter is the commonest way a serial stops being consistent |
+| repetition | the share of the passage that repeats a phrase it already used |
+| length | how far it is from the length asked for |
+| measured pull | the engagement measure learned from the library (hook, momentum, dialogue, ending), when there is one |
+
+The chapter's record keeps what was chosen and why (`choices` in its metadata). With the downloaded
+model `write.best_of` stays at 1, since that model is slow and steadier; raise it if you want.
+
+Measured on a small test model, twenty pieces each way: one attempt invented 0.70 names per piece,
+the best of four 0.10. That shows the choosing does what it is built to do on the thing it judges;
+it does not show the prose is better in ways the judge cannot see.
+
+**Tried and left out: scene cards.** The idea was to put a short card before every training passage
+(its names and its most particular words) so that the model would learn to write from a card, and a
+card built from the story's canon could then keep it consistent. In a trial the model predicted a
+passage only 0.5% better with its own card than with another passage's card: it was not reading the
+card. Like the context drills, this needs a model that already uses context, which a small one
+barely does (see the table above). It is not in Gauge.
+
+### What makes it stronger, in order
+
+Everything measured here points the same way. A small GaugeLM improves quickly at guessing the next
+piece from the last few and slowly at using what came earlier, and consistency across a novel is
+entirely a matter of using what came earlier.
+
+1. **Size and time.** A graphics card, a higher capacity limit, more steps, then `gauge native grow`
+   for a longer reading length and a bigger model. Use `gauge native understand` to watch the context
+   number; it is the one that matters for consistency.
+2. **Let the downloaded model write until that number is good.** The consistency machinery (bible,
+   world state, character sheets, the critics) only helps a writer that reads its prompt. GaugeLM
+   keeps learning from every chapter in the meantime.
+3. **Several attempts, the best kept** (above): the cheapest gain for a weak writer.
+4. **Better teachers and more text**: more local models in the school; the book finder.
+5. **Your own ratings.** Stars on the books you add teach the engagement measure what you think
+   works, and that measure is part of how attempts are chosen.
+
+
 ### Other ways to make it learn faster
 
 In rough order of effect:
