@@ -96,6 +96,9 @@ Set `GAUGE_DATA_DIR` to put `data` somewhere else (for example on a bigger drive
 
 ## Troubleshooting
 
+In Gauge Studio, press **Check for problems** (or **Help > Check Gauge for problems...**): it checks
+everything Gauge depends on and says what to do about each problem. `gauge doctor` prints the same.
+
 - **`LLM NOT reachable`** in `gauge doctor`: open the Ollama app (tray icon) or run `ollama serve`.
   Check `http://localhost:11434` in a browser; it should say "Ollama is running".
 - **`model ... not pulled`**: `ollama pull <name>`.

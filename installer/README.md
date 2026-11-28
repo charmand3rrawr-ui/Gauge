@@ -418,6 +418,17 @@ small can and cannot do.
 
 ## If something goes wrong
 
+**Start with Check for problems.** It is a button on Gauge Studio's main window (also **Help > Check
+Gauge for problems...**). It checks everything Gauge depends on in a few seconds: Python, the data
+folder and disk space, the settings file, the library, whether the writing model is installed and
+answering, GaugeLM, its teachers, the graphics card, and your stories. Each problem comes with what to
+do about it, and with a button that opens the window that fixes it. It only reads; it changes
+nothing, so it is safe to press at any time, even while Gauge is writing or training.
+
+**Copy the report** puts the whole result on the clipboard, to paste wherever you are asking for help.
+It contains no keys or passwords, but it does show where Gauge is on your computer (the folder path,
+which usually includes your Windows user name). `gauge doctor` prints the same checks in a terminal.
+
 - **Blue "Windows protected your PC" screen** when double-clicking the .bat: click *More info*, then
   *Run anyway*. Windows shows this for any script downloaded from the internet. The scripts are plain
   text; you can open them in Notepad and read them first.
@@ -435,4 +446,5 @@ small can and cannot do.
 ## For the curious
 
 `gauge.bat` (Windows) and the `gauge` command (macOS/Linux) run the command line; everything in
-`docs/` applies. `gauge gui` opens the Studio from a terminal, and `gauge doctor` re-checks an install.
+`docs/` applies. `gauge gui` opens the Studio from a terminal, and `gauge doctor` re-checks an install (the same checks as
+Studio's **Check for problems** button).

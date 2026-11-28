@@ -472,6 +472,20 @@ class StudioController:
 
         return checkwork.trend(self.cfg.models_dir / "datasets")["line"]
 
+    # ---- the doctor ------------------------------------------------------------------------
+    def doctor(self, progress: Optional[Callable[[str], None]] = None) -> dict[str, Any]:
+        """Check everything Gauge depends on. Read-only, so it can run while Gauge is busy with something else."""
+        from . import doctor
+
+        if self._sensed is None:
+            from .compute import scan
+
+            try:
+                self._sensed = scan()
+            except Exception as e:
+                log.warning("could not look for devices: %s", e)
+        return doctor.run(self.cfg, self.db, sensed=self._sensed, progress=progress)
+
     def use_claude(self, on: bool = True) -> dict[str, Any]:
         """Make Claude the writer (on), or go back to the downloaded model (off)."""
         import json
@@ -1519,7 +1533,8 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
                 log.error("studio task failed: %s\n%s", e, traceback.format_exc())
                 err = str(e)
                 root.after(0, lambda: (set_busy(False, "Something went wrong."),
-                                       messagebox.showerror("Gauge", f"{err}\n\nIf this keeps happening, run 'gauge doctor'.")))
+                                       messagebox.showerror("Gauge", f"{err}\n\nIf this keeps happening, press "
+                                                            "'Check for problems' (or Help > Check Gauge for problems).")))
 
         threading.Thread(target=target, daemon=True).start()
 
@@ -1535,7 +1550,8 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
         elif eng.get("is_claude"):
             status_var.set("Claude is not answering. Check the internet connection, or press Change the AI, then Claude.")
         else:
-            status_var.set("Story engine is OFF. Open the Ollama app (the llama icon), then restart Gauge Studio.")
+            status_var.set("Story engine is OFF. Open the Ollama app (the llama icon), then restart Gauge Studio. "
+                           "'Check for problems' says what else may be wrong.")
 
     def refresh_chapters() -> None:
         chapters_box.delete(0, "end")
@@ -1908,6 +1924,73 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
 
     def on_pause_training() -> None:
         status_var.set(ctl.pause_training()["message"])
+
+    def on_doctor() -> None:
+        """Check everything Gauge depends on, and say what to do about each problem."""
+        win, frame, alive, note, _start = dialog("Check for problems", 800, 620)
+        ttk.Label(frame, text="Check for problems", font=huge).pack(anchor="w")
+        summary_var = tk.StringVar(value="Checking...")
+        ttk.Label(frame, textvariable=summary_var, wraplength=740, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(2, 6))
+        report = scrolledtext.ScrolledText(frame, wrap="word", font=small, height=18, padx=10, pady=8)
+        report.pack(fill="both", expand=True)
+        row = ttk.Frame(frame)
+        row.pack(fill="x", pady=(6, 0))
+        fixes = ttk.Frame(frame)
+        fixes.pack(fill="x", pady=(4, 0))
+        ttk.Label(frame, textvariable=note, wraplength=740, font=mid).pack(anchor="w", pady=(4, 0))
+        last: dict[str, Any] = {"text": "", "buttons": False}
+        openers = {"engine": on_engine, "teach": on_teach, "switches": on_switches, "devices": on_switches,
+                   "claude": lambda: on_claude(show_engine), "helpers": lambda: on_helpers(show_engine)}
+
+        def show(res: dict[str, Any]) -> None:
+            last["text"] = res["text"]
+            if not alive():
+                return
+            summary_var.set(res["summary"] + f" (checked in {res['seconds']:g} seconds)")
+            report.configure(state="normal")
+            report.delete("1.0", "end")
+            report.insert("1.0", res["text"])
+            report.configure(state="disabled")
+            note.set("")
+            if not last["buttons"]:                  # a button for each window that fixes something found
+                from . import doctor as _doctor
+
+                last["buttons"] = True
+                for action in res["actions"]:
+                    if action in openers:
+                        ttk.Button(fixes, text=_doctor.ACTIONS[action], style="Mid.TButton",
+                                   command=openers[action]).pack(side="left", padx=(0, 8))
+
+        def check() -> None:
+            # Not through run_bg: the checks only read, so they may run while Gauge is busy writing or training.
+            summary_var.set("Checking...")
+
+            def step(name: str) -> None:
+                root.after(0, lambda: note.set(f"Checking: {name}...") if alive() else None)
+
+            def target() -> None:
+                try:
+                    res = ctl.doctor(step)
+                    root.after(0, lambda: show(res))
+                except Exception as e:
+                    log.error("the doctor failed: %s\n%s", e, traceback.format_exc())
+                    err = str(e)
+                    root.after(0, lambda: summary_var.set(f"The check itself failed: {err}") if alive() else None)
+
+            threading.Thread(target=target, daemon=True).start()
+
+        def copy() -> None:
+            if not last["text"]:
+                note.set("Wait for the check to finish first.")
+                return
+            win.clipboard_clear()
+            win.clipboard_append(last["text"])
+            note.set("The report is copied. Paste it (Ctrl+V) wherever you are asking for help. It contains no keys or "
+                     "passwords, but it does show where Gauge is on your computer.")
+
+        ttk.Button(row, text="Check again", style="Mid.TButton", command=check).pack(side="left", padx=(0, 8))
+        ttk.Button(row, text="Copy the report", style="Mid.TButton", command=copy).pack(side="left", padx=(0, 8))
+        check()
 
     def on_check() -> None:
         """Have the chapter on screen checked by another model, and show what it found."""
@@ -2386,7 +2469,8 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
     buttons.append(novel_btn)
     pairs = [("Talk to a character", on_chat), ("Open another story", on_open),
              ("Teach Gauge", on_teach), ("Change the AI", on_engine),
-             ("Switches", on_switches), ("Save story as one file", on_export)]
+             ("Switches", on_switches), ("Save story as one file", on_export),
+             ("Check for problems", on_doctor)]
     for i, (text, cmd) in enumerate(pairs):
         b = ttk.Button(grid, text=text, style="Mid.TButton", command=cmd)
         b.grid(row=i // 2, column=i % 2, sticky="ew", padx=2, pady=2)
@@ -2406,7 +2490,7 @@ def run_studio(cfg: GaugeConfig, db: Database) -> None:  # pragma: no cover - ne
                    ("Start training GaugeLM", lambda: start_training(None, UNTIL_PAUSED)),
                    ("Pause training", on_pause_training)]),
         ("Settings", [("Switches...", on_switches), ("Devices (processor and graphics cards)...", on_switches)]),
-        ("Help", [("About and version", on_about)]),
+        ("Help", [("Check Gauge for problems...", on_doctor), ("About and version", on_about)]),
     ):
         menu = tk.Menu(menubar, tearoff=0)
         for label, cmd in entries:

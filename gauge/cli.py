@@ -134,6 +134,16 @@ def doctor(c: Ctx) -> None:
         console.print("scikit-learn: installed (gradient boosting enabled)")
     except ImportError:
         console.print("scikit-learn: not installed (ridge only; `pip install scikit-learn` for a stronger model)")
+    from . import doctor as checkup
+
+    res = checkup.run(c.cfg, c.db)                   # the same checks as Studio's Check for problems button
+    console.print()
+    colour = {"ok": "green", "warn": "yellow", "problem": "red", "info": "white"}
+    for f in res["findings"]:
+        console.print(f"[{colour[f['status']]}]{checkup.MARK[f['status']]}[/] {f['name']}: {f['says']}", highlight=False)
+        if f["fix"]:
+            console.print(f"    What to do: {f['fix']}", highlight=False)
+    console.print(("[green]" if res["ok"] else "[red]") + res["summary"] + "[/]", highlight=False)
 
 
 # ---------------------------------------------------------------------------- ingest
